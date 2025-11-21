@@ -12,12 +12,20 @@
 </head>
 
 <body>
+    <!-- Contador de Tempo -->
+    <div class="timer-container" id="timerContainer" style="display: none;">
+        <span class="timer-icon">⏱️</span>
+        <span class="timer-label">Tempo restante:</span>
+        <span class="timer-value" id="timerValue">60s</span>
+    </div>
+
     <div class="poker-container">
         <button id="exitGameBtn" class="btn-exit">Sair</button>
         <!-- Painel Lateral Esquerdo -->
         <div class="stats-panel">
             <div class="stats-header">
                 <h2>Estatísticas</h2>
+                <button id="toggleStatsBtn" class="toggle-btn" aria-label="Toggle statistics panel" aria-expanded="true" tabindex="0">Ocultar</button>
             </div>
 
             <!-- Round Info -->
@@ -46,13 +54,22 @@
                 </div>
             </div>
 
-            <!-- Sua Aposta -->
-            <div class="bet-section">
-                <div class="bet-label">Aposta</div>
-                <div class="bet-value-container">
-                    <img src="images/poker_pot.png" alt="chip" class="chip-icon-small">
-                    <div class="bet-value" id="playerBet">0</div>
-                </div>
+            <!-- Current Hand -->
+            <div class="stat-section" role="region" aria-label="Current Hand">
+                <div class="stat-label">Mão Atual</div>
+                <div class="stat-value" id="currentHand" aria-live="polite" aria-atomic="true">-</div>
+            </div>
+
+            <!-- Win Probability -->
+            <div class="stat-section" role="region" aria-label="Win Probability">
+                <div class="stat-label">Probabilidade de Vitória</div>
+                <div class="stat-value" id="winProbability" aria-live="polite" aria-atomic="true">-</div>
+            </div>
+
+            <!-- Chat Container -->
+            <div class="chat-container" role="log" aria-label="Game History Chat">
+                <div class="chat-header">Histórico</div>
+                <div class="chat-messages" id="chatMessages" aria-live="polite" aria-atomic="false" tabindex="0"></div>
             </div>
         </div>
 
@@ -75,6 +92,14 @@
                         <div class="card card-back"></div>
                     </div>
                     <div id="communityCards" class="community-cards"></div>
+                </div>
+            </div>
+
+            <!-- Mensagem de Erro de Timeout -->
+            <div id="timeoutError" class="timeout-error" style="display: none;">
+                <div class="timeout-error-content">
+                    <span class="timeout-error-icon">⏱️</span>
+                    <span class="timeout-error-message"></span>
                 </div>
             </div>
 
@@ -124,6 +149,8 @@
     </div>
 
     <script src="js/api.js"></script>
+    <script src="js/stats.js"></script>
+    <script src="js/chat.js"></script>
     <script src="js/game.js"></script>
 </body>
 

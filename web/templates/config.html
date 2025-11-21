@@ -12,6 +12,21 @@
         <div class="config-card">
             <label for="playerName">Seu Nome:</label>
             <input type="text" id="playerName" placeholder="Digite seu nome" maxlength="20">
+            
+            <label for="playerCount">Número de Bots (2-9):</label>
+            <input type="number" id="playerCount" min="2" max="9" value="5">
+            
+            <label for="initialStack">Stack Inicial:</label>
+            <input type="number" id="initialStack" min="1000" value="10000">
+            
+            <label for="smallBlind">Small Blind:</label>
+            <input type="number" id="smallBlind" min="1" value="25">
+            
+            <label for="statisticsVisible">
+                <input type="checkbox" id="statisticsVisible" checked>
+                Mostrar Estatísticas
+            </label>
+            
             <div class="form-group">
                 <button id="saveBtn" class="btn btn-primary">Salvar e Jogar</button>
             </div>

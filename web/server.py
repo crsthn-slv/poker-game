@@ -26,6 +26,66 @@ from players.adaptive_player import AdaptivePlayer
 from players.conservative_aggressive_player import ConservativeAggressivePlayer
 from players.opportunistic_player import OpportunisticPlayer
 from players.hybrid_player import HybridPlayer
+from players.hand_evaluator import HandEvaluator
+
+# Importa módulo de card_utils do PyPokerEngine para monkey patch
+try:
+    import pypokerengine.utils.card_utils as card_utils
+except ImportError:
+    card_utils = None
+
+# Monkey patch para acelerar avaliação de mãos usando treys
+_original_calc_hand_info = None
+_hand_evaluator = None
+
+def _fast_calc_hand_info_flg(hole_card, community_card):
+    """
+    Versão otimizada de _calc_hand_info_flg usando treys.
+    Substitui a função lenta do PyPokerEngine.
+    """
+    global _hand_evaluator
+    if _hand_evaluator is None:
+        _hand_evaluator = HandEvaluator()
+    
+    try:
+        # Converte listas de cartas para formato esperado
+        hole_cards = hole_card if isinstance(hole_card, list) else []
+        community_cards = community_card if isinstance(community_card, list) else []
+        
+        # Avalia usando treys
+        score = _hand_evaluator.evaluate(hole_cards, community_cards)
+        
+        # PyPokerEngine espera um dict com 'hand' e 'strength'
+        # Retorna formato compatível
+        # Nota: treys retorna score onde menor = melhor, PyPokerEngine pode esperar diferente
+        # Mas vamos manter compatibilidade retornando o score diretamente
+        return score
+    except Exception as e:
+        # Em caso de erro, usa método original se disponível
+        if _original_calc_hand_info:
+            return _original_calc_hand_info(hole_card, community_card)
+        print(f"[HandEvaluator] Erro em _fast_calc_hand_info_flg: {e}")
+        # Retorna valor padrão (pior mão possível)
+        return 7462
+
+def apply_treys_patch():
+    """
+    Aplica monkey patch para substituir _calc_hand_info_flg do PyPokerEngine por versão otimizada.
+    """
+    global _original_calc_hand_info, _hand_evaluator
+    
+    if card_utils is None:
+        print("[HandEvaluator] card_utils não disponível, pulando monkey patch")
+        return
+    
+    if hasattr(card_utils, '_calc_hand_info_flg'):
+        _original_calc_hand_info = card_utils._calc_hand_info_flg
+        card_utils._calc_hand_info_flg = _fast_calc_hand_info_flg
+        _hand_evaluator = HandEvaluator()
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        print(f"✅ [HandEvaluator] [{timestamp}] Monkey patch aplicado - treys ativado para avaliação rápida de mãos")
+    else:
+        print("[HandEvaluator] _calc_hand_info_flg não encontrado em card_utils, pulando monkey patch")
 
 # Importa configurações centralizadas
 try:
@@ -111,7 +171,10 @@ game_state = {
     'player_uuid': None,
     'game_result': None,
     'thinking_uuid': None,  # UUID do bot que está pensando
-    'round_data_cleared': False  # Flag para indicar que dados de fim de round foram limpos manualmente
+    'round_data_cleared': False,  # Flag para indicar que dados de fim de round foram limpos manualmente
+    'timeout_error': None,  # Erro de timeout do jogador
+    'error': None,  # Erro geral do jogo
+    'statistics_visible': True  # Visibilidade do painel de estatísticas
 }
 
 # Wrapper para Bots com delay e loading
@@ -200,7 +263,28 @@ class WebPlayer(BasePokerPlayer):
         self.action_received = threading.Event()
         self.uuid = None
     
+    def set_uuid(self, uuid):
+        """Método chamado pelo PyPokerEngine para definir o UUID do jogador."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        old_uuid = self.uuid
+        self.uuid = uuid
+        print(f"🟢 [SERVER] [{timestamp}] WebPlayer.set_uuid chamado: {old_uuid} -> {uuid}")
+        # Atualiza game_state imediatamente quando UUID é definido
+        with game_lock:
+            game_state['player_uuid'] = self.uuid
+    
     def declare_action(self, valid_actions, hole_card, round_state):
+        # CRÍTICO: Reseta o evento ANTES de esperar pela ação
+        # Isso garante que não há estado residual de ações anteriores
+        self.action_received.clear()
+        self.pending_action = None
+        
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        print(f"🟢 [SERVER] [{timestamp}] declare_action CHAMADO - Event resetado, aguardando ação do jogador")
+        print(f"🟢 [SERVER] [{timestamp}] declare_action - web_player UUID: {self.uuid}")
+        print(f"🟢 [SERVER] [{timestamp}] declare_action - web_player id: {id(self)}")
+        print(f"🟢 [SERVER] [{timestamp}] declare_action - action_received.is_set() após clear: {self.action_received.is_set()}")
+        
         # Notifica o frontend que é a vez do jogador
         serialized_state = self._serialize_round_state(round_state)
         # Quando declare_action é chamado, este jogador é o current_player
@@ -211,6 +295,7 @@ class WebPlayer(BasePokerPlayer):
             current_round = game_state.get('current_round') or {}
             if not isinstance(current_round, dict):
                 current_round = {}
+            old_is_player_turn = current_round.get('is_player_turn', False)
             current_round.update({
                 'valid_actions': valid_actions,
                 'hole_card': hole_card,
@@ -218,31 +303,47 @@ class WebPlayer(BasePokerPlayer):
                 'is_player_turn': True  # É a vez do jogador quando declare_action é chamado
             })
             game_state['current_round'] = current_round
+            if old_is_player_turn != True:
+                print(f"🟢 [SERVER] [{timestamp}] declare_action - is_player_turn setado para True (era {old_is_player_turn})")
         
         # Espera pela ação do jogador com timeout
-        # Timeout de 30 segundos para evitar travamento
-        timeout_seconds = 30
+        # Timeout de 60 segundos para evitar travamento
+        timeout_seconds = 60
+        start_wait_time = time.time()
+        print(f"🟢 [SERVER] [{timestamp}] declare_action - Iniciando espera por ação (timeout: {timeout_seconds}s)")
+        
         action_received = self.action_received.wait(timeout=timeout_seconds)
+        wait_duration = time.time() - start_wait_time
         
         if not action_received:
-            # Timeout: faz fold automático para não travar o jogo
+            # Timeout: define erro no game_state e retorna exceção
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            print(f"⚠️ [SERVER] [{timestamp}] TIMEOUT em declare_action - Jogador não respondeu em {timeout_seconds}s")
-            print(f"⚠️ [SERVER] [{timestamp}] Fazendo fold automático para não travar o jogo")
+            print(f"⚠️ [SERVER] [{timestamp}] TIMEOUT em declare_action - Jogador não respondeu em {wait_duration:.2f}s")
             _log_error("Timeout em declare_action - jogador não respondeu", None)
             
-            # Retorna fold como ação padrão
-            fold_action = valid_actions[0] if valid_actions else None
-            if fold_action:
-                return fold_action['action'], fold_action['amount']
-            else:
-                # Fallback: retorna fold mesmo sem valid_actions
-                return 'fold', 0
+            # Obtém round_count atual
+            with game_lock:
+                current_round = game_state.get('current_round', {})
+                round_count = current_round.get('round_count', 0)
+                game_state['timeout_error'] = {
+                    'message': f'Tempo de resposta esgotado. Você não respondeu em {wait_duration:.2f}s (tempo limite: 60s)',
+                    'timestamp': timestamp,
+                    'round_count': round_count
+                }
+                game_state['active'] = False  # Pausa o jogo
+            
+            # Lança exceção para indicar timeout
+            raise TimeoutError(f"Jogador não respondeu em {wait_duration:.2f}s")
+        
+        # Ação recebida com sucesso
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        print(f"🟢 [SERVER] [{timestamp}] declare_action - Ação recebida após {wait_duration:.2f}s")
         
         self.action_received.clear()
         
         action, amount = self.pending_action
         self.pending_action = None
+        print(f"🟢 [SERVER] [{timestamp}] declare_action - Retornando ação: {action}, amount: {amount}")
         return action, amount
     
     def _serialize_hand_info(self, hand_info):
@@ -369,6 +470,10 @@ class WebPlayer(BasePokerPlayer):
             pot = round_state.get('pot', {}) if isinstance(round_state, dict) else {}
             community_card = round_state.get('community_card', []) if isinstance(round_state, dict) else []
             action_histories = round_state.get('action_histories', {}) if isinstance(round_state, dict) else {}
+            
+            # Log do pote para debug (apenas se mudou significativamente)
+            pot_amount = pot.get('main', {}).get('amount', 0) if isinstance(pot, dict) else 0
+            _log_debug("Pot serializado", {'amount': pot_amount, 'pot_structure': pot})
         except:
             pot = {}
             community_card = []
@@ -384,9 +489,49 @@ class WebPlayer(BasePokerPlayer):
         }
     
     def receive_game_start_message(self, game_info):
-        self.uuid = next((p['uuid'] for p in game_info.get('seats', []) if p.get('name') == game_state['player_name']), None)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        
+        # PyPokerEngine já define self.uuid automaticamente quando o jogador é registrado
+        # Se não estiver definido, tenta encontrar pelo nome nos seats
+        if not self.uuid:
+            # Tenta encontrar pelo nome
+            seats = game_info.get('seats', [])
+            print(f"🟢 [SERVER] [{timestamp}] WebPlayer.receive_game_start_message - self.uuid não definido, procurando pelo nome")
+            print(f"🟢 [SERVER] [{timestamp}] game_info structure: {type(game_info)}, seats type: {type(seats)}, seats count: {len(seats) if isinstance(seats, list) else 'N/A'}")
+            
+            # Tenta diferentes estruturas possíveis
+            for seat in seats if isinstance(seats, list) else []:
+                seat_name = None
+                seat_uuid = None
+                
+                # Tenta diferentes formatos de seat
+                if isinstance(seat, dict):
+                    seat_name = seat.get('name') or (seat.get('player', {}).get('name') if isinstance(seat.get('player'), dict) else None)
+                    seat_uuid = seat.get('uuid') or (seat.get('player', {}).get('uuid') if isinstance(seat.get('player'), dict) else None)
+                elif hasattr(seat, 'name'):
+                    seat_name = getattr(seat, 'name', None)
+                    seat_uuid = getattr(seat, 'uuid', None)
+                
+                if seat_name == game_state['player_name'] and seat_uuid:
+                    self.uuid = seat_uuid
+                    print(f"🟢 [SERVER] [{timestamp}] UUID encontrado pelo nome: {self.uuid}")
+                    break
+        
+        # Se ainda não encontrou, loga erro detalhado
+        if not self.uuid:
+            print(f"🔴 [SERVER] [{timestamp}] ERRO CRÍTICO: Não foi possível determinar UUID do jogador!")
+            print(f"🔴 [SERVER] [{timestamp}] player_name: {game_state['player_name']}")
+            print(f"🔴 [SERVER] [{timestamp}] game_info keys: {list(game_info.keys()) if isinstance(game_info, dict) else 'N/A'}")
+            seats = game_info.get('seats', [])
+            if isinstance(seats, list):
+                print(f"🔴 [SERVER] [{timestamp}] seats structure (primeiro 2): {seats[:2] if len(seats) >= 2 else seats}")
+        
+        print(f"🟢 [SERVER] [{timestamp}] WebPlayer.receive_game_start_message - UUID final: {self.uuid}")
         with game_lock:
+            old_uuid = game_state.get('player_uuid')
             game_state['player_uuid'] = self.uuid
+            if old_uuid != self.uuid:
+                print(f"🟢 [SERVER] [{timestamp}] player_uuid atualizado no game_state: {old_uuid} -> {self.uuid}")
     
     def receive_round_start_message(self, round_count, hole_card, seats):
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
@@ -456,16 +601,25 @@ class WebPlayer(BasePokerPlayer):
             serialized_state = self._serialize_round_state(round_state)
             
             # Verifica se é a vez do jogador humano
+            # IMPORTANTE: Após uma nova street, o PyPokerEngine pode chamar declare_action
+            # imediatamente, então não devemos resetar is_player_turn aqui
+            # Deixamos que declare_action defina is_player_turn quando for realmente a vez
             current_player_uuid = serialized_state.get('current_player_uuid')
             is_player_turn = (current_player_uuid == self.uuid) if current_player_uuid and self.uuid else False
             
             # Preserva round_ended se já estiver True (não sobrescreve)
             round_ended = current_round.get('round_ended', False)
             
+            # Preserva is_player_turn se já estiver True (não sobrescreve com False)
+            # Isso garante que se declare_action já foi chamado, não perdemos essa informação
+            existing_is_player_turn = current_round.get('is_player_turn', False)
+            if existing_is_player_turn:
+                is_player_turn = True
+            
             current_round.update({
                 'street': street,
                 'round_state': serialized_state,
-                'is_player_turn': is_player_turn,  # Limpa ou seta baseado no current_player_uuid
+                'is_player_turn': is_player_turn,
                 'round_ended': round_ended  # Preserva se já estiver True
             })
             game_state['current_round'] = current_round
@@ -504,13 +658,16 @@ class WebPlayer(BasePokerPlayer):
             
             serialized_state = self._serialize_round_state(round_state)
             # Após uma ação, o próximo jogador é determinado pela ordem dos seats
-            # O jogador que acabou de agir não é mais o current_player
-            serialized_state['current_player_uuid'] = None
+            # O current_player_uuid já foi calculado pelo _serialize_round_state
             
-            # Verifica se a ação foi do jogador humano
-            # Se foi, limpa is_player_turn porque a ação já foi processada
-            # Se não foi, também limpa porque não é mais a vez do jogador
+            # Verifica se o próximo jogador (após esta ação) é o jogador humano
+            next_player_uuid = serialized_state.get('current_player_uuid')
+            is_next_player_turn = (next_player_uuid == self.uuid) if next_player_uuid and self.uuid else False
+            
+            # Log para debug
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             action_was_from_player = (action_data.get('uuid') == self.uuid) if self.uuid else False
+            print(f"🟢 [SERVER] [{timestamp}] receive_game_update_message - Action from: {action_data.get('name', 'Unknown')}, Next player UUID: {next_player_uuid}, Is player turn: {is_next_player_turn}")
             
             with game_lock:
                 # Preserva round_count e outras informações existentes
@@ -520,10 +677,25 @@ class WebPlayer(BasePokerPlayer):
                 # Preserva round_ended se já estiver True (não sobrescreve)
                 round_ended = current_round.get('round_ended', False)
                 
+                # IMPORTANTE: Se declare_action já foi chamado e setou is_player_turn=True,
+                # não devemos sobrescrever com False. Isso garante que após a primeira ação,
+                # quando o PyPokerEngine chama declare_action novamente, mantemos o estado correto.
+                # Mas se o próximo jogador realmente é o humano, atualizamos para True.
+                existing_is_player_turn = current_round.get('is_player_turn', False)
+                if is_next_player_turn:
+                    # Próximo jogador é o humano, seta True
+                    final_is_player_turn = True
+                elif existing_is_player_turn:
+                    # Já estava True (declare_action foi chamado), mantém True
+                    final_is_player_turn = True
+                else:
+                    # Não é a vez do jogador
+                    final_is_player_turn = False
+                
                 current_round.update({
                     'action': action_data,
                     'round_state': serialized_state,
-                    'is_player_turn': False,  # Sempre limpa após uma ação
+                    'is_player_turn': final_is_player_turn,
                     'round_ended': round_ended  # Preserva se já estiver True
                 })
                 game_state['current_round'] = current_round
@@ -824,27 +996,110 @@ def start_game():
     global game_state, web_player
     
     try:
+        # CRÍTICO: Verifica se já existe um jogo ativo antes de iniciar um novo
+        with game_lock:
+            if game_state.get('active', False):
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                print(f"⚠️ [SERVER] [{timestamp}] Tentativa de iniciar novo jogo enquanto um jogo já está ativo")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Já existe um jogo ativo. Por favor, aguarde o jogo atual terminar ou reinicie o servidor.'
+                }), 400
+        
         data = request.json or {}
         player_name = data.get('player_name', 'Jogador')
+        player_count = int(data.get('player_count', 5))
+        
+        # IMPORTANTE: Usa o valor do request, não o default
+        # Se não for fornecido, usa DEFAULT_INITIAL_STACK como fallback
+        initial_stack_raw = data.get('initial_stack')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        print(f"🔵 [SERVER] [{timestamp}] start_game - Dados recebidos: {data}")
+        print(f"🔵 [SERVER] [{timestamp}] start_game - initial_stack_raw (tipo: {type(initial_stack_raw).__name__}): {initial_stack_raw}")
+        
+        if initial_stack_raw is not None:
+            try:
+                initial_stack = int(initial_stack_raw)
+                print(f"🔵 [SERVER] [{timestamp}] start_game - initial_stack convertido: {initial_stack}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️ [SERVER] [{timestamp}] Erro ao converter initial_stack: {e}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f'initial_stack inválido: {initial_stack_raw}'
+                }), 400
+        else:
+            initial_stack = DEFAULT_INITIAL_STACK
+            print(f"🔵 [SERVER] [{timestamp}] start_game - initial_stack não fornecido, usando default: {initial_stack}")
+        
+        small_blind_raw = data.get('small_blind')
+        print(f"🔵 [SERVER] [{timestamp}] start_game - small_blind_raw (tipo: {type(small_blind_raw).__name__}): {small_blind_raw}")
+        
+        if small_blind_raw is not None:
+            try:
+                small_blind = int(small_blind_raw)
+                print(f"🔵 [SERVER] [{timestamp}] start_game - small_blind convertido: {small_blind}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️ [SERVER] [{timestamp}] Erro ao converter small_blind: {e}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f'small_blind inválido: {small_blind_raw}'
+                }), 400
+        else:
+            small_blind = DEFAULT_SMALL_BLIND
+            print(f"🔵 [SERVER] [{timestamp}] start_game - small_blind não fornecido, usando default: {small_blind}")
+        
+        statistics_visible = data.get('statistics_visible', True)
+        
+        # Validação de configuração
+        if player_count < 2 or player_count > 9:
+            return jsonify({
+                'status': 'error',
+                'message': 'player_count must be between 2 and 9'
+            }), 400
+        
+        if initial_stack <= 0:
+            return jsonify({
+                'status': 'error',
+                'message': 'initial_stack must be greater than 0'
+            }), 400
+        
+        if small_blind <= 0 or small_blind >= initial_stack:
+            return jsonify({
+                'status': 'error',
+                'message': 'small_blind must be greater than 0 and less than initial_stack'
+            }), 400
         
         # Sanitiza e valida nome do jogador
         player_name = sanitize_player_name(player_name)
         
+        # Log para debug - verifica se o valor está sendo usado corretamente
+        print(f"🟢 [SERVER] [{timestamp}] start_game - Valores finais: initial_stack: {initial_stack}, small_blind: {small_blind}")
+        
+        # CRÍTICO: Limpa completamente o estado antes de iniciar novo jogo
         with game_lock:
-            game_state['player_name'] = player_name
-            game_state['active'] = True
-            game_state['current_round'] = None
-            game_state['game_result'] = None
-            game_state['error'] = None
+            # Reseta completamente o estado do jogo
+            game_state = {
+                'active': False,  # Será setado para True após iniciar thread
+                'current_round': None,
+                'player_name': player_name,
+                'player_uuid': None,  # Será setado quando WebPlayer receber UUID
+                'game_result': None,
+                'thinking_uuid': None,
+                'round_data_cleared': False,
+                'statistics_visible': statistics_visible
+            }
         
         # Cria novo web_player
         web_player = WebPlayer()
         
-        # Configuração do jogo (usa constantes do config.py)
+        # Aplica monkey patch do treys para acelerar avaliação de mãos
+        apply_treys_patch()
+        
+        # Configuração do jogo (usa valores fornecidos - garantido acima)
         config = setup_config(
             max_round=DEFAULT_MAX_ROUNDS,
-            initial_stack=DEFAULT_INITIAL_STACK,
-            small_blind_amount=DEFAULT_SMALL_BLIND
+            initial_stack=initial_stack,  # Valor do request, não default
+            small_blind_amount=small_blind  # Valor do request, não default
         )
         config.register_player(name=player_name, algorithm=web_player)
         
@@ -863,8 +1118,8 @@ def start_game():
             RandomPlayer(), BalancedPlayer(), AdaptivePlayer(),
             ConservativeAggressivePlayer(), OpportunisticPlayer(), HybridPlayer()
         ]
-        # Garante que temos bots suficientes (pode repetir se necessário, mas temos 9 tipos)
-        selected_bots = random.sample(available_bots, min(6, len(available_bots)))
+        # Registra número de bots baseado em player_count
+        selected_bots = random.sample(available_bots, min(player_count, len(available_bots)))
         
         for i, bot in enumerate(selected_bots):
             try:
@@ -873,6 +1128,10 @@ def start_game():
             except Exception as e:
                 _log_error(f"Erro ao registrar bot {i}", e)
                 continue
+        
+        # CRÍTICO: Marca jogo como ativo ANTES de iniciar thread para evitar múltiplos jogos
+        with game_lock:
+            game_state['active'] = True
         
         # Inicia jogo em thread separada
         def run_game():
@@ -890,6 +1149,21 @@ def start_game():
                     game_state['game_result'] = result
                     game_state['active'] = False
                     print(f"🟣 [SERVER] [{timestamp_end}] Jogo finalizado. Active: False")
+            except TimeoutError as e:
+                # Timeout do jogador - já foi tratado em WebPlayer.declare_action
+                timestamp_error = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                print(f"🟣 [SERVER] [{timestamp_error}] ⏱️ TIMEOUT do jogador - jogo pausado")
+                print(f"🟣 [SERVER] [{timestamp_error}] Mensagem: {e}")
+                # game_state['timeout_error'] já foi definido em WebPlayer.declare_action
+                with game_lock:
+                    if 'timeout_error' not in game_state:
+                        game_state['timeout_error'] = {
+                            'message': str(e),
+                            'timestamp': timestamp_error,
+                            'round_count': game_state.get('current_round', {}).get('round_count', 0)
+                        }
+                    game_state['active'] = False
+                    print(f"🟣 [SERVER] [{timestamp_error}] Jogo pausado devido a timeout. Active: False")
             except Exception as e:
                 timestamp_error = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 print(f"🟣 [SERVER] [{timestamp_error}] ❌ ERRO CRÍTICO na thread do jogo: {e}")
@@ -949,13 +1223,61 @@ def player_action():
         # Normaliza action para lowercase
         action = action.lower()
         
-        if web_player and not web_player.action_received.is_set():
-            web_player.pending_action = (action, amount)
-            web_player.action_received.set()
-            _log_debug("Ação do jogador recebida", {"action": action, "amount": amount})
-            return jsonify({'status': 'ok'})
+        # Validação adicional: se for call, verifica se amount não excede stack do jogador
+        # Se exceder, converte para raise (all-in) com amount igual ao stack
+        if action == 'call' and web_player and web_player.uuid:
+            with game_lock:
+                current_round = game_state.get('current_round', {})
+                round_state = current_round.get('round_state', {})
+                seats = round_state.get('seats', [])
+                
+                # Encontra o seat do jogador
+                player_seat = None
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == web_player.uuid:
+                        player_seat = seat
+                        break
+                
+                if player_seat:
+                    player_stack = player_seat.get('stack', 0)
+                    # Se amount excede stack, converte para raise (all-in)
+                    if amount > player_stack:
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        print(f"🟡 [SERVER] [{timestamp}] Convertendo call para all-in: call amount ({amount}) > stack ({player_stack}), convertendo para raise com {player_stack}")
+                        action = 'raise'
+                        amount = player_stack
         
-        return jsonify({'status': 'error', 'message': 'No pending action'}), 400
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        
+        if not web_player:
+            print(f"⚠️ [SERVER] [{timestamp}] player_action - web_player não existe")
+            return jsonify({'status': 'error', 'message': 'WebPlayer não inicializado'}), 400
+        
+        # Log detalhado do estado atual
+        action_received_state = web_player.action_received.is_set()
+        has_pending_action = web_player.pending_action is not None
+        web_player_uuid = getattr(web_player, 'uuid', None)
+        
+        print(f"🔵 [SERVER] [{timestamp}] player_action - Estado antes de processar:")
+        print(f"🔵 [SERVER] [{timestamp}]   - action_received.is_set(): {action_received_state}")
+        print(f"🔵 [SERVER] [{timestamp}]   - pending_action: {web_player.pending_action}")
+        print(f"🔵 [SERVER] [{timestamp}]   - web_player.uuid: {web_player_uuid}")
+        print(f"🔵 [SERVER] [{timestamp}]   - Ação recebida: {action}, amount: {amount}")
+        
+        # Verifica se já há uma ação pendente (pode acontecer se o jogador clicar múltiplas vezes)
+        if web_player.action_received.is_set():
+            print(f"⚠️ [SERVER] [{timestamp}] player_action - Já existe ação pendente, ignorando nova ação")
+            print(f"⚠️ [SERVER] [{timestamp}]   - Ação pendente atual: {web_player.pending_action}")
+            return jsonify({'status': 'error', 'message': 'Já existe uma ação pendente. Aguarde sua vez novamente.'}), 400
+        
+        # Define a ação pendente e sinaliza que foi recebida
+        web_player.pending_action = (action, amount)
+        web_player.action_received.set()
+        
+        print(f"🟢 [SERVER] [{timestamp}] player_action - Ação recebida e processada: {action}, amount: {amount}")
+        print(f"🟢 [SERVER] [{timestamp}] player_action - Event setado, aguardando declare_action processar")
+        _log_debug("Ação do jogador recebida", {"action": action, "amount": amount})
+        return jsonify({'status': 'ok'})
     except Exception as e:
         _log_error("Erro em player_action", e)
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -999,20 +1321,42 @@ def get_game_state():
         _log_error("Erro em get_game_state", e)
         return jsonify({'error': str(e), 'active': False}), 500
 
-@app.route('/api/reset_game', methods=['POST'])
-def reset_game():
+def initialize_game_state():
+    """
+    Inicializa/reseta completamente o estado do jogo.
+    Chamada quando o servidor inicia para garantir que não há partidas em andamento.
+    """
     global game_state, web_player
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    print(f"🔄 [SERVER] [{timestamp}] === INICIALIZANDO ESTADO DO JOGO ===")
+    
     with game_lock:
         game_state = {
             'active': False,
             'current_round': None,
-            'player_name': game_state.get('player_name', 'Jogador'),
+            'player_name': 'Jogador',
             'player_uuid': None,
             'game_result': None,
             'thinking_uuid': None,
-            'round_data_cleared': False
+            'round_data_cleared': False,
+            'timeout_error': None,
+            'error': None,
+            'statistics_visible': True
         }
+    
+    # Cria novo web_player limpo
     web_player = WebPlayer()
+    
+    print(f"🔄 [SERVER] [{timestamp}] ✅ Estado do jogo resetado - pronto para nova partida")
+    print(f"🔄 [SERVER] [{timestamp}]   active: {game_state['active']}")
+    print(f"🔄 [SERVER] [{timestamp}]   current_round: {game_state['current_round']}")
+    print(f"🔄 [SERVER] [{timestamp}]   player_uuid: {game_state['player_uuid']}")
+
+@app.route('/api/reset_game', methods=['POST'])
+def reset_game():
+    """Endpoint para resetar o jogo manualmente via API."""
+    initialize_game_state()
     return jsonify({'status': 'reset'})
 
 @app.route('/api/reset_memory', methods=['POST'])
@@ -1115,5 +1459,15 @@ def force_next_round():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
+    # Reseta o estado do jogo ao iniciar o servidor
+    # Garante que sempre começa na página inicial, sem partidas em andamento
+    initialize_game_state()
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    print(f"🚀 [SERVER] [{timestamp}] === SERVIDOR INICIANDO ===")
+    print(f"🚀 [SERVER] [{timestamp}] Host: {SERVER_HOST}, Port: {SERVER_PORT}")
+    print(f"🚀 [SERVER] [{timestamp}] Debug Mode: {DEBUG_MODE}")
+    print(f"🚀 [SERVER] [{timestamp}] === PRONTO PARA RECEBER CONEXÕES ===")
+    
     app.run(debug=DEBUG_MODE, host=SERVER_HOST, port=SERVER_PORT)
 
