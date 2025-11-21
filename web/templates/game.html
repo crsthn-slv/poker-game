@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jogo - Poker Game</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="poker-container">
+        <button id="exitGameBtn" class="btn-exit">Sair</button>
+        <!-- Painel Lateral Esquerdo -->
+        <div class="stats-panel">
+            <div class="stats-header">
+                <h2>Estatísticas</h2>
+            </div>
+
+            <!-- Round Info -->
+            <div class="round-section">
+                <div class="round-label">ROUND</div>
+                <div class="round-value-container">
+                    <div class="round-value" id="roundInfo">1/10</div>
+                </div>
+            </div>
+
+            <!-- Pot Display -->
+            <div class="pot-section">
+                <div class="pot-label">POT</div>
+                <div class="pot-value-container">
+                    <img src="images/poker_pot.png" alt="chip" class="chip-icon-small">
+                    <div class="pot-value" id="potAmount">0</div>
+                </div>
+            </div>
+
+            <!-- Suas Fichas -->
+            <div class="chips-section">
+                <div class="chips-label">Suas fichas</div>
+                <div class="chips-value-container">
+                    <img src="images/poker_pot.png" alt="chip" class="chip-icon-small">
+                    <div class="chips-value" id="playerStack">100</div>
+                </div>
+            </div>
+
+            <!-- Sua Aposta -->
+            <div class="bet-section">
+                <div class="bet-label">Aposta</div>
+                <div class="bet-value-container">
+                    <img src="images/poker_pot.png" alt="chip" class="chip-icon-small">
+                    <div class="bet-value" id="playerBet">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Área Principal do Jogo -->
+        <div class="game-area">
+            <!-- Mensagem de Turno -->
+            <div class="turn-message" id="turnMessage" style="display: none;"></div>
+
+            <!-- Mesa com Jogadores -->
+            <div class="poker-table">
+                <!-- Jogadores posicionados ao redor da mesa -->
+                <div class="players-container">
+                    <!-- Jogadores serão inseridos aqui dinamicamente -->
+                    <div id="playersContainer"></div>
+                </div>
+
+                <!-- Cartas Comunitárias no centro -->
+                <div class="community-cards-area">
+                    <div class="deck-placeholder">
+                        <div class="card card-back"></div>
+                    </div>
+                    <div id="communityCards" class="community-cards"></div>
+                </div>
+            </div>
+
+            <!-- Botões de Ação -->
+            <div class="actions-container" id="actionsContainer" style="display: none;">
+                <div class="action-buttons">
+                    <button id="foldBtn" class="btn-action btn-fold">Fold</button>
+                    <button id="callBtn" class="btn-action btn-call">Call</button>
+                    <button id="raiseBtn" class="btn-action btn-raise">Raise</button>
+                    <button id="allinBtn" class="btn-action btn-allin">All-in</button>
+                </div>
+                <div class="raise-input" id="raiseInput" style="display: none;">
+                    <label>Valor:</label>
+                    <input type="number" id="raiseAmount" min="0" value="0">
+                    <button id="confirmRaiseBtn" class="btn-action btn-confirm">Confirmar</button>
+                </div>
+                <div id="actionInfo" class="action-info"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Fim de Round -->
+    <div class="round-end-modal" id="roundEndModal" style="display: none;">
+        <div class="round-end-content">
+            <h2 class="round-end-title">Fim do Round</h2>
+            <div class="round-end-info">
+                <div class="round-end-pot">
+                    <span class="round-end-label">Pot Final:</span>
+                    <span class="round-end-value" id="roundEndPot">0</span>
+                </div>
+                <div class="round-end-stacks" id="roundEndStacks"></div>
+            </div>
+            <button id="nextRoundBtn" class="btn-next-round">Próximo Round</button>
+        </div>
+    </div>
+
+    <!-- Modal Final do Jogo -->
+    <div class="round-end-modal" id="gameEndModal" style="display: none;">
+        <div class="round-end-content" style="max-width: 600px;">
+            <h2 class="round-end-title" style="font-size: 32px; margin-bottom: 20px;">🎉 Jogo Finalizado! 🎉</h2>
+            <div id="gameEndContent">
+                <div id="gameEndWinner" style="font-size: 24px; color: #3a9f75; margin-bottom: 20px; font-weight: bold;"></div>
+                <div id="gameEndStats" style="margin-top: 20px;"></div>
+            </div>
+            <button id="playAgainBtn" class="btn-next-round" style="margin-top: 20px;">Jogar Novamente</button>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/game.js"></script>
+</body>
+
+</html>
