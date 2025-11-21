@@ -3,22 +3,17 @@ const playerNameInput = document.getElementById('playerName');
 const playerCountInput = document.getElementById('playerCount');
 const initialStackInput = document.getElementById('initialStack');
 const smallBlindInput = document.getElementById('smallBlind');
-const statisticsVisibleInput = document.getElementById('statisticsVisible');
 
 // Carrega valores salvos do localStorage
 const savedName = localStorage.getItem('playerName');
 const savedPlayerCount = localStorage.getItem('playerCount');
 const savedInitialStack = localStorage.getItem('initialStack');
 const savedSmallBlind = localStorage.getItem('smallBlind');
-const savedStatisticsVisible = localStorage.getItem('statisticsVisible');
 
 if (savedName) playerNameInput.value = savedName;
 if (savedPlayerCount) playerCountInput.value = savedPlayerCount;
 if (savedInitialStack) initialStackInput.value = savedInitialStack;
 if (savedSmallBlind) smallBlindInput.value = savedSmallBlind;
-if (savedStatisticsVisible !== null) {
-    statisticsVisibleInput.checked = savedStatisticsVisible === 'true';
-}
 
 // Validação de configuração
 function validateConfiguration() {
@@ -54,16 +49,16 @@ function validateConfiguration() {
     return true;
 }
 
-// Salva configuração e inicia jogo
-document.getElementById('saveBtn').addEventListener('click', async () => {
+// Função para iniciar jogo
+async function startGame() {
     if (!validateConfiguration()) return;
 
-    const saveBtn = document.getElementById('saveBtn');
-    const originalText = saveBtn.textContent;
+    const playBtn = document.getElementById('playBtn');
+    const originalText = playBtn.textContent;
     
-    // CRÍTICO: Desabilita botão para evitar múltiplas chamadas simultâneas
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Iniciando...';
+    // Desabilita botão para evitar múltiplas chamadas simultâneas
+    playBtn.disabled = true;
+    playBtn.textContent = 'Iniciando...';
 
     // Valida e converte valores numéricos
     const playerCount = parseInt(playerCountInput.value, 10);
@@ -85,12 +80,16 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     if (isNaN(initialStack) || initialStack <= 0) {
         alert('Stack inicial inválido! Por favor, digite um número válido maior que zero.');
         initialStackInput.focus();
+        playBtn.disabled = false;
+        playBtn.textContent = originalText;
         return;
     }
     
     if (isNaN(smallBlind) || smallBlind <= 0) {
         alert('Small blind inválido! Por favor, digite um número válido maior que zero.');
         smallBlindInput.focus();
+        playBtn.disabled = false;
+        playBtn.textContent = originalText;
         return;
     }
     
@@ -99,7 +98,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         player_count: isNaN(playerCount) ? 5 : playerCount,
         initial_stack: initialStack,
         small_blind: smallBlind,
-        statistics_visible: statisticsVisibleInput.checked
+        statistics_visible: true // Mantém sempre true, checkbox removido
     };
     
     // Log final antes de enviar
@@ -110,7 +109,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     localStorage.setItem('playerCount', config.player_count.toString());
     localStorage.setItem('initialStack', config.initial_stack.toString());
     localStorage.setItem('smallBlind', config.small_blind.toString());
-    localStorage.setItem('statisticsVisible', config.statistics_visible.toString());
+    localStorage.setItem('statisticsVisible', 'true');
 
     // Envia configuração para o servidor
     try {
@@ -146,26 +145,49 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
             window.location.href = 'game.html';
         } else {
             // Reabilita botão em caso de erro
-            saveBtn.disabled = false;
-            saveBtn.textContent = originalText;
+            playBtn.disabled = false;
+            playBtn.textContent = originalText;
             alert('Erro ao iniciar jogo: ' + (data.message || 'Erro desconhecido'));
         }
     } catch (error) {
         // Reabilita botão em caso de erro
-        saveBtn.disabled = false;
-        saveBtn.textContent = originalText;
+        playBtn.disabled = false;
+        playBtn.textContent = originalText;
         console.error('Erro ao iniciar jogo:', error);
+        alert('Erro ao conectar com o servidor');
+    }
+}
+
+// Botão Jogar - Inicia nova partida
+document.getElementById('playBtn').addEventListener('click', startGame);
+
+// Botão Retomar - Retoma partida anterior
+document.getElementById('resumeBtn').addEventListener('click', async () => {
+    // Verifica se há um jogo ativo
+    try {
+        const response = await fetch('/api/game_state');
+        const data = await response.json();
+        
+        if (data.active) {
+            // Se há jogo ativo, redireciona para o jogo
+            window.location.href = 'game.html';
+        } else {
+            alert('Não há partida anterior para retomar.');
+        }
+    } catch (error) {
+        console.error('Erro ao verificar estado do jogo:', error);
         alert('Erro ao conectar com o servidor');
     }
 });
 
-// Volta para início
-document.getElementById('backBtn').addEventListener('click', () => {
-    window.location.href = 'index.html';
+// Botão Histórico - Mostra histórico de partidas
+document.getElementById('historyBtn').addEventListener('click', () => {
+    // Por enquanto mostra mensagem de desenvolvimento
+    alert('Histórico de partidas em desenvolvimento.');
 });
 
-// Resetar memória dos bots
-document.getElementById('resetMemoryBtn').addEventListener('click', async () => {
+// Botão Reset Bots - Reseta memória dos bots
+document.getElementById('resetBotsBtn').addEventListener('click', async () => {
     if (confirm('Tem certeza? Isso apagará todo o aprendizado dos bots!')) {
         try {
             const response = await fetch('/api/reset_memory', { method: 'POST' });
@@ -181,4 +203,3 @@ document.getElementById('resetMemoryBtn').addEventListener('click', async () => 
         }
     }
 });
-
