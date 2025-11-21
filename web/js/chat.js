@@ -65,7 +65,21 @@ function createCardRevealMessage(street, cards) {
         'river': 'River'
     };
     const streetText = streetNames[street] || street.charAt(0).toUpperCase() + street.slice(1);
-    const cardsText = cards.join(' ');
+    // Converte códigos de cartas para nomes completos (se a função estiver disponível)
+    let cardsText;
+    try {
+        if (typeof getCardNames === 'function' && Array.isArray(cards) && cards.length > 0) {
+            const cardNamesArray = getCardNames(cards);
+            cardsText = cardNamesArray.join(', ');
+        } else {
+            // Fallback: usa os códigos originais se getCardNames não estiver disponível
+            cardsText = Array.isArray(cards) ? cards.join(' ') : '';
+        }
+    } catch (e) {
+        // Em caso de erro, usa os códigos originais
+        console.warn('Erro ao converter nomes de cartas:', e);
+        cardsText = Array.isArray(cards) ? cards.join(' ') : '';
+    }
     const content = `${streetText}: ${cardsText}`;
 
     return {
@@ -113,7 +127,6 @@ function renderChatMessage(message) {
     // Apply color styling
     if (message.color) {
         messageDiv.style.color = message.color;
-        messageDiv.style.borderLeft = `3px solid ${message.color}`;
     }
 
     // Add icon if specified

@@ -19,6 +19,7 @@ let lastSeatsState = null; // JSON string dos seats para comparação
 let lastCurrentPlayerUuid = null; // Último jogador atual
 let lastGameStateHash = null; // Hash do gameState para throttle no polling
 let lastCommunityCards = null; // Últimas cartas comunitárias para evitar atualizações desnecessárias
+let processedActionIds = new Set(); // IDs de ações já processadas para player-status
 
 // Sistema de debug (desabilitado em produção)
 // Por padrão desabilitado. Para ativar, defina DEBUG_MODE=true no console do navegador
@@ -305,45 +306,26 @@ function createPlayerElement(seat, playerUuid, currentPlayerUuid, isMainPlayer) 
     stackDiv.appendChild(stackValue);
     infoDiv.appendChild(stackDiv);
 
-    // Última jogada (sempre mostra, mesmo que vazio inicialmente)
-    const lastActionDiv = document.createElement('div');
-    lastActionDiv.className = 'player-last-action';
-    lastActionDiv.id = `last-action-${seat.uuid}`;
-    lastActionDiv.style.fontSize = '12px';
-    lastActionDiv.style.color = '#fa8c01';
-    lastActionDiv.style.marginTop = '4px';
-    lastActionDiv.style.minHeight = '16px';
-    lastActionDiv.textContent = '';
-    infoDiv.appendChild(lastActionDiv);
-
-    // Aposta (se houver)
-    if (seat.paid && seat.paid > 0) {
-        const betDiv = document.createElement('div');
-        betDiv.className = 'player-bet';
-        betDiv.textContent = `Aposta: ${seat.paid}`;
-        infoDiv.appendChild(betDiv);
-    }
-
-    // Monta estrutura: cartas -> nome -> info -> status
+    // Monta estrutura: cartas -> nome -> info -> última ação
     playerContent.appendChild(cardsContainer);
     playerContent.appendChild(nameDiv);
     playerContent.appendChild(infoDiv);
 
-    // Status da ação (Fold, Raise, etc)
-    const statusDiv = document.createElement('div');
-    statusDiv.className = 'player-status';
-    statusDiv.id = `status-${seat.uuid}`;
-    // Recupera status anterior se existir (para não piscar/sumir rápido demais)
-    const oldStatus = document.getElementById(`status-${seat.uuid}`);
-    if (oldStatus) statusDiv.textContent = oldStatus.textContent;
+    // Última jogada (dentro de player-content)
+    const lastActionDiv = document.createElement('div');
+    lastActionDiv.className = 'player-last-action';
+    lastActionDiv.id = `last-action-${seat.uuid}`;
+    lastActionDiv.style.fontSize = '14px';
+    lastActionDiv.style.color = '#fa8c01';
+    lastActionDiv.style.fontWeight = '700';
+    lastActionDiv.style.minHeight = '20px';
+    lastActionDiv.textContent = '';
+    playerContent.appendChild(lastActionDiv);
 
-    // Se o jogador foldou, mostra FOLDED
+    // Se o jogador foldou, reduz opacidade
     if (seat.state === 'folded') {
-        statusDiv.textContent = 'FOLD';
         playerDiv.style.opacity = '0.6'; // Opacidade reduzida para quem saiu
     }
-
-    playerContent.appendChild(statusDiv);
     playerDiv.appendChild(playerContent);
 
     // Adiciona indicador de turno
@@ -427,31 +409,45 @@ function updatePlayerElement(playerDiv, seat, playerUuid, currentPlayerUuid, isM
     const stackValue = playerDiv.querySelector('.player-stack span');
     if (stackValue) stackValue.textContent = seat.stack || 0;
 
-    // Atualiza Aposta
-    let betDiv = playerDiv.querySelector('.player-bet');
-    if (seat.paid && seat.paid > 0) {
-        if (!betDiv) {
-            betDiv = document.createElement('div');
-            betDiv.className = 'player-bet';
-            playerDiv.querySelector('.player-info').appendChild(betDiv);
+    // Garante que última ação existe na player-content
+    let lastActionDiv = playerDiv.querySelector('.player-last-action');
+    if (!lastActionDiv) {
+        lastActionDiv = document.createElement('div');
+        lastActionDiv.className = 'player-last-action';
+        lastActionDiv.id = `last-action-${seat.uuid}`;
+        lastActionDiv.style.fontSize = '14px';
+        lastActionDiv.style.color = '#fa8c01';
+        lastActionDiv.style.fontWeight = '700';
+        lastActionDiv.style.minHeight = '20px';
+        lastActionDiv.textContent = '';
+        const playerContent = playerDiv.querySelector('.player-content');
+        const infoDiv = playerContent?.querySelector('.player-info');
+        if (playerContent && infoDiv) {
+            playerContent.insertBefore(lastActionDiv, infoDiv.nextSibling);
         }
-        betDiv.textContent = `Aposta: ${seat.paid}`;
-    } else if (betDiv) {
-        betDiv.remove();
     }
 
-    // Atualiza Status (Fold)
+    // Remove o antigo player-bet se existir (estava em player-info)
+    const oldBetDiv = playerDiv.querySelector('.player-bet');
+    if (oldBetDiv) {
+        oldBetDiv.remove();
+    }
+
+    // Remove player-status e player-bet-amount se existirem
     const statusDiv = playerDiv.querySelector('.player-status');
+    if (statusDiv) {
+        statusDiv.remove();
+    }
+    const betAmountDiv = playerDiv.querySelector('.player-bet-amount');
+    if (betAmountDiv) {
+        betAmountDiv.remove();
+    }
+
+    // Atualiza opacidade baseado no estado
     if (seat.state === 'folded') {
-        statusDiv.textContent = 'FOLD';
         playerDiv.style.opacity = '0.6';
     } else {
-        // Se não estiver folded, mantemos o texto de ação temporária (gerido pelo updateGameInfo)
-        // ou limpamos se mudou de estado (ex: nova rodada)
-        if (statusDiv.textContent === 'FOLD') {
-            statusDiv.textContent = '';
-            playerDiv.style.opacity = '1';
-        }
+        playerDiv.style.opacity = '1';
     }
 
     // NÃO atualizamos cartas aqui para o jogador principal (feito via updatePlayerCards)
@@ -789,40 +785,69 @@ function updateGameInfo(gameState) {
             source: thinkingUuid ? 'thinking_uuid' : (round.is_player_turn === true && playerUuid ? 'is_player_turn' : (roundState.current_player_uuid ? 'round_state' : 'none'))
         });
 
-        // Atualiza status da ação na UI (se houver ação)
-        if (round.action && typeof round.action === 'object' && round.action.uuid) {
+        // Atualiza status da ação na UI usando action_histories (mesmo método do chat)
+        if (roundState.action_histories) {
             try {
-                const actionSeat = Array.isArray(seats) ? seats.find(s => s && s.uuid === round.action.uuid) : null;
-                if (actionSeat) {
-                    const statusEl = document.getElementById(`status-${actionSeat.uuid}`);
-                    if (statusEl && round.action.action) {
-                        let actionText = String(round.action.action).toUpperCase();
-                        const amount = round.action.amount;
-                        if (amount && typeof amount === 'number' && amount > 0 && actionText !== 'FOLD') {
-                            actionText += ` ${amount}`;
-                        }
-                        statusEl.textContent = actionText;
-
-                        // Atualiza última jogada abaixo das fichas
-                        const lastActionEl = document.getElementById(`last-action-${actionSeat.uuid}`);
-                        if (lastActionEl) {
-                            let lastActionText = String(round.action.action).toUpperCase();
-                            if (amount && typeof amount === 'number' && amount > 0) {
-                                lastActionText += ` ${amount}`;
-                            }
-                            lastActionEl.textContent = lastActionText;
-                        }
-
-                        // Limpa status após 2 segundos (exceto Fold)
-                        if (actionText !== 'FOLD') {
-                            setTimeout(() => {
-                                if (statusEl && statusEl.textContent === actionText) {
-                                    statusEl.textContent = '';
+                // Processa todas as ações de todas as streets
+                Object.keys(roundState.action_histories).forEach(street => {
+                    const actions = roundState.action_histories[street];
+                    if (Array.isArray(actions)) {
+                        actions.forEach(action => {
+                            // Cria ID único para a ação (mesmo formato do chat)
+                            const actionId = `status_${street}_${action.uuid}_${action.action}_${action.amount || 0}`;
+                            
+                            // Só processa se ainda não foi processada
+                            if (!processedActionIds.has(actionId)) {
+                                processedActionIds.add(actionId);
+                                
+                                const actionSeat = Array.isArray(seats) ? seats.find(s => s && s.uuid === action.uuid) : null;
+                                if (actionSeat && action.action) {
+                                    // Atualiza última ação na player-content (para TODAS as ações)
+                                    const lastActionEl = document.getElementById(`last-action-${action.uuid}`);
+                                    if (lastActionEl) {
+                                        let lastActionText = String(action.action).toUpperCase();
+                                        // Adiciona o valor quando houver amount (para raise, call, etc)
+                                        const amount = action.amount;
+                                        if (amount && typeof amount === 'number' && amount > 0 && action.action !== 'fold') {
+                                            lastActionText += ` ${amount}`;
+                                        }
+                                        lastActionEl.textContent = lastActionText;
+                                    } else {
+                                        // Se o elemento não existe, tenta criar
+                                        debugLog('Elemento last-action não encontrado, tentando criar', { uuid: action.uuid });
+                                        const playerDiv = document.querySelector(`.player-seat[data-uuid="${action.uuid}"]`);
+                                        if (playerDiv) {
+                                            const playerContent = playerDiv.querySelector('.player-content');
+                                            if (playerContent) {
+                                                const newLastActionEl = document.createElement('div');
+                                                newLastActionEl.className = 'player-last-action';
+                                                newLastActionEl.id = `last-action-${action.uuid}`;
+                                                newLastActionEl.style.fontSize = '14px';
+                                                newLastActionEl.style.color = '#fa8c01';
+                                                newLastActionEl.style.fontWeight = '700';
+                                                newLastActionEl.style.minHeight = '20px';
+                                                let lastActionText = String(action.action).toUpperCase();
+                                                // Adiciona o valor quando houver amount
+                                                const amount = action.amount;
+                                                if (amount && typeof amount === 'number' && amount > 0 && action.action !== 'fold') {
+                                                    lastActionText += ` ${amount}`;
+                                                }
+                                                newLastActionEl.textContent = lastActionText;
+                                                // Insere após player-info
+                                                const infoDiv = playerContent.querySelector('.player-info');
+                                                if (infoDiv) {
+                                                    playerContent.insertBefore(newLastActionEl, infoDiv.nextSibling);
+                                                } else {
+                                                    playerContent.appendChild(newLastActionEl);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
-                            }, 2000);
-                        }
+                            }
+                        });
                     }
-                }
+                });
             } catch (e) {
                 debugLog('Erro ao atualizar status da ação', e);
             }
@@ -2432,60 +2457,12 @@ document.addEventListener('DOMContentLoaded', async () => {
  * Initialize statistics panel toggle functionality
  */
 function initializeStatisticsToggle() {
-    const toggleBtn = document.getElementById('toggleStatsBtn');
+    // Função simplificada - botão de toggle foi removido da UI
+    // Painel de estatísticas sempre visível
     const statsPanel = document.querySelector('.stats-panel');
-    
-    if (!toggleBtn || !statsPanel) return;
-    
-    // Load saved preference
-    const savedVisibility = localStorage.getItem('statisticsPanelVisible');
-    const isVisible = savedVisibility !== null ? savedVisibility === 'true' : true;
-    
-    // Apply initial visibility from game state if available
-    // This will be updated when game state is received
-    if (!isVisible) {
-        statsPanel.style.display = 'none';
-        toggleBtn.textContent = 'Mostrar';
+    if (statsPanel) {
+        statsPanel.style.display = 'flex';
     }
-    
-    const togglePanel = () => {
-        // Performance measurement: T047 - Toggle response within 100ms
-        const toggleStartTime = performance.now();
-        
-        const isCurrentlyVisible = statsPanel.style.display !== 'none';
-        statsPanel.style.display = isCurrentlyVisible ? 'none' : 'flex';
-        toggleBtn.textContent = isCurrentlyVisible ? 'Mostrar' : 'Ocultar';
-        toggleBtn.setAttribute('aria-expanded', (!isCurrentlyVisible).toString());
-        localStorage.setItem('statisticsPanelVisible', (!isCurrentlyVisible).toString());
-        
-        // Expand game area when panel is hidden
-        const gameArea = document.querySelector('.game-area');
-        if (gameArea) {
-            if (isCurrentlyVisible) {
-                gameArea.style.marginLeft = '0';
-            } else {
-                gameArea.style.marginLeft = '0';
-            }
-        }
-        
-        // Performance validation: should be < 100ms
-        const toggleTime = performance.now() - toggleStartTime;
-        if (toggleTime > 100) {
-            console.warn(`[T047] Toggle response took ${toggleTime.toFixed(2)}ms (target: < 100ms)`);
-        } else {
-            console.log(`[T047] Toggle response completed in ${toggleTime.toFixed(2)}ms ✓`);
-        }
-    };
-    
-    toggleBtn.addEventListener('click', togglePanel);
-    
-    // Keyboard navigation support
-    toggleBtn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            togglePanel();
-        }
-    });
 }
 
 /**
@@ -2576,15 +2553,12 @@ function updateStatistics(gameState) {
  * Apply statistics visibility preference from game state
  */
 function applyStatisticsVisibility(gameState) {
+    // Função simplificada - botão de toggle foi removido da UI
+    // Painel de estatísticas sempre visível
     const statsPanel = document.querySelector('.stats-panel');
-    const toggleBtn = document.getElementById('toggleStatsBtn');
-    
-    if (!statsPanel || !toggleBtn) return;
-    
-    const statisticsVisible = gameState.statistics_visible !== false; // Default to true
-    statsPanel.style.display = statisticsVisible ? 'flex' : 'none';
-    toggleBtn.textContent = statisticsVisible ? 'Ocultar' : 'Mostrar';
-    localStorage.setItem('statisticsPanelVisible', statisticsVisible.toString());
+    if (statsPanel) {
+        statsPanel.style.display = 'flex';
+    }
 }
 
 // Chat Functions
@@ -2625,13 +2599,23 @@ function updateChat(gameState) {
     
     // Check for bet actions in action_histories
     if (roundState.action_histories) {
+        // Obtém os seats para buscar nomes dos jogadores
+        const seats = roundState.seats || [];
+        
         Object.keys(roundState.action_histories).forEach(street => {
             const actions = roundState.action_histories[street];
             if (Array.isArray(actions)) {
                 actions.forEach(action => {
                     const messageId = `bet_${street}_${action.uuid}_${action.action}_${action.amount || 0}`;
                     if (!processedMessageIds.has(messageId)) {
-                        const playerName = action.name || 'Unknown';
+                        // Busca o nome do jogador nos seats usando o UUID
+                        let playerName = action.name || 'Unknown';
+                        if (action.uuid && Array.isArray(seats)) {
+                            const seat = seats.find(s => s && s.uuid === action.uuid);
+                            if (seat && seat.name) {
+                                playerName = seat.name;
+                            }
+                        }
                         const message = createBetMessage(playerName, action.action, action.amount);
                         chatMessageQueue.add(message);
                         processedMessageIds.add(messageId);
@@ -2668,6 +2652,7 @@ function resetChat() {
     lastCommunityCardCount = 0;
     lastCommunityCards = null; // Reseta cache de cartas comunitárias
     processedMessageIds.clear();
+    processedActionIds.clear(); // Reseta ações processadas para player-status
     chatMessageQueue.clear();
     const chatContainer = document.getElementById('chatMessages');
     if (chatContainer) {
