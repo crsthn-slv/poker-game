@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Discussões
+    url: https://github.com/crsthn-slv/poker-game/discussions
+    about: Faça perguntas e discuta ideias com a comunidade
+  - name: 📚 Documentação
+    url: https://github.com/crsthn-slv/poker-game/blob/main/docs/DOCUMENTACAO_COMPLETA.md
+    about: Consulte a documentação completa do projeto
+

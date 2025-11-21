@@ -1,0 +1,58 @@
+[
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Algo não está funcionando"
+  },
+  {
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "Nova funcionalidade ou melhoria"
+  },
+  {
+    "name": "documentation",
+    "color": "0075ca",
+    "description": "Melhorias ou adições à documentação"
+  },
+  {
+    "name": "good first issue",
+    "color": "7057ff",
+    "description": "Bom para iniciantes"
+  },
+  {
+    "name": "help wanted",
+    "color": "008672",
+    "description": "Precisa de ajuda extra"
+  },
+  {
+    "name": "question",
+    "color": "d876e3",
+    "description": "Pergunta sobre o projeto"
+  },
+  {
+    "name": "wontfix",
+    "color": "ffffff",
+    "description": "Não será implementado"
+  },
+  {
+    "name": "dependencies",
+    "color": "0366d6",
+    "description": "Atualizações de dependências"
+  },
+  {
+    "name": "python",
+    "color": "3776ab",
+    "description": "Relacionado a Python"
+  },
+  {
+    "name": "web",
+    "color": "0e8a16",
+    "description": "Relacionado à interface web"
+  },
+  {
+    "name": "ai",
+    "color": "fbca04",
+    "description": "Relacionado aos bots/AI"
+  }
+]
+
