@@ -4,27 +4,62 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Configuração - Poker Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
-    <div class="container">
-        <h1>⚙️ Configuração</h1>
-        <div class="config-card">
-            <label for="playerName">Seu Nome:</label>
-            <input type="text" id="playerName" placeholder="Digite seu nome" maxlength="20">
-            <div class="form-group">
-                <button id="saveBtn" class="btn btn-primary">Salvar e Jogar</button>
+<body class="config-page">
+    <div class="config-background"></div>
+    
+    <!-- Logo -->
+    <div class="config-logo-container">
+        <img src="/images/logo.png" alt="POKER Logo" class="config-logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+        <div class="config-logo-placeholder" style="display: none;">
+            <h1 class="config-logo-text">POKER</h1>
+        </div>
+    </div>
+    
+    <!-- Campos de Configuração -->
+    <div class="config-fields-container">
+        <div class="config-field">
+            <div class="config-input-wrapper">
+                <label class="config-field-label">Bots</label>
+                <input type="number" id="playerCount" class="config-input" min="2" max="9" value="5">
             </div>
-            <div class="form-group" style="margin-top: 10px;">
-                <button id="resetMemoryBtn" class="btn btn-secondary" style="background-color: #dc3545;">Resetar Memória dos Bots</button>
+        </div>
+        
+        <div class="config-field">
+            <div class="config-input-wrapper">
+                <label class="config-field-label">Stack Inicial</label>
+                <input type="number" id="initialStack" class="config-input" min="1000" value="1000">
             </div>
-            <div class="form-group" style="margin-top: 10px;">
-                <button id="backBtn" class="btn btn-secondary">Voltar</button>
+        </div>
+        
+        <div class="config-field">
+            <div class="config-input-wrapper">
+                <label class="config-field-label">Small blind</label>
+                <input type="number" id="smallBlind" class="config-input" min="1" value="25">
             </div>
         </div>
     </div>
+    
+    <!-- Nickname (canto inferior esquerdo) -->
+    <div class="config-nickname-container">
+        <label class="config-nickname-label">Nickname</label>
+        <div class="config-nickname-input-wrapper">
+            <input type="text" id="playerName" class="config-nickname-input" placeholder="Escreva" maxlength="20">
+        </div>
+    </div>
+    
+    <!-- Botões de Ação -->
+    <div class="config-buttons-container">
+        <button id="playBtn" class="config-btn config-btn-play">Jogar</button>
+        <button id="resumeBtn" class="config-btn config-btn-resume">Retomar</button>
+        <button id="historyBtn" class="config-btn config-btn-history">Histórico</button>
+        <button id="resetBotsBtn" class="config-btn config-btn-reset">Reset bots</button>
+    </div>
+    
     <script src="js/config.js"></script>
 </body>
 </html>
-
-

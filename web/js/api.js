@@ -67,7 +67,11 @@ async function startGame(playerName) {
 
 async function sendPlayerAction(action, amount = 0) {
     try {
+        const timestamp = new Date().toISOString();
+        console.log(`[FRONTEND] [${timestamp}] sendPlayerAction - Enviando ação: ${action}, amount: ${amount}`);
+        
         if (!action || typeof action !== 'string') {
+            console.error(`[FRONTEND] [${timestamp}] sendPlayerAction - Ação inválida: ${action}`);
             return { error: 'Ação inválida' };
         }
 
@@ -75,6 +79,7 @@ async function sendPlayerAction(action, amount = 0) {
             amount = 0;
         }
 
+        console.log(`[FRONTEND] [${timestamp}] sendPlayerAction - Fazendo fetch para ${API_BASE}/player_action`);
         const response = await fetch(`${API_BASE}/player_action`, {
             method: 'POST',
             headers: {
@@ -83,9 +88,12 @@ async function sendPlayerAction(action, amount = 0) {
             body: JSON.stringify({ action, amount })
         });
         
-        return await parseJSONResponse(response);
+        const result = await parseJSONResponse(response);
+        console.log(`[FRONTEND] [${timestamp}] sendPlayerAction - Resposta recebida:`, result);
+        return result;
     } catch (error) {
-        console.error('Erro em sendPlayerAction:', error);
+        const timestamp = new Date().toISOString();
+        console.error(`[FRONTEND] [${timestamp}] Erro em sendPlayerAction:`, error);
         return { error: `Erro de rede: ${error.message}` };
     }
 }
