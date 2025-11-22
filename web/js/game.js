@@ -19,16 +19,45 @@ let lastSeatsState = null; // JSON string dos seats para comparação
 let lastCurrentPlayerUuid = null; // Último jogador atual
 let lastGameStateHash = null; // Hash do gameState para throttle no polling
 let lastCommunityCards = null; // Últimas cartas comunitárias para evitar atualizações desnecessárias
+let lastHoleCards = null; // Últimas cartas do jogador para evitar recálculos desnecessários de estatísticas
+let lastStreet = null; // Última street para detectar mudanças de fase (preflop -> flop -> turn -> river)
 let processedActionIds = new Set(); // IDs de ações já processadas para player-status
 
 // Sistema de debug (desabilitado em produção)
 // Por padrão desabilitado. Para ativar, defina DEBUG_MODE=true no console do navegador
-const DEBUG_MODE = false; // Desabilitado por padrão em produção
+const DEBUG_MODE = true; // ✅ ATIVADO PARA DEBUG
 
-function debugLog(message, data = null) {
-    if (DEBUG_MODE) {
-        const timestamp = new Date().toISOString();
-        console.log(`[${timestamp}] DEBUG: ${message}`, data || '');
+// Níveis de log para controlar verbosidade
+const LOG_LEVELS = {
+    NONE: 0,
+    ERROR: 1,
+    WARN: 2,
+    INFO: 3,
+    DEBUG: 4
+};
+
+// Nível atual de log (pode ser ajustado via console: LOG_LEVEL = LOG_LEVELS.INFO)
+let CURRENT_LOG_LEVEL = DEBUG_MODE ? LOG_LEVELS.DEBUG : LOG_LEVELS.ERROR;
+
+function debugLog(message, data = null, level = LOG_LEVELS.DEBUG) {
+    if (CURRENT_LOG_LEVEL < level) return;
+    
+    const timestamp = new Date().toISOString();
+    
+    // Formata dados de forma mais legível
+    if (data === null || data === undefined) {
+        console.log(`[${timestamp}] DEBUG: ${message}`);
+    } else if (typeof data === 'object') {
+        // Para objetos, usa JSON.stringify com indentação para melhor legibilidade
+        try {
+            const formattedData = JSON.stringify(data, null, 2);
+            console.log(`[${timestamp}] DEBUG: ${message}`, formattedData);
+        } catch (e) {
+            // Se falhar ao stringify (objetos circulares, etc), usa console.log normal
+            console.log(`[${timestamp}] DEBUG: ${message}`, data);
+        }
+    } else {
+        console.log(`[${timestamp}] DEBUG: ${message}`, data);
     }
 }
 
@@ -152,18 +181,20 @@ function renderPlayers(seats, currentPlayerUuid, playerUuid) {
     });
 
     // Separa jogador principal dos bots
-    // Validação: garante que playerUuid está definido e não é null/undefined
+    // IMPORTANTE: Se playerUuid não estiver definido, não renderiza nenhum jogador ainda
+    // Isso evita renderizar todos os seats como bots no início
     if (!playerUuid) {
-        console.warn('🟡 [RENDER] playerUuid não está definido em renderPlayers', { 
+        debugLog('⚠️ playerUuid não está definido em renderPlayers, aguardando...', { 
             playerUuid, 
             activeSeatsCount: activeSeats.length,
             activeSeatsUuids: activeSeats.map(s => s?.uuid).filter(Boolean)
         });
-        debugLog('⚠️ playerUuid não está definido em renderPlayers', { playerUuid, activeSeatsCount: activeSeats.length });
+        // Não renderiza nada até playerUuid ser definido
+        return;
     }
     
-    const playerSeat = playerUuid ? activeSeats.find(s => s && s.uuid === playerUuid) : null;
-    const botSeats = playerUuid ? activeSeats.filter(s => s && s.uuid !== playerUuid) : activeSeats;
+    const playerSeat = activeSeats.find(s => s && s.uuid === playerUuid);
+    const botSeats = activeSeats.filter(s => s && s.uuid !== playerUuid);
     
     // Log sempre ativo se houver problema
     if (playerUuid && !playerSeat) {
@@ -454,9 +485,19 @@ function updatePlayerElement(playerDiv, seat, playerUuid, currentPlayerUuid, isM
     // Para bots, as cartas são estáticas (back cards), então não precisa mexer
 }
 
+// Cache das últimas cartas renderizadas para evitar atualizações desnecessárias
+let lastRenderedCards = null;
+
 // Atualiza cartas do jogador
-function updatePlayerCards(holeCard) {
+// Parâmetro opcional: skipIfInconsistent - se true, não atualiza durante inconsistências
+function updatePlayerCards(holeCard, skipIfInconsistent = false) {
     if (!playerUuid) return;
+    
+    // Se solicitado, não atualiza durante inconsistências
+    if (skipIfInconsistent && isInitializing) {
+        debugLog('⚠️ Pulando atualização de cartas durante inicialização (skipIfInconsistent=true)');
+        return;
+    }
 
     const playerSeat = document.querySelector(`.player-seat[data-uuid="${playerUuid}"]`);
     if (!playerSeat) return;
@@ -464,14 +505,35 @@ function updatePlayerCards(holeCard) {
     const cardsContainer = playerSeat.querySelector('.player-cards-container');
     if (!cardsContainer) return;
 
-    // Se já tiver cartas renderizadas e forem as mesmas, não recria (evita piscar)
-    // Mas se holeCard for fornecido, forçamos atualização para garantir visibilidade
+    // Normaliza cartas para comparação (ordena para garantir comparação correta)
+    const normalizeCards = (cards) => {
+        if (!cards || !Array.isArray(cards)) return null;
+        return [...cards].sort().join(',');
+    };
+    
+    const currentCardsStr = normalizeCards(holeCard);
+    const lastCardsStr = normalizeCards(lastRenderedCards);
+    
+    // Se as cartas são as mesmas, não atualiza (evita piscar/mudança visual)
+    if (currentCardsStr === lastCardsStr && currentCardsStr !== null) {
+        debugLog('[CARDS] Cartas não mudaram, pulando atualização visual', {
+            currentCards: holeCard,
+            lastRendered: lastRenderedCards
+        });
+        return;
+    }
+    
+    // Atualiza cache
+    lastRenderedCards = holeCard ? [...holeCard] : null;
+    
+    // Limpa container apenas se realmente precisa atualizar
     cardsContainer.innerHTML = '';
 
     if (holeCard && holeCard.length > 0) {
         holeCard.forEach(card => {
             renderCard(card, cardsContainer, 'player-card');
         });
+        debugLog('[CARDS] Cartas atualizadas', { cards: holeCard });
     } else {
         // Se não houver cartas, mostra placeholders vazios (não back cards) para manter layout
         // O usuário pediu "nunca com uma backcard"
@@ -518,24 +580,76 @@ function updateGameInfo(gameState) {
         }
 
         // Sistema de inicialização estável (baseado em PyPokerGUI)
-        // Aguarda 2 iterações antes de considerar estado estável
+        // Aguarda 4 iterações e valida consistência antes de considerar estado estável
         if (isInitializing) {
             initializationCount++;
+            
             // Durante inicialização, atualiza lastRoundCount se disponível
             if (gameState.current_round && gameState.current_round.round_count) {
                 lastRoundCount = gameState.current_round.round_count;
             }
-            if (initializationCount >= 2) {
+            
+            // Valida consistência de estado durante inicialização
+            // IMPORTANTE: Durante inicialização, usa round_state.seats como fonte única de verdade
+            let stateConsistent = true;
+            let validationErrors = [];
+            
+            // Valida que playerUuid está presente e nos seats
+            if (playerUuid) {
+                const roundStateSeats = gameState.current_round?.round_state?.seats || [];
+                const roundSeats = gameState.current_round?.seats || [];
+                
+                const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean);
+                const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean);
+                
+                // Durante inicialização, usa round_state.seats como fonte única de verdade
+                // round_state.seats é mais atualizado e confiável
+                const playerInRoundState = roundStateUuids.includes(playerUuid);
+                
+                // Verifica consistência entre round_state.seats e round.seats
+                const uuidsMatch = JSON.stringify(roundStateUuids.sort()) === JSON.stringify(roundUuids.sort());
+                
+                // Se playerUuid não está em round_state.seats, é inconsistente
+                if (!playerInRoundState && roundStateSeats.length > 0) {
+                    stateConsistent = false;
+                    validationErrors.push('playerUuid não encontrado em round_state.seats');
+                }
+                
+                // Se UUIDs não correspondem, é inconsistente - bloqueia processamento
+                if (!uuidsMatch && roundStateUuids.length > 0 && roundUuids.length > 0) {
+                    stateConsistent = false;
+                    validationErrors.push('UUIDs inconsistentes entre round_state.seats e round.seats');
+                }
+            } else if (gameState.player_uuid) {
+                // Se playerUuid ainda não foi definido mas está disponível no gameState
+                stateConsistent = false;
+                validationErrors.push('playerUuid ainda não foi atribuído');
+            }
+            
+            // Requer pelo menos 4 iterações E estado consistente
+            const minIterations = 4;
+            if (initializationCount >= minIterations && stateConsistent) {
                 isInitializing = false;
                 debugLog('Inicialização concluída, estado estável', {
                     initializationCount: initializationCount,
-                    lastRoundCount: lastRoundCount
+                    lastRoundCount: lastRoundCount,
+                    playerUuid: playerUuid
                 });
             } else {
-                debugLog('Aguardando estabilização inicial', {
-                    initializationCount: initializationCount,
-                    lastRoundCount: lastRoundCount
-                });
+                if (!stateConsistent) {
+                    debugLog('Aguardando estabilização inicial - estado inconsistente', {
+                        initializationCount: initializationCount,
+                        lastRoundCount: lastRoundCount,
+                        errors: validationErrors,
+                        playerUuid: playerUuid
+                    });
+                } else {
+                    debugLog('Aguardando estabilização inicial', {
+                        initializationCount: initializationCount,
+                        lastRoundCount: lastRoundCount,
+                        requiredIterations: minIterations
+                    });
+                }
                 return; // Não processa durante inicialização
             }
         }
@@ -554,6 +668,107 @@ function updateGameInfo(gameState) {
         if (!round || typeof round !== 'object') {
             debugLog('round inválido', round);
             return;
+        }
+        
+        // Valida consistência entre round_state.seats e round.seats antes de processar
+        // IMPORTANTE: Durante inicialização ou se houver inconsistência, usa round_state.seats como fonte única
+        const roundStateSeats = round.round_state?.seats || [];
+        const roundSeats = round.seats || [];
+        
+        // Verifica se é claramente a vez do jogador (is_player_turn + valid_actions)
+        const isPlayerTurnCheck = round.is_player_turn === true;
+        const hasValidActions = round.valid_actions && Array.isArray(round.valid_actions) && round.valid_actions.length > 0;
+        const isClearlyPlayerTurn = isPlayerTurnCheck && hasValidActions;
+        
+        // Variável para rastrear se há inconsistência
+        let hasInconsistency = false;
+        
+        if (roundStateSeats.length > 0 && roundSeats.length > 0) {
+            const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean).sort();
+            const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean).sort();
+            
+            // Se UUIDs não correspondem, é estado inconsistente
+            if (JSON.stringify(roundStateUuids) !== JSON.stringify(roundUuids)) {
+                hasInconsistency = true;
+                
+                // SE É CLARAMENTE A VEZ DO JOGADOR, permite processamento mesmo com inconsistência
+                // Isso evita timeouts quando o jogador está tentando agir
+                if (isClearlyPlayerTurn && playerUuid && roundStateUuids.includes(playerUuid)) {
+                    debugLog('⚠️ Inconsistência detectada, MAS é a vez do jogador - permitindo processamento limitado', {
+                        roundStateUuids: roundStateUuids,
+                        roundUuids: roundUuids,
+                        isPlayerTurn: isPlayerTurnCheck,
+                        hasValidActions: hasValidActions,
+                        playerUuid: playerUuid
+                    });
+                    // Permite processamento limitado - apenas para habilitar ações
+                    hasInconsistency = false; // Não bloqueia completamente
+                } else {
+                    debugLog('⚠️ Inconsistência detectada entre round_state.seats e round.seats - BLOQUEANDO processamento', {
+                        roundStateUuids: roundStateUuids,
+                        roundUuids: roundUuids,
+                        roundStateCount: roundStateSeats.length,
+                        roundCount: roundSeats.length,
+                        playerUuid: playerUuid,
+                        isPlayerTurn: isPlayerTurnCheck,
+                        hasValidActions: hasValidActions
+                    });
+                    
+                    // Durante inconsistência, usa round_state.seats como fonte única
+                    // Verifica se playerUuid está em round_state.seats (fonte confiável)
+                    // EXCEÇÃO CRÍTICA: Se é claramente a vez do jogador, confia no servidor e permite processamento
+                    if (playerUuid) {
+                        const playerInRoundState = roundStateUuids.includes(playerUuid);
+                        
+                        if (!playerInRoundState) {
+                            // Se é claramente a vez do jogador, confia no servidor e permite processamento
+                            if (isClearlyPlayerTurn) {
+                                debugLog('⚠️ playerUuid não encontrado em round_state.seats, MAS é a vez do jogador - confiando no servidor e permitindo processamento', {
+                                    playerUuid: playerUuid,
+                                    roundStateUuids: roundStateUuids,
+                                    isPlayerTurn: isPlayerTurnCheck,
+                                    hasValidActions: hasValidActions
+                                });
+                                // Permite processamento - confia no servidor quando diz que é a vez do jogador
+                                hasInconsistency = false; // Não bloqueia completamente
+                            } else {
+                                debugLog('⚠️ playerUuid não encontrado em round_state.seats - estado inconsistente, bloqueando processamento', {
+                                    playerUuid: playerUuid,
+                                    roundStateUuids: roundStateUuids
+                                });
+                                // Reseta cache de cartas para forçar re-renderização quando estabilizar
+                                lastRenderedCards = null;
+                                return; // BLOQUEIA TODO PROCESSAMENTO
+                            }
+                        }
+                    } else {
+                        // Se não tem playerUuid ainda, mas é claramente a vez do jogador, permite processamento limitado
+                        if (isClearlyPlayerTurn) {
+                            debugLog('⚠️ playerUuid não definido durante inconsistência, MAS é a vez do jogador - permitindo processamento limitado');
+                            // Permite processamento limitado
+                        } else {
+                            // Se não tem playerUuid ainda, também bloqueia
+                            debugLog('⚠️ playerUuid não definido durante inconsistência - bloqueando processamento');
+                            lastRenderedCards = null;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Se não há round_state.seats mas há round.seats, também é inconsistente durante inicialização
+        // MAS permite se é claramente a vez do jogador
+        if (isInitializing && roundStateSeats.length === 0 && roundSeats.length > 0) {
+            if (isClearlyPlayerTurn && playerUuid) {
+                debugLog('⚠️ round_state.seats vazio mas é a vez do jogador - permitindo processamento limitado');
+                // Permite processamento limitado
+            } else {
+                hasInconsistency = true;
+                debugLog('⚠️ round_state.seats vazio mas round.seats tem dados - inconsistência, bloqueando processamento');
+                lastRenderedCards = null;
+                return;
+            }
         }
 
         // Guarda o estado original do round antes de qualquer modificação
@@ -689,6 +904,8 @@ function updateGameInfo(gameState) {
                 modalDismissedForRound = null;
                 // Reseta cache de cartas comunitárias quando novo round começa
                 lastCommunityCards = null;
+                lastHoleCards = null;
+                lastStreet = null;
                 hideRoundEndModal();
             } else {
                 if (originalRound.round_ended !== lastRoundEnded) {
@@ -698,7 +915,42 @@ function updateGameInfo(gameState) {
         }
 
         const roundState = round.round_state || {};
-        const seats = Array.isArray(roundState.seats) ? roundState.seats : [];
+        
+        // IMPORTANTE: Durante inconsistências, usa round_state.seats como fonte única
+        // Se houver inconsistência detectada anteriormente, garante que usa apenas round_state.seats
+        let seats = Array.isArray(roundState.seats) ? roundState.seats : [];
+        
+        // Se round_state.seats está vazio mas round.seats tem dados, e ainda está inicializando, bloqueia
+        if (isInitializing && seats.length === 0 && round.seats && round.seats.length > 0) {
+            debugLog('⚠️ round_state.seats vazio durante inicialização - bloqueando processamento');
+            lastRenderedCards = null; // Reseta cache
+            return;
+        }
+        
+        // Valida que playerUuid está nos seats antes de continuar
+        // EXCEÇÃO: Se é claramente a vez do jogador, permite processamento mesmo se playerUuid não estiver nos seats
+        // (pode ser uma inconsistência temporária que não deve bloquear ações)
+        if (playerUuid && seats.length > 0) {
+            const seatUuids = seats.map(s => s?.uuid).filter(Boolean);
+            if (!seatUuids.includes(playerUuid)) {
+                if (isClearlyPlayerTurn) {
+                    debugLog('⚠️ playerUuid não encontrado em round_state.seats, MAS é a vez do jogador - permitindo processamento limitado', {
+                        playerUuid: playerUuid,
+                        seatUuids: seatUuids,
+                        isPlayerTurn: isPlayerTurnCheck,
+                        hasValidActions: hasValidActions
+                    });
+                    // Permite processamento limitado para habilitar ações
+                } else {
+                    debugLog('⚠️ playerUuid não encontrado em round_state.seats - bloqueando processamento', {
+                        playerUuid: playerUuid,
+                        seatUuids: seatUuids
+                    });
+                    lastRenderedCards = null; // Reseta cache
+                    return;
+                }
+            }
+        }
 
         // Atualiza pot de forma segura
         try {
@@ -803,7 +1055,16 @@ function updateGameInfo(gameState) {
                                 const actionSeat = Array.isArray(seats) ? seats.find(s => s && s.uuid === action.uuid) : null;
                                 if (actionSeat && action.action) {
                                     // Atualiza última ação na player-content (para TODAS as ações)
-                                    const lastActionEl = document.getElementById(`last-action-${action.uuid}`);
+                                    let lastActionEl = document.getElementById(`last-action-${action.uuid}`);
+                                    
+                                    // Se não encontrou por ID, tenta encontrar no DOM do player-seat
+                                    if (!lastActionEl) {
+                                        const playerDiv = document.querySelector(`.player-seat[data-uuid="${action.uuid}"]`);
+                                        if (playerDiv) {
+                                            lastActionEl = playerDiv.querySelector('.player-last-action');
+                                        }
+                                    }
+                                    
                                     if (lastActionEl) {
                                         let lastActionText = String(action.action).toUpperCase();
                                         // Adiciona o valor quando houver amount (para raise, call, etc)
@@ -813,32 +1074,36 @@ function updateGameInfo(gameState) {
                                         }
                                         lastActionEl.textContent = lastActionText;
                                     } else {
-                                        // Se o elemento não existe, tenta criar
-                                        debugLog('Elemento last-action não encontrado, tentando criar', { uuid: action.uuid });
+                                        // Se o elemento não existe, tenta criar apenas uma vez
                                         const playerDiv = document.querySelector(`.player-seat[data-uuid="${action.uuid}"]`);
                                         if (playerDiv) {
-                                            const playerContent = playerDiv.querySelector('.player-content');
-                                            if (playerContent) {
-                                                const newLastActionEl = document.createElement('div');
-                                                newLastActionEl.className = 'player-last-action';
-                                                newLastActionEl.id = `last-action-${action.uuid}`;
-                                                newLastActionEl.style.fontSize = '14px';
-                                                newLastActionEl.style.color = '#fa8c01';
-                                                newLastActionEl.style.fontWeight = '700';
-                                                newLastActionEl.style.minHeight = '20px';
-                                                let lastActionText = String(action.action).toUpperCase();
-                                                // Adiciona o valor quando houver amount
-                                                const amount = action.amount;
-                                                if (amount && typeof amount === 'number' && amount > 0 && action.action !== 'fold') {
-                                                    lastActionText += ` ${amount}`;
-                                                }
-                                                newLastActionEl.textContent = lastActionText;
-                                                // Insere após player-info
-                                                const infoDiv = playerContent.querySelector('.player-info');
-                                                if (infoDiv) {
-                                                    playerContent.insertBefore(newLastActionEl, infoDiv.nextSibling);
-                                                } else {
-                                                    playerContent.appendChild(newLastActionEl);
+                                            // Verifica novamente se não foi criado entre a verificação anterior e agora
+                                            const existingEl = playerDiv.querySelector('.player-last-action');
+                                            if (!existingEl) {
+                                                const playerContent = playerDiv.querySelector('.player-content');
+                                                if (playerContent) {
+                                                    const newLastActionEl = document.createElement('div');
+                                                    newLastActionEl.className = 'player-last-action';
+                                                    newLastActionEl.id = `last-action-${action.uuid}`;
+                                                    newLastActionEl.style.fontSize = '14px';
+                                                    newLastActionEl.style.color = '#fa8c01';
+                                                    newLastActionEl.style.fontWeight = '700';
+                                                    newLastActionEl.style.minHeight = '20px';
+                                                    let lastActionText = String(action.action).toUpperCase();
+                                                    // Adiciona o valor quando houver amount
+                                                    const amount = action.amount;
+                                                    if (amount && typeof amount === 'number' && amount > 0 && action.action !== 'fold') {
+                                                        lastActionText += ` ${amount}`;
+                                                    }
+                                                    newLastActionEl.textContent = lastActionText;
+                                                    // Insere após player-info
+                                                    const infoDiv = playerContent.querySelector('.player-info');
+                                                    if (infoDiv) {
+                                                        playerContent.insertBefore(newLastActionEl, infoDiv.nextSibling);
+                                                    } else {
+                                                        playerContent.appendChild(newLastActionEl);
+                                                    }
+                                                    debugLog('Elemento last-action criado', { uuid: action.uuid });
                                                 }
                                             }
                                         }
@@ -857,56 +1122,92 @@ function updateGameInfo(gameState) {
         const playerSeat = seats.find(s => s && s.uuid === playerUuid);
         const playerStillInGame = playerSeat && (playerSeat.state === 'participating' || playerSeat.state === 'folded');
         
-        // Log sempre ativo para diagnóstico
-        if (!playerUuid) {
-            console.warn('🟡 [PLAYER STATUS] playerUuid não está definido!', {
-                gameStatePlayerUuid: gameState.player_uuid,
-                seatsCount: seats.length,
-                seatsUuids: seats.map(s => s?.uuid).filter(Boolean)
-            });
-        } else if (!playerSeat) {
-            console.warn('🟡 [PLAYER STATUS] Jogador não encontrado nos seats', {
-                playerUuid: playerUuid,
-                seatsCount: seats.length,
-                seatsUuids: seats.map(s => s?.uuid).filter(Boolean),
-                playerNotFoundCount: playerNotFoundCount
-            });
-        }
-        
         // Grace period: aguarda algumas iterações antes de marcar como eliminado
         // Isso evita marcar o jogador como eliminado antes dele ser adicionado aos seats
         if (playerUuid) {
             if (playerStillInGame) {
                 // Jogador encontrado, reseta contador
+                if (playerNotFoundCount > 0) {
+                    debugLog('Jogador encontrado novamente nos seats, resetando contador', {
+                        playerUuid: playerUuid,
+                        previousCount: playerNotFoundCount
+                    });
+                }
                 playerNotFoundCount = 0;
             } else {
                 // Jogador não encontrado, incrementa contador
                 playerNotFoundCount++;
+                
+                // Log apenas quando o contador atinge certos valores para reduzir verbosidade
+                if (playerNotFoundCount === 1 || playerNotFoundCount === 3 || playerNotFoundCount === 5) {
+                    debugLog('Jogador não encontrado nos seats', {
+                        playerUuid: playerUuid,
+                        seatsCount: seats.length,
+                        seatsUuids: seats.map(s => s?.uuid).filter(Boolean),
+                        playerNotFoundCount: playerNotFoundCount,
+                        willBeEliminated: playerNotFoundCount >= 5
+                    });
+                }
+            }
+        } else {
+            // Se playerUuid não está definido, log apenas uma vez
+            if (playerNotFoundCount === 0) {
+                console.warn('🟡 [PLAYER STATUS] playerUuid não está definido!', {
+                    gameStatePlayerUuid: gameState.player_uuid,
+                    seatsCount: seats.length,
+                    seatsUuids: seats.map(s => s?.uuid).filter(Boolean)
+                });
+                playerNotFoundCount = 1; // Evita log repetido
             }
         }
         
-        // Só considera eliminado se não encontrado por 3 iterações (1.5 segundos)
-        const playerEliminated = playerUuid && !playerStillInGame && playerNotFoundCount >= 3;
+        // Só considera eliminado se não encontrado por 5 iterações (2.5 segundos)
+        // Aumentado de 3 para 5 para dar mais tempo de sincronização
+        const playerEliminated = playerUuid && !playerStillInGame && playerNotFoundCount >= 5;
         
         // Renderiza jogadores apenas se houver mudanças (cache de estado)
         try {
             if (Array.isArray(seats)) {
-                // Cria hash dos seats para comparação
-                const seatsHash = JSON.stringify(seats.map(s => ({
-                    uuid: s.uuid,
-                    state: s.state,
-                    stack: s.stack,
-                    name: s.name
-                })));
+                // Valida consistência antes de renderizar
+                let shouldRender = true;
                 
-                // Só renderiza se seats ou currentPlayerUuid mudaram
-                const seatsChanged = seatsHash !== lastSeatsState;
-                const currentPlayerChanged = currentPlayerUuid !== lastCurrentPlayerUuid;
+                // Durante inicialização, valida que playerUuid está nos seats
+                if (isInitializing && playerUuid) {
+                    const seatUuids = seats.map(s => s?.uuid).filter(Boolean);
+                    if (!seatUuids.includes(playerUuid)) {
+                        shouldRender = false;
+                        debugLog('⚠️ Não renderizando jogadores durante inicialização - playerUuid não está nos seats', {
+                            playerUuid: playerUuid,
+                            seatUuids: seatUuids,
+                            initializationCount: initializationCount
+                        });
+                    }
+                }
                 
-                if (seatsChanged || currentPlayerChanged) {
-                    renderPlayers(seats, currentPlayerUuid, playerUuid);
-                    lastSeatsState = seatsHash;
-                    lastCurrentPlayerUuid = currentPlayerUuid;
+                // Valida que há seats válidos
+                if (seats.length === 0) {
+                    shouldRender = false;
+                    debugLog('⚠️ Não renderizando jogadores - nenhum seat disponível');
+                }
+                
+                if (shouldRender) {
+                    // Cria hash dos seats para comparação
+                    const seatsHash = JSON.stringify(seats.map(s => ({
+                        uuid: s.uuid,
+                        state: s.state,
+                        stack: s.stack,
+                        name: s.name
+                    })));
+                    
+                    // Só renderiza se seats ou currentPlayerUuid mudaram
+                    const seatsChanged = seatsHash !== lastSeatsState;
+                    const currentPlayerChanged = currentPlayerUuid !== lastCurrentPlayerUuid;
+                    
+                    if (seatsChanged || currentPlayerChanged) {
+                        renderPlayers(seats, currentPlayerUuid, playerUuid);
+                        lastSeatsState = seatsHash;
+                        lastCurrentPlayerUuid = currentPlayerUuid;
+                    }
                 }
             }
         } catch (e) {
@@ -971,13 +1272,35 @@ function updateGameInfo(gameState) {
         // Atualiza cartas do jogador se disponíveis - SEMPRE, independente de ser a vez do jogador
         // As cartas devem estar sempre visíveis desde o início, mesmo antes das cartas comunitárias
         // IMPORTANTE: Sempre atualiza quando houver cartas, mesmo que seja um array vazio inicialmente
+        // MAS: Não atualiza durante inconsistências para evitar mostrar cartas erradas
         if (round && round.hole_card !== undefined) {
             try {
+                // Verifica se há inconsistência antes de atualizar cartas
+                const roundStateSeats = round.round_state?.seats || [];
+                const roundSeats = round.seats || [];
+                let hasInconsistency = false;
+                
+                if (roundStateSeats.length > 0 && roundSeats.length > 0) {
+                    const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    hasInconsistency = JSON.stringify(roundStateUuids) !== JSON.stringify(roundUuids);
+                }
+                
                 // Se hole_card existe (mesmo que seja array vazio), atualiza
                 // Isso garante que as cartas apareçam assim que forem disponibilizadas
                 const holeCards = Array.isArray(round.hole_card) ? round.hole_card : [];
                 if (holeCards.length > 0) {
-                    updatePlayerCards(holeCards);
+                    // Durante inconsistências na inicialização, não atualiza cartas para evitar mostrar cartas erradas
+                    if (hasInconsistency && isInitializing) {
+                        debugLog('⚠️ Não atualizando cartas durante inconsistência detectada', {
+                            hasInconsistency: hasInconsistency,
+                            isInitializing: isInitializing,
+                            holeCards: holeCards
+                        });
+                        lastRenderedCards = null; // Reseta cache para forçar atualização quando estabilizar
+                    } else {
+                        updatePlayerCards(holeCards);
+                    }
                 } else {
                     // Se ainda não há cartas, não faz nada (mantém estado anterior ou placeholders)
                     debugLog('Cartas do jogador ainda não disponíveis', { hasRound: !!round, holeCard: round.hole_card });
@@ -1018,14 +1341,42 @@ function updateGameInfo(gameState) {
         }
 
         // Verifica se é a vez do jogador
-        // Condições: não eliminado, ainda no jogo, não há bot pensando, há ações válidas, e is_player_turn é True
-        // IMPORTANTE: Se is_player_turn é True, é definitivamente a vez do jogador, mesmo que currentPlayerUuid não esteja setado
-        const isPlayerTurn = !playerEliminated && 
-                            playerStillInGame && 
-                            !thinkingUuid && 
-                            round.valid_actions && 
-                            round.is_player_turn === true &&
-                            (currentPlayerUuid === playerUuid || currentPlayerUuid === null); // Permite null como fallback quando is_player_turn é True
+        // IMPORTANTE: Se is_player_turn é True, é definitivamente a vez do jogador
+        // Priorizamos is_player_turn quando True, mas ainda verificamos condições básicas de segurança
+        let isPlayerTurn = false;
+        
+        if (round.is_player_turn === true) {
+            // Se o servidor diz que é a vez do jogador, confiamos nisso
+            // Mas ainda verificamos condições básicas de segurança
+            isPlayerTurn = !playerEliminated && 
+                          playerStillInGame && 
+                          !thinkingUuid && 
+                          round.valid_actions &&
+                          (currentPlayerUuid === playerUuid || currentPlayerUuid === null || !currentPlayerUuid);
+            
+            // Se todas as condições básicas falharem mas is_player_turn é True,
+            // ainda permitimos (pode ser caso edge de sincronização)
+            if (!isPlayerTurn && round.valid_actions && !thinkingUuid) {
+                // Log de diagnóstico mas ainda permite o turno
+                debugLog('⚠️ [PLAYER TURN] is_player_turn=True mas algumas condições falharam, permitindo turno mesmo assim', {
+                    playerEliminated: playerEliminated,
+                    playerStillInGame: playerStillInGame,
+                    thinkingUuid: thinkingUuid,
+                    currentPlayerUuid: currentPlayerUuid,
+                    playerUuid: playerUuid
+                });
+                // Permite turno se pelo menos não há bot pensando e há ações válidas
+                isPlayerTurn = !thinkingUuid && !!round.valid_actions;
+            }
+        } else {
+            // Se is_player_turn não é True, usa lógica mais restritiva
+            isPlayerTurn = !playerEliminated && 
+                          playerStillInGame && 
+                          !thinkingUuid && 
+                          round.valid_actions && 
+                          currentPlayerUuid === playerUuid;
+        }
+        
         // Log sempre ativo para diagnóstico crítico
         if (round.is_player_turn === true || isPlayerTurn) {
             console.log('🟢 [PLAYER TURN] Verificando vez do jogador', {
@@ -1040,18 +1391,6 @@ function updateGameInfo(gameState) {
                 currentMatchesPlayer: currentPlayerUuid === playerUuid,
                 validActionsCount: round.valid_actions ? round.valid_actions.length : 0,
                 willShowActions: !playerEliminated && playerStillInGame
-            });
-        }
-        
-        // Log de alerta se is_player_turn é True mas isPlayerTurn é False (indica problema)
-        if (round.is_player_turn === true && !isPlayerTurn) {
-            console.warn('⚠️ [PLAYER TURN] is_player_turn=True mas isPlayerTurn=False - possível problema!', {
-                playerEliminated: playerEliminated,
-                playerStillInGame: playerStillInGame,
-                thinkingUuid: thinkingUuid,
-                hasValidActions: !!round.valid_actions,
-                currentPlayerUuid: currentPlayerUuid,
-                playerUuid: playerUuid
             });
         }
         
@@ -1152,18 +1491,45 @@ function stopTimer() {
 
 function updateTimerDisplay() {
     const timerValue = document.getElementById('timerValue');
+    const timerContainer = document.getElementById('timerContainer');
+    
     if (timerValue) {
         timerValue.textContent = `${timerSeconds}s`;
         
-        // Muda cor quando está ficando sem tempo
+        // Muda cor e adiciona animação quando está ficando sem tempo
         if (timerSeconds <= 10) {
             timerValue.style.color = '#ef4637';
             timerValue.style.fontWeight = 'bold';
+            timerValue.style.animation = 'pulse 0.5s ease-in-out infinite';
+            // Adiciona aviso visual no container
+            if (timerContainer) {
+                timerContainer.style.border = '2px solid #ef4637';
+                timerContainer.style.boxShadow = '0 0 10px rgba(239, 70, 55, 0.5)';
+            }
         } else if (timerSeconds <= 20) {
             timerValue.style.color = '#fa8c01';
+            timerValue.style.fontWeight = 'bold';
+            timerValue.style.animation = 'none';
+            if (timerContainer) {
+                timerContainer.style.border = '2px solid #fa8c01';
+                timerContainer.style.boxShadow = '0 0 8px rgba(250, 140, 1, 0.3)';
+            }
+        } else if (timerSeconds <= 30) {
+            timerValue.style.color = '#fa8c01';
+            timerValue.style.fontWeight = 'normal';
+            timerValue.style.animation = 'none';
+            if (timerContainer) {
+                timerContainer.style.border = '1px solid rgba(250, 140, 1, 0.3)';
+                timerContainer.style.boxShadow = 'none';
+            }
         } else {
             timerValue.style.color = 'var(--text-primary)';
             timerValue.style.fontWeight = 'normal';
+            timerValue.style.animation = 'none';
+            if (timerContainer) {
+                timerContainer.style.border = 'none';
+                timerContainer.style.boxShadow = 'none';
+            }
         }
     }
 }
@@ -1822,10 +2188,21 @@ function hideGameEndModal() {
 }
 
 // Função auxiliar para criar hash do gameState (campos críticos)
+// Otimizado para detectar mudanças relevantes e evitar falsos positivos
 function createGameStateHash(gameState) {
     if (!gameState || typeof gameState !== 'object') return null;
     
     try {
+        // Normaliza seats para comparação (apenas UUIDs e estados, não toda a estrutura)
+        const normalizeSeats = (seats) => {
+            if (!Array.isArray(seats)) return null;
+            return seats.map(s => s ? {
+                uuid: s.uuid,
+                state: s.state,
+                stack: s.stack
+            } : null).filter(Boolean);
+        };
+        
         const criticalFields = {
             active: gameState.active,
             player_uuid: gameState.player_uuid,
@@ -1835,11 +2212,14 @@ function createGameStateHash(gameState) {
                 round_count: gameState.current_round.round_count,
                 round_ended: gameState.current_round.round_ended,
                 is_player_turn: gameState.current_round.is_player_turn,
+                street: gameState.current_round.street,
                 round_state: gameState.current_round.round_state ? {
-                    seats: gameState.current_round.round_state.seats,
+                    seats: normalizeSeats(gameState.current_round.round_state.seats),
                     current_player_uuid: gameState.current_round.round_state.current_player_uuid,
-                    pot: gameState.current_round.round_state.pot
-                } : null
+                    pot: gameState.current_round.round_state.pot,
+                    community_card: gameState.current_round.round_state.community_card || []
+                } : null,
+                hole_card: gameState.current_round.hole_card || null
             } : null
         };
         return JSON.stringify(criticalFields);
@@ -1860,10 +2240,11 @@ function startGamePolling() {
     lastGameStateHash = null;
     lastSeatsState = null;
     lastCurrentPlayerUuid = null;
+    lastRenderedCards = null; // Reseta cache de cartas renderizadas
     
     // Reset chat for new game
     resetChat();
-
+    
     // Store game start time
     localStorage.setItem('gameStartTime', Date.now().toString());
     
@@ -1876,6 +2257,11 @@ function startGamePolling() {
             if (errorIndicator) {
                 errorIndicator.remove();
             }
+            
+            // Reset contador de erros de rede em caso de sucesso
+            if (window.networkErrorCount) {
+                window.networkErrorCount = 0;
+            }
 
             if (!gameState || typeof gameState !== 'object') {
                 debugLog('gameState inválido no polling');
@@ -1886,7 +2272,28 @@ function startGamePolling() {
                 console.error('Erro no jogo:', gameState.error);
                 debugLog('Erro no jogo recebido do servidor', gameState.error);
                 handleGameStatePollError(new Error(gameState.error));
-                // Não para o polling, apenas loga o erro
+                
+                // Se erro indica que servidor reiniciou ou jogo não existe, redireciona
+                if (gameState.error.includes('404') || 
+                    gameState.error.includes('500') || 
+                    gameState.error.includes('não encontrado') ||
+                    gameState.error.includes('not found')) {
+                    console.log('🔄 Servidor reiniciado ou jogo não encontrado - redirecionando para configuração');
+                    clearInterval(gameInterval);
+                    gameInterval = null;
+                    window.location.href = 'config.html';
+                    return;
+                }
+                // Não para o polling para outros erros, apenas loga
+                return;
+            }
+            
+            // Se jogo não está ativo e não há round em andamento, redireciona para config
+            if (gameState.active === false && !gameState.current_round) {
+                console.log('🔄 Jogo não está ativo - redirecionando para configuração');
+                clearInterval(gameInterval);
+                gameInterval = null;
+                window.location.href = 'config.html';
                 return;
             }
 
@@ -1928,9 +2335,8 @@ function startGamePolling() {
                 if (gameState.current_round) {
                     updateGameInfo(gameState);
                 }
-            } else {
-                debugLog('Estado não mudou, pulando atualização (throttle)');
             }
+            // Removido log de throttle para reduzir verbosidade - estado não mudou, não precisa logar
 
             if (gameState.game_result && gameState.active === false) {
                 clearInterval(gameInterval);
@@ -1943,6 +2349,33 @@ function startGamePolling() {
         } catch (error) {
             console.error('Erro ao obter estado do jogo:', error);
             debugLog('Erro crítico no polling', error);
+            
+            // Se erro de rede persistente, verifica se deve redirecionar
+            const errorMessage = error.message || String(error);
+            const isNetworkError = errorMessage.includes('Failed to fetch') || 
+                                   errorMessage.includes('NetworkError') ||
+                                   errorMessage.includes('Network request failed');
+            
+            if (isNetworkError) {
+                // Conta erros de rede consecutivos
+                if (!window.networkErrorCount) {
+                    window.networkErrorCount = 0;
+                }
+                window.networkErrorCount++;
+                
+                // Se 3 erros consecutivos (1.5 segundos), assume que servidor está offline
+                if (window.networkErrorCount >= 3) {
+                    console.log('🔄 Múltiplos erros de rede - servidor provavelmente offline, redirecionando para configuração');
+                    clearInterval(gameInterval);
+                    gameInterval = null;
+                    window.location.href = 'config.html';
+                    return;
+                }
+            } else {
+                // Reset contador se não for erro de rede
+                window.networkErrorCount = 0;
+            }
+            
             handleGameStatePollError(error);
             // Continua o polling mesmo com erro para não quebrar o jogo
         }
@@ -1964,6 +2397,9 @@ async function resetAndRestart() {
     lastCurrentPlayerUuid = null;
     lastGameStateHash = null;
     lastCommunityCards = null; // Reseta cache de cartas comunitárias
+    lastHoleCards = null;
+    lastStreet = null;
+    lastRenderedCards = null; // Reseta cache de cartas renderizadas
     hideRoundEndModal();
     await startGame(playerName);
     startGamePolling();
@@ -1976,7 +2412,61 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (foldBtn) {
         foldBtn.addEventListener('click', async () => {
             stopTimer();
+            const timestamp = new Date().toISOString();
             try {
+                // CRÍTICO: Verifica se há inconsistência antes de enviar ação
+                const gameState = await getGameState();
+                const round = gameState.current_round || {};
+                const isPlayerTurn = round.is_player_turn === true;
+                const hasValidActions = round.valid_actions && Array.isArray(round.valid_actions) && round.valid_actions.length > 0;
+                const isClearlyPlayerTurn = isPlayerTurn && hasValidActions;
+                
+                const roundStateSeats = round.round_state?.seats || [];
+                const roundSeats = round.seats || [];
+                let hasInconsistency = false;
+                
+                if (roundStateSeats.length > 0 && roundSeats.length > 0) {
+                    const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    hasInconsistency = JSON.stringify(roundStateUuids) !== JSON.stringify(roundUuids);
+                }
+                
+                // Se é claramente a vez do jogador, confia no servidor e permite ação mesmo com inconsistência
+                const playerInRoundState = playerUuid && roundStateSeats.length > 0 && roundStateSeats.some(s => s && s.uuid === playerUuid);
+                
+                // Se há inconsistência E não é claramente a vez do jogador, bloqueia
+                if (hasInconsistency && !isClearlyPlayerTurn) {
+                    console.error(`[FRONTEND] [${timestamp}] ⚠️ Inconsistência detectada - não enviando ação fold`, {
+                        hasInconsistency: hasInconsistency,
+                        isPlayerTurn: isPlayerTurn,
+                        hasValidActions: hasValidActions,
+                        playerInRoundState: playerInRoundState
+                    });
+                    alert('Estado do jogo inconsistente. Aguarde alguns instantes e tente novamente.');
+                    return;
+                }
+                
+                // Se playerUuid não está em round_state.seats E não é claramente a vez do jogador, bloqueia
+                // IMPORTANTE: Se é claramente a vez do jogador, confia no servidor e permite a ação
+                if (playerUuid && roundStateSeats.length > 0 && !playerInRoundState) {
+                    if (!isClearlyPlayerTurn) {
+                        console.error(`[FRONTEND] [${timestamp}] ⚠️ playerUuid não encontrado em round_state.seats - não enviando ação fold`, {
+                            playerUuid: playerUuid,
+                            isPlayerTurn: isPlayerTurn,
+                            hasValidActions: hasValidActions
+                        });
+                        alert('Jogador não encontrado no jogo. Aguarde alguns instantes e tente novamente.');
+                        return;
+                    } else {
+                        // É claramente a vez do jogador - confia no servidor e permite a ação mesmo com inconsistência
+                        console.warn(`[FRONTEND] [${timestamp}] ⚠️ playerUuid não encontrado em round_state.seats, MAS é a vez do jogador - confiando no servidor e permitindo ação fold`, {
+                            playerUuid: playerUuid,
+                            isPlayerTurn: isPlayerTurn,
+                            hasValidActions: hasValidActions
+                        });
+                    }
+                }
+                
                 const result = await sendPlayerAction('fold', 0);
                 if (result.error) {
                     console.error('Erro ao enviar fold:', result.error);
@@ -1998,20 +2488,93 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             try {
                 const gameState = await getGameState();
+                const round = gameState.current_round || {};
+                
+                // CRÍTICO: Verifica se há inconsistência antes de enviar ação
+                const isPlayerTurn = round.is_player_turn === true;
+                const hasValidActions = round.valid_actions && Array.isArray(round.valid_actions) && round.valid_actions.length > 0;
+                const isClearlyPlayerTurn = isPlayerTurn && hasValidActions;
+                
+                const roundStateSeats = round.round_state?.seats || [];
+                const roundSeats = round.seats || [];
+                let hasInconsistency = false;
+                
+                if (roundStateSeats.length > 0 && roundSeats.length > 0) {
+                    const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    hasInconsistency = JSON.stringify(roundStateUuids) !== JSON.stringify(roundUuids);
+                }
+                
+                // Verifica se playerUuid está em round_state.seats (fonte confiável)
+                const playerInRoundState = playerUuid && roundStateSeats.length > 0 && roundStateSeats.some(s => s && s.uuid === playerUuid);
+                
+                // Se é claramente a vez do jogador E playerUuid está em round_state.seats, permite ação mesmo com inconsistência
+                const shouldBlock = hasInconsistency && !(isClearlyPlayerTurn && playerInRoundState);
+                
+                // Se há inconsistência E não é claramente a vez do jogador, bloqueia
+                if (shouldBlock) {
+                    console.error(`[FRONTEND] [${timestamp}] ⚠️ Inconsistência detectada - não enviando ação call`, {
+                        hasInconsistency: hasInconsistency,
+                        isPlayerTurn: isPlayerTurn,
+                        hasValidActions: hasValidActions,
+                        playerInRoundState: playerInRoundState
+                    });
+                    alert('Estado do jogo inconsistente. Aguarde alguns instantes e tente novamente.');
+                    return;
+                }
+                
+                // Se playerUuid não está em round_state.seats E não é claramente a vez do jogador, bloqueia
+                // IMPORTANTE: Se é claramente a vez do jogador, confia no servidor e permite a ação
+                if (playerUuid && roundStateSeats.length > 0 && !playerInRoundState) {
+                    if (!isClearlyPlayerTurn) {
+                        console.error(`[FRONTEND] [${timestamp}] ⚠️ playerUuid não encontrado em round_state.seats - não enviando ação`, {
+                            playerUuid: playerUuid,
+                            isPlayerTurn: isPlayerTurn,
+                            hasValidActions: hasValidActions
+                        });
+                        alert('Jogador não encontrado no jogo. Aguarde alguns instantes e tente novamente.');
+                        return;
+                    } else {
+                        // É claramente a vez do jogador - confia no servidor e permite a ação mesmo com inconsistência
+                        console.warn(`[FRONTEND] [${timestamp}] ⚠️ playerUuid não encontrado em round_state.seats, MAS é a vez do jogador - confiando no servidor e permitindo ação`, {
+                            playerUuid: playerUuid,
+                            isPlayerTurn: isPlayerTurn,
+                            hasValidActions: hasValidActions
+                        });
+                    }
+                }
+                
                 const callAmount = gameState.current_round?.valid_actions?.[1]?.amount || 0;
                 console.log(`[FRONTEND] [${timestamp}] Call amount do valid_actions: ${callAmount}`);
                 
                 // Obtém o stack do jogador para verificar se tem fichas suficientes
                 let playerStack = null;
-                if (playerUuid && gameState.current_round?.round_state?.seats) {
-                    const playerSeat = gameState.current_round.round_state.seats.find(
+                if (playerUuid && roundStateSeats.length > 0) {
+                    const playerSeat = roundStateSeats.find(
                         s => s && s.uuid === playerUuid
                     );
                     if (playerSeat) {
                         playerStack = playerSeat.stack || 0;
                         console.log(`[FRONTEND] [${timestamp}] Player stack encontrado: ${playerStack}`);
                     } else {
-                        console.warn(`[FRONTEND] [${timestamp}] Player seat não encontrado para UUID: ${playerUuid}`);
+                        // Se é claramente a vez do jogador, permite ação mesmo sem encontrar o seat
+                        // Usa um valor padrão ou tenta obter do valid_actions
+                        if (isClearlyPlayerTurn) {
+                            // Tenta obter stack do valid_actions ou usa um valor padrão
+                            const allInAction = gameState.current_round?.valid_actions?.find(a => a.action === 'all-in');
+                            if (allInAction && allInAction.amount) {
+                                playerStack = allInAction.amount;
+                                console.warn(`[FRONTEND] [${timestamp}] ⚠️ Player seat não encontrado, MAS é a vez do jogador - usando stack do all-in action: ${playerStack}`);
+                            } else {
+                                // Usa um valor padrão alto para não bloquear a ação
+                                playerStack = 10000; // Valor padrão alto
+                                console.warn(`[FRONTEND] [${timestamp}] ⚠️ Player seat não encontrado, MAS é a vez do jogador - usando stack padrão: ${playerStack}`);
+                            }
+                        } else {
+                            console.error(`[FRONTEND] [${timestamp}] ⚠️ Player seat não encontrado para UUID: ${playerUuid} - não enviando ação`);
+                            alert('Jogador não encontrado no jogo. Aguarde alguns instantes e tente novamente.');
+                            return;
+                        }
                     }
                 }
                 
@@ -2069,10 +2632,54 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (confirmRaiseBtn) {
         confirmRaiseBtn.addEventListener('click', async () => {
             stopTimer();
-            const raiseAmount = document.getElementById('raiseAmount');
-            if (raiseAmount) {
-                const amount = parseInt(raiseAmount.value);
-                await sendPlayerAction('raise', amount);
+            const timestamp = new Date().toISOString();
+            try {
+                // CRÍTICO: Verifica se há inconsistência antes de enviar ação
+                const gameState = await getGameState();
+                const round = gameState.current_round || {};
+                const isPlayerTurn = round.is_player_turn === true;
+                const hasValidActions = round.valid_actions && Array.isArray(round.valid_actions) && round.valid_actions.length > 0;
+                const isClearlyPlayerTurn = isPlayerTurn && hasValidActions;
+                
+                const roundStateSeats = round.round_state?.seats || [];
+                const roundSeats = round.seats || [];
+                let hasInconsistency = false;
+                
+                if (roundStateSeats.length > 0 && roundSeats.length > 0) {
+                    const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    hasInconsistency = JSON.stringify(roundStateUuids) !== JSON.stringify(roundUuids);
+                }
+                
+                // Verifica se playerUuid está em round_state.seats
+                const playerInRoundState = playerUuid && roundStateSeats.length > 0 && roundStateSeats.some(s => s && s.uuid === playerUuid);
+                
+                // Se é claramente a vez do jogador E playerUuid está em round_state.seats, permite ação mesmo com inconsistência
+                const shouldBlock = hasInconsistency && !(isClearlyPlayerTurn && playerInRoundState);
+                
+                if (shouldBlock || (playerUuid && roundStateSeats.length > 0 && !playerInRoundState && !isClearlyPlayerTurn)) {
+                    console.error(`[FRONTEND] [${timestamp}] ⚠️ Inconsistência detectada - não enviando ação raise`, {
+                        hasInconsistency: hasInconsistency,
+                        isPlayerTurn: isPlayerTurn,
+                        hasValidActions: hasValidActions,
+                        playerInRoundState: playerInRoundState
+                    });
+                    alert('Estado do jogo inconsistente. Aguarde alguns instantes e tente novamente.');
+                    const raiseInput = document.getElementById('raiseInput');
+                    if (raiseInput) raiseInput.style.display = 'none';
+                    return;
+                }
+                
+                const raiseAmount = document.getElementById('raiseAmount');
+                if (raiseAmount) {
+                    const amount = parseInt(raiseAmount.value);
+                    await sendPlayerAction('raise', amount);
+                    const raiseInput = document.getElementById('raiseInput');
+                    if (raiseInput) raiseInput.style.display = 'none';
+                }
+            } catch (error) {
+                console.error(`[FRONTEND] [${timestamp}] Erro ao processar raise:`, error);
+                alert(`Erro ao fazer raise: ${error.message || 'Erro desconhecido'}`);
                 const raiseInput = document.getElementById('raiseInput');
                 if (raiseInput) raiseInput.style.display = 'none';
             }
@@ -2083,39 +2690,87 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (allinBtn) {
         allinBtn.addEventListener('click', async () => {
             stopTimer();
-            if (!playerUuid) {
-                debugLog('playerUuid não definido ao clicar all-in');
+            const timestamp = new Date().toISOString();
+            try {
+                if (!playerUuid) {
+                    debugLog('playerUuid não definido ao clicar all-in');
+                    const gameState = await getGameState();
+                    if (gameState && gameState.player_uuid) {
+                        playerUuid = gameState.player_uuid;
+                    } else {
+                        console.error('Não foi possível obter playerUuid');
+                        return;
+                    }
+                }
+                
                 const gameState = await getGameState();
-                if (gameState && gameState.player_uuid) {
-                    playerUuid = gameState.player_uuid;
-                } else {
-                    console.error('Não foi possível obter playerUuid');
+                const round = gameState.current_round || {};
+                
+                // CRÍTICO: Verifica se há inconsistência antes de enviar ação
+                const isPlayerTurn = round.is_player_turn === true;
+                const hasValidActions = round.valid_actions && Array.isArray(round.valid_actions) && round.valid_actions.length > 0;
+                const isClearlyPlayerTurn = isPlayerTurn && hasValidActions;
+                
+                const roundStateSeats = gameState.current_round?.round_state?.seats || [];
+                const roundSeats = gameState.current_round?.seats || [];
+                let hasInconsistency = false;
+                
+                if (roundStateSeats.length > 0 && roundSeats.length > 0) {
+                    const roundStateUuids = roundStateSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    const roundUuids = roundSeats.map(s => s?.uuid).filter(Boolean).sort();
+                    hasInconsistency = JSON.stringify(roundStateUuids) !== JSON.stringify(roundUuids);
+                }
+                
+                // Se é claramente a vez do jogador, permite ação mesmo com inconsistência
+                if (hasInconsistency && !isClearlyPlayerTurn) {
+                    console.error(`[FRONTEND] [${timestamp}] ⚠️ Inconsistência detectada - não enviando ação all-in`);
+                    alert('Estado do jogo inconsistente. Aguarde alguns instantes e tente novamente.');
                     return;
                 }
-            }
-            
-            const gameState = await getGameState();
-            const roundState = gameState.current_round?.round_state || {};
-            const seats = roundState.seats || [];
-            const playerSeat = seats.find(s => s && s.uuid === playerUuid);
-            
-            if (!playerSeat) {
-                debugLog('playerSeat não encontrado para all-in', { playerUuid, seats });
-                console.error('Não foi possível encontrar seu assento');
-                return;
-            }
-            
-            const allinAmount = typeof playerSeat.stack === 'number' ? playerSeat.stack : 0;
-            
-            if (allinAmount <= 0) {
-                console.error('Stack inválido para all-in:', allinAmount);
-                return;
-            }
-            
-            debugLog('Enviando all-in', { action: 'raise', amount: allinAmount, playerUuid });
-            const result = await sendPlayerAction('raise', allinAmount);
-            if (result.error) {
-                console.error('Erro ao enviar all-in:', result.error);
+                
+                const roundState = gameState.current_round?.round_state || {};
+                const seats = roundState.seats || [];
+                const playerSeat = seats.find(s => s && s.uuid === playerUuid);
+                
+                let allinAmount = 0;
+                
+                if (!playerSeat) {
+                    // Se é claramente a vez do jogador, permite ação mesmo sem encontrar o seat
+                    if (isClearlyPlayerTurn) {
+                        // Tenta obter stack do valid_actions (all-in action)
+                        const allInAction = round.valid_actions?.find(a => a.action === 'all-in');
+                        if (allInAction && allInAction.amount) {
+                            allinAmount = allInAction.amount;
+                            console.warn(`[FRONTEND] [${timestamp}] ⚠️ Player seat não encontrado, MAS é a vez do jogador - usando stack do all-in action: ${allinAmount}`);
+                        } else {
+                            // Usa um valor padrão alto para não bloquear a ação
+                            allinAmount = 10000; // Valor padrão alto
+                            console.warn(`[FRONTEND] [${timestamp}] ⚠️ Player seat não encontrado, MAS é a vez do jogador - usando stack padrão: ${allinAmount}`);
+                        }
+                    } else {
+                        debugLog('playerSeat não encontrado para all-in', { playerUuid, seats });
+                        console.error(`[FRONTEND] [${timestamp}] ⚠️ Player seat não encontrado - não enviando ação all-in`);
+                        alert('Jogador não encontrado no jogo. Aguarde alguns instantes e tente novamente.');
+                        return;
+                    }
+                } else {
+                    allinAmount = typeof playerSeat.stack === 'number' ? playerSeat.stack : 0;
+                }
+                
+                if (allinAmount <= 0) {
+                    console.error('Stack inválido para all-in:', allinAmount);
+                    return;
+                }
+                
+                debugLog('Enviando all-in', { action: 'raise', amount: allinAmount, playerUuid });
+                const result = await sendPlayerAction('raise', allinAmount);
+                if (result.error) {
+                    console.error('Erro ao enviar all-in:', result.error);
+                    alert(`Erro ao fazer all-in: ${result.error}`);
+                }
+            } catch (error) {
+                console.error(`[FRONTEND] [${timestamp}] Erro ao processar all-in:`, error);
+                alert(`Erro ao fazer all-in: ${error.message || 'Erro desconhecido'}`);
             }
         });
     }
@@ -2444,6 +3099,37 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
+    // Verifica estado do servidor antes de iniciar o jogo
+    // Se servidor estiver offline ou jogo não estiver ativo, redireciona para config
+    try {
+        const initialGameState = await getGameState();
+        
+        // Se houver erro de rede ou servidor não disponível, redireciona imediatamente
+        if (initialGameState.error) {
+            const errorMsg = initialGameState.error || '';
+            if (errorMsg.includes('Failed to fetch') || 
+                errorMsg.includes('NetworkError') || 
+                errorMsg.includes('Network request failed') ||
+                errorMsg.includes('Servidor não disponível')) {
+                console.log('🔄 Servidor não disponível ao carregar página - redirecionando para configuração');
+                window.location.href = 'config.html';
+                return;
+            }
+        }
+        
+        // Se jogo não está ativo e não há round, redireciona
+        if (initialGameState.active === false && !initialGameState.current_round) {
+            console.log('🔄 Jogo não está ativo ao carregar página - redirecionando para configuração');
+            window.location.href = 'config.html';
+            return;
+        }
+    } catch (error) {
+        // Se não conseguir conectar ao servidor, redireciona
+        console.log('🔄 Erro ao verificar estado do servidor - redirecionando para configuração:', error);
+        window.location.href = 'config.html';
+        return;
+    }
+    
     await startGame(playerName);
     startGamePolling();
     
@@ -2466,14 +3152,93 @@ function initializeStatisticsToggle() {
 }
 
 /**
- * Update statistics panel with current game state
+ * Verifica se as cartas ou street mudaram comparando com cache
+ * @param {Array<string>} holeCards - Cartas do jogador
+ * @param {Array<string>} communityCards - Cartas comunitárias
+ * @param {string} street - Street atual (preflop, flop, turn, river)
+ * @returns {boolean} - true se cartas ou street mudaram, false caso contrário
  */
+function haveCardsChanged(holeCards, communityCards, street) {
+    // Normaliza arrays para comparação
+    const normalize = (cards) => {
+        if (!cards || !Array.isArray(cards)) return [];
+        return [...cards].sort().join(',');
+    };
+    
+    const currentHole = normalize(holeCards);
+    const currentCommunity = normalize(communityCards);
+    const currentStreet = street || 'preflop';
+    
+    const lastHole = normalize(lastHoleCards);
+    const lastCommunity = normalize(lastCommunityCards);
+    const lastStreetValue = lastStreet || 'preflop';
+    
+    // Verifica mudanças: cartas OU street
+    const changed = (currentHole !== lastHole) || 
+                   (currentCommunity !== lastCommunity) || 
+                   (currentStreet !== lastStreetValue);
+    
+    if (changed) {
+        lastHoleCards = holeCards ? [...holeCards] : [];
+        lastCommunityCards = communityCards ? [...communityCards] : [];
+        lastStreet = currentStreet;
+    }
+    
+    return changed;
+}
+
+/**
+ * Calcula probabilidade de vitória (Equity).
+ * 
+ * IMPORTANTE: Esta probabilidade é calculada APENAS com base em:
+ * - Cartas do jogador (hole cards)
+ * - Cartas comunitárias conhecidas
+ * - Número de oponentes ativos
+ * 
+ * NÃO considera:
+ * - Ações já realizadas pelos oponentes
+ * - Histórico de jogadas
+ * - Tamanho do pot
+ * 
+ * É uma estimativa matemática pura: "Dado o que eu sei, qual a chance de eu ter a melhor mão?"
+ */
+// Armazena gameState globalmente para acesso em outras funções
+window.currentGameState = null;
+
 function updateStatistics(gameState) {
     if (!gameState || !gameState.current_round) return;
+    
+    // Armazena gameState globalmente para acesso em updateHandStats
+    window.currentGameState = gameState;
     
     const round = gameState.current_round;
     const roundState = round.round_state;
     if (!roundState) return;
+    
+    // Atualiza probabilidade de vitória diretamente se disponível no gameState
+    // Isso garante que a probabilidade seja exibida mesmo quando getHandInfo ainda não retornou
+    const winProbability = round.win_probability;
+    if (winProbability !== undefined && winProbability !== null && typeof winProbability === 'number') {
+        const winProbEl = document.getElementById('winProbability');
+        if (winProbEl) {
+            winProbEl.textContent = `${winProbability}%`;
+            winProbEl.style.fontSize = '16px';
+            winProbEl.style.fontWeight = 'bold';
+            
+            // Cores baseadas na probabilidade
+            if (winProbability >= 60) {
+                winProbEl.style.color = '#3a9f75'; // Verde - favorável
+            } else if (winProbability >= 40) {
+                winProbEl.style.color = '#fa8c01'; // Laranja - neutro
+            } else {
+                winProbEl.style.color = '#f44336'; // Vermelho - desfavorável
+            }
+            
+            debugLog('[STATS] Probabilidade de vitória atualizada diretamente do gameState', {
+                win_probability: winProbability
+            });
+        }
+    }
     
     // Get player's hole cards
     const holeCards = round.hole_card || [];
@@ -2483,62 +3248,141 @@ function updateStatistics(gameState) {
     // Get seats for stack comparison
     const seats = roundState.seats || [];
     
+    // ✅ NOVO: Só recalcula se cartas ou street mudaram
+    if (!haveCardsChanged(holeCards, communityCards, street)) {
+        debugLog('[STATS] Cartas não mudaram, pulando recálculo de estatísticas');
+        return; // Cartas não mudaram, não precisa recalcular
+    }
+    
+    debugLog('[STATS] Cartas mudaram, recalculando estatísticas', {
+        holeCards,
+        communityCards,
+        street
+    });
+    
     // Progressive activation: preflop shows limited stats
     const isPreflop = street === 'preflop';
     
-    // Current Hand - Calcula desde o início com apenas 2 cartas do jogador
-    const currentHandEl = document.getElementById('currentHand');
-    if (currentHandEl) {
-        if (holeCards.length >= 2) {
-            // Calcula com as cartas disponíveis (hole cards + community cards)
-            const allCards = [...holeCards, ...communityCards];
-            if (allCards.length >= 5) {
-                // Com 5+ cartas, avalia a melhor mão de 5 cartas
-                const hand = evaluateHand(allCards.slice(0, 5));
-                currentHandEl.textContent = hand.description || '-';
-            } else if (allCards.length >= 2) {
-                // No preflop ou com menos de 5 cartas, avalia apenas as 2 cartas do jogador
-                // Mostra o par ou high card das 2 cartas
-                const hand = evaluateHandFromTwoCards(holeCards);
-                currentHandEl.textContent = hand.description || '-';
-            } else {
-                currentHandEl.textContent = '-';
-            }
-        } else {
-            currentHandEl.textContent = '-';
-        }
-    }
-    
-    // Win Probability (Monte Carlo) - Calcula desde o início mesmo no preflop
-    const winProbEl = document.getElementById('winProbability');
-    if (winProbEl) {
-        if (holeCards.length >= 2) {
-            const opponentCount = seats.length - 1;
-            winProbEl.textContent = 'Calculando...';
-            
-            // Performance measurement: T046 - Statistics calculation within 1 second
-            const calcStartTime = performance.now();
-            
-            // Calcula mesmo no preflop (com apenas 2 cartas)
-            calculateWinProbability(holeCards, communityCards, opponentCount, 2000)
-                .then(probability => {
-                    const calcTime = performance.now() - calcStartTime;
-                    
-                    // Performance validation: should be < 1000ms
-                    if (calcTime > 1000) {
-                        console.warn(`[T046] Statistics calculation took ${calcTime.toFixed(2)}ms (target: < 1000ms)`);
-                    } else {
-                        console.log(`[T046] Statistics calculation completed in ${calcTime.toFixed(2)}ms ✓`);
-                    }
-                    
-                    winProbEl.textContent = `${probability.toFixed(1)}%`;
-                })
-                .catch((error) => {
-                    handleStatisticsCalculationError(error, 'winProbability');
+    // Current Hand e Hand Strength usando ConsoleFormatter (mesma lógica do terminal)
+    if (holeCards.length >= 2) {
+        debugLog('[STATS] Iniciando chamada getHandInfo', {
+            holeCards: holeCards,
+            communityCards: communityCards,
+            street: street
+        });
+        
+        // Chama endpoint que usa ConsoleFormatter
+        getHandInfo(holeCards, communityCards, street)
+            .then(result => {
+                debugLog('[STATS] Resultado recebido de getHandInfo', {
+                    result: result,
+                    has_error: !!result.error,
+                    has_hand_strength: !!result.hand_strength,
+                    has_hand_strength_level: !!result.hand_strength_level,
+                    hand_strength: result.hand_strength,
+                    hand_strength_level: result.hand_strength_level
                 });
-        } else {
-            winProbEl.textContent = '-';
-        }
+                
+                if (result.error) {
+                    debugLog('[STATS] Erro ao obter informações da mão:', result.error);
+                    // Fallback: mostra valores padrão
+                    const currentHandEl = document.getElementById('currentHand');
+                    const winProbEl = document.getElementById('winProbability');
+                    if (currentHandEl) currentHandEl.textContent = '-';
+                    if (winProbEl) winProbEl.textContent = '-';
+                    return;
+                }
+                
+                // Atualiza Current Hand com força da mão e probabilidade de vitória
+                const currentHandEl = document.getElementById('currentHand');
+                const winProbEl = document.getElementById('winProbability');
+                
+                // Obtém probabilidade de vitória do gameState (prioridade)
+                // gameState é passado para updateHandStats via closure ou precisa ser acessado
+                let winProbability = null;
+                try {
+                    // Tenta obter do gameState atual se disponível
+                    if (typeof window.currentGameState !== 'undefined' && 
+                        window.currentGameState?.current_round?.win_probability !== undefined) {
+                        winProbability = window.currentGameState.current_round.win_probability;
+                    }
+                } catch (e) {
+                    debugLog('[STATS] Erro ao obter probabilidade do gameState', e);
+                }
+                
+                // Formata força da mão (sem probabilidade aqui, ela vai em winProbability)
+                if (currentHandEl && result.hand_strength) {
+                    // Mostra apenas a força da mão no elemento currentHand
+                    currentHandEl.textContent = result.hand_strength;
+                    debugLog('[STATS] Current Hand atualizado', {
+                        element: 'currentHand',
+                        hand_strength: result.hand_strength
+                    });
+                } else if (currentHandEl) {
+                    currentHandEl.textContent = '-';
+                }
+                
+                // Atualiza Win Probability (mostra porcentagem se disponível, senão nível semântico)
+                if (winProbEl) {
+                    if (winProbability !== null && typeof winProbability === 'number') {
+                        // Mostra porcentagem de vitória com cor baseada na probabilidade
+                        winProbEl.textContent = `${winProbability}%`;
+                        winProbEl.style.fontSize = '16px';
+                        winProbEl.style.fontWeight = 'bold';
+                        
+                        // Cores baseadas na probabilidade
+                        if (winProbability >= 60) {
+                            winProbEl.style.color = '#3a9f75'; // Verde - favorável
+                        } else if (winProbability >= 40) {
+                            winProbEl.style.color = '#fa8c01'; // Laranja - neutro
+                        } else {
+                            winProbEl.style.color = '#f44336'; // Vermelho - desfavorável
+                        }
+                        
+                        debugLog('[STATS] Win Probability atualizado (percentual)', {
+                            element: 'winProbability',
+                            win_probability: winProbability
+                        });
+                    } else if (result.hand_strength_level) {
+                        // Fallback: mostra nível semântico da força da mão
+                        winProbEl.textContent = result.hand_strength_level;
+                        winProbEl.style.fontSize = '14px';
+                        winProbEl.style.fontWeight = '';
+                        winProbEl.style.color = '';
+                        debugLog('[STATS] Win Probability atualizado (nível semântico)', {
+                            element: 'winProbability',
+                            hand_strength_level: result.hand_strength_level
+                        });
+                    } else {
+                        winProbEl.textContent = '-';
+                        winProbEl.style.fontSize = '';
+                        winProbEl.style.fontWeight = '';
+                        winProbEl.style.color = '';
+                        debugLog('[STATS] Win Probability não atualizado', {
+                            has_element: !!winProbEl,
+                            has_hand_strength_level: !!result.hand_strength_level,
+                            has_win_probability: winProbability !== null
+                        });
+                    }
+                }
+            })
+            .catch(error => {
+                debugLog('[STATS] Erro ao obter informações da mão (catch):', {
+                    error: error,
+                    message: error.message,
+                    stack: error.stack
+                });
+                const currentHandEl = document.getElementById('currentHand');
+                const winProbEl = document.getElementById('winProbability');
+                if (currentHandEl) currentHandEl.textContent = '-';
+                if (winProbEl) winProbEl.textContent = '-';
+            });
+    } else {
+        // Sem cartas suficientes
+        const currentHandEl = document.getElementById('currentHand');
+        const winProbEl = document.getElementById('winProbability');
+        if (currentHandEl) currentHandEl.textContent = '-';
+        if (winProbEl) winProbEl.textContent = '-';
     }
     
     // Pot Value (already displayed, but ensure it's updated)
@@ -2651,6 +3495,8 @@ function updateChat(gameState) {
 function resetChat() {
     lastCommunityCardCount = 0;
     lastCommunityCards = null; // Reseta cache de cartas comunitárias
+    lastHoleCards = null;
+    lastStreet = null;
     processedMessageIds.clear();
     processedActionIds.clear(); // Reseta ações processadas para player-status
     chatMessageQueue.clear();
