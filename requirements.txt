@@ -1,5 +1,5 @@
 PyPokerEngine>=1.0.1
-Flask==2.3.3
-flask-cors==4.0.0
+Flask==3.1.2
+flask-cors==6.0.1
 pokerkit>=1.0.0
 
