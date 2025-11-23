@@ -11,21 +11,21 @@ config = setup_config(max_round=10, initial_stack=initial_stack, small_blind_amo
 
 # Registra os jogadores
 # Você (ConsolePlayer) + 3 AIs com diferentes personalidades
-config.register_player(name="Você", algorithm=ConsolePlayer(initial_stack=initial_stack))
+config.register_player(name="You", algorithm=ConsolePlayer(initial_stack=initial_stack))
 config.register_player(name="Tight", algorithm=TightPlayer())
 config.register_player(name="Aggressive", algorithm=AggressivePlayer())
 config.register_player(name="Smart", algorithm=SmartPlayer())
 
 # Inicia o jogo
 print("=" * 60)
-print("Bem-vindo ao Poker no Terminal!")
+print("Welcome to Terminal Poker!")
 print("=" * 60)
-print("\nVocê jogará contra 3 AIs com diferentes personalidades:")
-print("  - Tight: Conservador, blefa 8% das vezes")
-print("  - Aggressive: Agressivo, blefa 35% das vezes")
-print("  - Smart: Inteligente, blefe dinâmico (15% base)")
-print("\nUse 'f' para FOLD, 'c' para CALL, 'r' para RAISE")
-print("Digite 'q' a qualquer momento para sair")
+print("\nYou will play against 3 AIs with different personalities:")
+print("  - Tight: Conservative, bluffs 8% of the time")
+print("  - Aggressive: Aggressive, bluffs 35% of the time")
+print("  - Smart: Intelligent, dynamic bluff (15% base)")
+print("\nUse 'f' for FOLD, 'c' for CALL, 'r' for RAISE")
+print("Type 'q' at any time to quit")
 print("=" * 60)
 print()
 
@@ -35,12 +35,12 @@ try:
     # O resultado final é mostrado pelo ConsolePlayer.receive_round_result_message
     # Não precisamos imprimir o JSON bruto aqui
     print("\n" + "=" * 60)
-    print("Fim do Jogo")
+    print("End of Game")
     print("=" * 60)
 except QuitGameException:
     print("\n\n" + "=" * 60)
-    print("Jogo encerrado pelo usuário")
+    print("Game ended by user")
     print("=" * 60)
-    print("\nObrigado por jogar! Até a próxima.")
+    print("\nThank you for playing! See you next time.")
     exit(0)
 

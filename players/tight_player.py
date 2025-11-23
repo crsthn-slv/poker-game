@@ -104,9 +104,16 @@ class TightPlayer(BasePokerPlayer):
         pass
     
     def receive_round_start_message(self, round_count, hole_card, seats):
-        """Salva memória periodicamente."""
+        """Salva memória periodicamente e armazena cartas no registry."""
         if round_count % 5 == 0:
             self.save_memory()
+        # Armazena cartas no registry global para exibição no final do round
+        if hole_card and hasattr(self, 'uuid') and self.uuid:
+            from .cards_registry import store_player_cards
+            from .hand_utils import normalize_hole_cards
+            hole_cards = normalize_hole_cards(hole_card)
+            if hole_cards:
+                store_player_cards(self.uuid, hole_cards)
     
     def receive_street_start_message(self, street, round_state):
         pass
