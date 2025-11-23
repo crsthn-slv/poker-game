@@ -1,21 +1,37 @@
 .PHONY: help install install-dev test lint format clean run-server
 
+# Detecta o Python correto (com pokerkit instalado)
+# Tenta diferentes versões de Python até encontrar uma com pokerkit
+PYTHON := $(shell \
+	if python3.11 -c "import pokerkit" 2>/dev/null; then \
+		echo "python3.11"; \
+	elif python3.10 -c "import pokerkit" 2>/dev/null; then \
+		echo "python3.10"; \
+	elif python3.9 -c "import pokerkit" 2>/dev/null; then \
+		echo "python3.9"; \
+	elif python3 -c "import pokerkit" 2>/dev/null; then \
+		echo "python3"; \
+	else \
+		echo "python3"; \
+	fi \
+)
+
 help: ## Mostra esta mensagem de ajuda
 	@echo "Comandos disponíveis:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 install: ## Instala dependências do projeto
-	pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements.txt
 
 install-dev: ## Instala dependências de desenvolvimento
-	pip install -r requirements-dev.txt
+	$(PYTHON) -m pip install -r requirements-dev.txt
 	pre-commit install
 
 test: ## Executa testes
-	pytest tests/ -v
+	$(PYTHON) -m pytest tests/ -v
 
 test-cov: ## Executa testes com cobertura
-	pytest tests/ -v --cov=. --cov-report=html --cov-report=term
+	$(PYTHON) -m pytest tests/ -v --cov=. --cov-report=html --cov-report=term
 
 lint: ## Verifica estilo de código
 	flake8 . --max-line-length=100 --extend-ignore=E203,W503
@@ -36,14 +52,18 @@ clean: ## Remove arquivos gerados
 	rm -rf build/ dist/ .coverage htmlcov/
 
 run-server: ## Inicia o servidor web
-	cd web && python3 server.py
+	cd web && $(PYTHON) server.py
 
 run-game: ## Executa jogo no terminal
-	python3 -m game.game
+	$(PYTHON) -m game.game
 
 run-game-advanced: ## Executa jogo avançado
-	python3 -m game.game_advanced
+	$(PYTHON) -m game.game_advanced
 
 run-console: ## Executa jogo console interativo
-	python3 -m game.play_console
+	@echo "Usando Python: $(PYTHON)"
+	@$(PYTHON) -c "import sys; print(f'Versão: {sys.version}')" 2>/dev/null || true
+	@$(PYTHON) -c "import pokerkit; print('✓ pokerkit encontrado')" 2>/dev/null || echo "⚠ pokerkit não encontrado - o jogo pode não funcionar corretamente"
+	@echo ""
+	$(PYTHON) -m game.play_console
 

@@ -31,8 +31,38 @@ cd poker-game
 
 2. **Instale as dependências:**
 ```bash
+make install
+```
+
+Ou manualmente:
+```bash
 pip install -r requirements.txt
 ```
+
+**Nota:** O projeto detecta automaticamente o Python correto (com pokerkit instalado). Não é necessário usar ambiente virtual.
+
+## 🛠️ Comandos Makefile
+
+O projeto inclui um Makefile que facilita a execução de comandos comuns:
+
+```bash
+# Ver todos os comandos disponíveis
+make help
+
+# Instalar dependências
+make install
+
+# Executar jogo console interativo
+make run-console
+
+# Executar servidor web
+make run-server
+
+# Executar testes
+make test
+```
+
+**Nota importante:** O Makefile detecta automaticamente o Python correto (com pokerkit instalado). Não é necessário usar ambiente virtual - o projeto funciona diretamente com o Python do sistema.
 
 ## 🎮 Como Jogar
 
@@ -40,8 +70,12 @@ pip install -r requirements.txt
 
 1. **Inicie o servidor:**
 ```bash
-cd web
-python3 server.py
+make run-server
+```
+
+Ou manualmente:
+```bash
+cd web && python3 server.py
 ```
 
 2. **Abra o navegador:**
@@ -60,6 +94,19 @@ export FLASK_DEBUG=true
 
 ### Modo Terminal
 
+**Usando Makefile (Recomendado):**
+```bash
+# Jogo console interativo (você vs AIs)
+make run-console
+
+# Jogo básico AI vs AI
+make run-game
+
+# Jogo avançado com todas as IAs
+make run-game-advanced
+```
+
+**Ou manualmente:**
 ```bash
 # Jogo básico AI vs AI
 python3 -m game.game
@@ -70,6 +117,8 @@ python3 -m game.game_advanced
 # Jogar contra AIs (terminal interativo)
 python3 -m game.play_console
 ```
+
+**Nota:** O Makefile detecta automaticamente o Python correto (com pokerkit instalado) e mostra informações úteis ao iniciar.
 
 ## 🤖 Bots Disponíveis
 
@@ -123,26 +172,55 @@ poker-game/
 
 ```bash
 # Executar todos os testes
-python3 -m pytest tests/
+make test
 
-# Teste específico
-python3 -m pytest tests/test_server.py
+# Teste com cobertura
+make test-cov
+
+# Ou manualmente
+python3 -m pytest tests/
 ```
 
 ## 🛠️ Desenvolvimento
 
-### Configuração do Ambiente
+### Comandos Disponíveis
 
 ```bash
-# Criar ambiente virtual
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# ou
-venv\Scripts\activate     # Windows
+# Ver todos os comandos disponíveis
+make help
 
 # Instalar dependências
-pip install -r requirements.txt
+make install
+
+# Instalar dependências de desenvolvimento
+make install-dev
+
+# Executar testes
+make test
+
+# Verificar estilo de código
+make lint
+
+# Formatar código automaticamente
+make format
+
+# Limpar arquivos gerados
+make clean
 ```
+
+### Instalação Manual
+
+Se preferir não usar o Makefile:
+
+```bash
+# Instalar dependências
+pip install -r requirements.txt
+
+# Instalar dependências de desenvolvimento
+pip install -r requirements-dev.txt
+```
+
+**Nota:** O projeto não requer ambiente virtual. O Makefile detecta automaticamente o Python correto.
 
 ### Debug Mode
 

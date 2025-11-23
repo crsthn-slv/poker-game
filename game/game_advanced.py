@@ -4,9 +4,17 @@ from players.aggressive_player import AggressivePlayer
 from players.random_player import RandomPlayer
 from players.smart_player import SmartPlayer
 from players.learning_player import LearningPlayer
+from game.blind_manager import BlindManager
+
+# Configura stack inicial
+initial_stack = 100
+
+# Calcula blinds automaticamente
+blind_manager = BlindManager(initial_reference_stack=initial_stack)
+small_blind, big_blind = blind_manager.get_blinds()
 
 # Configuração do jogo
-config = setup_config(max_round=10, initial_stack=100, small_blind_amount=5)
+config = setup_config(max_round=10, initial_stack=initial_stack, small_blind_amount=small_blind)
 
 # Registra TODAS as IAs com sistema de blefe + IA com aprendizado
 config.register_player(name="Tight", algorithm=TightPlayer())

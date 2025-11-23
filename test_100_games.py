@@ -140,8 +140,14 @@ def run_100_games():
         # Seleciona bots para esta partida
         selected_bots = bot_selections[game_num - 1]
         
+        # Calcula blinds automaticamente
+        from game.blind_manager import BlindManager
+        initial_stack = 100
+        blind_manager = BlindManager(initial_reference_stack=initial_stack)
+        small_blind, big_blind = blind_manager.get_blinds()
+        
         # Configuração do jogo
-        config = setup_config(max_round=10, initial_stack=100, small_blind_amount=5)
+        config = setup_config(max_round=10, initial_stack=initial_stack, small_blind_amount=small_blind)
         
         # Cria e registra bots
         bot_instances = {}
