@@ -1,39 +1,53 @@
 from pypokerengine.players import BasePokerPlayer
 import random
-import json
-import os
-from .memory_utils import get_memory_path
+from .memory_manager import UnifiedMemoryManager
+from .hand_utils import evaluate_hand_strength
 
 class ConservativeAggressivePlayer(BasePokerPlayer):
-    """Combina Tight (conservador) + Aggressive (agressão seletiva). Conservador no início, agressivo quando ganha. Com memória persistente."""
+    """Combina Tight (conservador) + Aggressive (agressão seletiva). Conservador no início, agressivo quando ganha. Usa sistema de memória unificado."""
     
     def __init__(self, memory_file="conservative_aggressive_player_memory.json"):
-        self.memory_file = get_memory_path(memory_file)
-        self.bluff_probability = 0.05  # Começa muito conservador (5%)
-        
-        # Começa conservador, fica agressivo quando ganha
-        self.tightness_threshold = 35  # Muito seletivo inicialmente
-        self.aggression_level = 0.40   # Baixa agressão inicial
-        self.conservative_mode = True   # Modo conservador ativo
-        
-        # Sistema de aprendizado
-        self.round_results = []
-        self.total_rounds = 0
-        self.wins = 0
+        # Inicializa gerenciador de memória unificada
+        self.memory_manager = UnifiedMemoryManager(
+            memory_file,
+            default_bluff=0.05,  # Muito conservador inicialmente
+            default_aggression=0.40,  # Baixa agressão inicial
+            default_tightness=35  # Muito seletivo inicialmente
+        )
+        self.memory = self.memory_manager.get_memory()
+        self.bluff_probability = self.memory['bluff_probability']
+        self.aggression_level = self.memory['aggression_level']
+        self.tightness_threshold = self.memory['tightness_threshold']
+        self.conservative_mode = self.memory.get('conservative_mode', True)  # Modo conservador ativo
         self.initial_stack = None
-        self.current_stack = None
-        
-        # Carrega memória anterior se existir
-        self.load_memory()
     
     def declare_action(self, valid_actions, hole_card, round_state):
-        hand_strength = self._evaluate_hand_strength(hole_card)
+        # Identifica oponentes
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.identify_opponents(round_state, self.uuid)
+        
+        # Atualiza valores da memória
+        self.bluff_probability = self.memory['bluff_probability']
+        self.aggression_level = self.memory['aggression_level']
+        self.tightness_threshold = self.memory['tightness_threshold']
+        self.conservative_mode = self.memory.get('conservative_mode', True)
+        
+        hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         should_bluff = self._should_bluff()
         
         if should_bluff:
-            return self._bluff_action(valid_actions, round_state)
+            action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            return self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+        
+        # Registra ação
+        if hasattr(self, 'uuid') and self.uuid:
+            street = round_state.get('street', 'preflop')
+            self.memory_manager.record_my_action(
+                street, action, amount, hand_strength, round_state, should_bluff
+            )
+        
+        return action, amount
     
     def _should_bluff(self):
         """Blefe muito raro em modo conservador."""
@@ -79,41 +93,10 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
         # Mão fraca: fold
         return valid_actions[0]['action'], valid_actions[0]['amount']
     
-    def _evaluate_hand_strength(self, hole_card):
-        """Avalia força da mão."""
-        if not hole_card or len(hole_card) < 2:
-            return 0
-        
-        card_ranks = [card[1] for card in hole_card]
-        card_suits = [card[0] for card in hole_card]
-        
-        # Par
-        if card_ranks[0] == card_ranks[1]:
-            rank_value = self._get_rank_value(card_ranks[0])
-            return 50 + rank_value
-        
-        # Cartas altas
-        high_cards = ['A', 'K', 'Q', 'J']
-        has_high = any(rank in high_cards for rank in card_ranks)
-        
-        if has_high:
-            if all(rank in high_cards for rank in card_ranks):
-                return 45
-            return 30
-        
-        # Mesmo naipe
-        if card_suits[0] == card_suits[1]:
-            return 20
-        
-        return 10
-    
-    def _get_rank_value(self, rank):
-        """Retorna valor numérico do rank."""
-        rank_map = {
-            '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
-            '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
-        }
-        return rank_map.get(rank, 0)
+    def _evaluate_hand_strength(self, hole_card, round_state=None):
+        """Avalia força da mão usando utilitário compartilhado."""
+        community_cards = round_state.get('community_card', []) if round_state else None
+        return evaluate_hand_strength(hole_card, community_cards)
     
     def receive_game_start_message(self, game_info):
         """Inicializa stack."""
@@ -122,91 +105,60 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
             for player in seats:
                 if player.get('uuid') == self.uuid:
                     self.initial_stack = player.get('stack', 100)
+                    if not hasattr(self.memory_manager, 'initial_stack'):
+                        self.memory_manager.initial_stack = self.initial_stack
                     break
     
     def receive_round_start_message(self, round_count, hole_card, seats):
         """Salva memória periodicamente."""
         if round_count % 5 == 0:
-            self.save_memory()
+            self.memory_manager.save()
     
     def receive_street_start_message(self, street, round_state):
         pass
     
     def receive_game_update_message(self, action, round_state):
-        pass
+        """Registra ações dos oponentes."""
+        player_uuid = action.get('uuid') or action.get('player_uuid')
+        if player_uuid and player_uuid != self.uuid:
+            self.memory_manager.record_opponent_action(player_uuid, action, round_state)
     
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Aprendizado: conservador no início, agressivo quando ganha."""
-        self.total_rounds += 1
+        # Processa resultado usando gerenciador de memória
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.process_round_result(winners, hand_info, round_state, self.uuid)
         
-        # Atualiza stack
-        for seat in round_state['seats']:
-            if seat['uuid'] == self.uuid:
-                if self.initial_stack is None:
-                    self.initial_stack = seat['stack']
-                self.current_stack = seat['stack']
-                break
-        
-        # Verifica se ganhou
-        won = any(w['uuid'] == self.uuid for w in winners)
-        if won:
-            self.wins += 1
-        
-        # Registra resultado
-        self.round_results.append({'won': won, 'round': self.total_rounds})
-        if len(self.round_results) > 20:
-            self.round_results = self.round_results[-20:]
+        # Atualiza valores locais
+        self.memory = self.memory_manager.get_memory()
+        self.total_rounds = self.memory['total_rounds']
+        self.wins = self.memory['wins']
         
         # Aprendizado: muda de conservador para agressivo quando ganha
-        if len(self.round_results) >= 5:
-            win_rate = sum(1 for r in self.round_results if r['won']) / len(self.round_results)
+        round_history = self.memory.get('round_history', [])
+        if len(round_history) >= 5:
+            recent_rounds = round_history[-5:]
+            win_rate = sum(1 for r in recent_rounds if r['final_result']['won']) / len(recent_rounds)
             
             # Se está ganhando bem, muda para modo agressivo
             if win_rate > 0.6:
-                self.conservative_mode = False
-                self.aggression_level = min(0.80, self.aggression_level + 0.10)
-                self.bluff_probability = min(0.25, self.bluff_probability * 1.2)
-                self.tightness_threshold = max(25, self.tightness_threshold - 5)
+                self.memory['conservative_mode'] = False
+                self.memory['aggression_level'] = min(0.80, self.memory['aggression_level'] + 0.10)
+                self.memory['bluff_probability'] = min(0.25, self.memory['bluff_probability'] * 1.2)
+                self.memory['tightness_threshold'] = max(25, self.memory['tightness_threshold'] - 5)
             # Se está perdendo, volta para modo conservador
             elif win_rate < 0.3:
-                self.conservative_mode = True
-                self.aggression_level = max(0.30, self.aggression_level - 0.10)
-                self.bluff_probability = max(0.03, self.bluff_probability * 0.8)
-                self.tightness_threshold = min(40, self.tightness_threshold + 5)
+                self.memory['conservative_mode'] = True
+                self.memory['aggression_level'] = max(0.30, self.memory['aggression_level'] - 0.10)
+                self.memory['bluff_probability'] = max(0.03, self.memory['bluff_probability'] * 0.8)
+                self.memory['tightness_threshold'] = min(40, self.memory['tightness_threshold'] + 5)
+        
+        # Atualiza valores locais
+        self.bluff_probability = self.memory['bluff_probability']
+        self.aggression_level = self.memory['aggression_level']
+        self.tightness_threshold = self.memory['tightness_threshold']
+        self.conservative_mode = self.memory.get('conservative_mode', True)
         
         # Salva memória após ajustes
-        self.save_memory()
-    
-    def save_memory(self):
-        """Salva memória aprendida em arquivo."""
-        memory = {
-            'bluff_probability': self.bluff_probability,
-            'tightness_threshold': self.tightness_threshold,
-            'aggression_level': self.aggression_level,
-            'conservative_mode': self.conservative_mode,
-            'total_rounds': self.total_rounds,
-            'wins': self.wins
-        }
-        
-        try:
-            with open(self.memory_file, 'w') as f:
-                json.dump(memory, f, indent=2)
-        except Exception as e:
-            pass  # Silencioso
-    
-    def load_memory(self):
-        """Carrega memória aprendida de arquivo."""
-        if os.path.exists(self.memory_file):
-            try:
-                with open(self.memory_file, 'r') as f:
-                    memory = json.load(f)
-                
-                self.bluff_probability = memory.get('bluff_probability', 0.05)
-                self.tightness_threshold = memory.get('tightness_threshold', 35)
-                self.aggression_level = memory.get('aggression_level', 0.40)
-                self.conservative_mode = memory.get('conservative_mode', True)
-                self.total_rounds = memory.get('total_rounds', 0)
-                self.wins = memory.get('wins', 0)
-            except Exception as e:
-                pass  # Silencioso
+        self.memory_manager.save()
 

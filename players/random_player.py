@@ -1,43 +1,47 @@
 from pypokerengine.players import BasePokerPlayer
 import random
-import json
-import os
-from .memory_utils import get_memory_path
+from .memory_manager import UnifiedMemoryManager
 
 class RandomPlayer(BasePokerPlayer):
     """Jogador que faz decisões aleatórias. Blefa 25% das vezes. Aprendizado estocástico básico com memória persistente."""
     
     def __init__(self, memory_file="random_player_memory.json"):
-        self.memory_file = get_memory_path(memory_file)
-        self.bluff_probability = 0.25  # 25% de chance de blefar
+        # Inicializa gerenciador de memória unificada
+        self.memory_manager = UnifiedMemoryManager(
+            memory_file,
+            default_bluff=0.16,  # Nivelado: ligeiramente abaixo da média
+            default_aggression=0.55,  # Nivelado: média
+            default_tightness=27  # Nivelado: média
+        )
+        self.memory = self.memory_manager.get_memory()
+        self.bluff_probability = self.memory['bluff_probability']
         self.bluff_call_ratio = 0.50  # 50% CALL / 50% RAISE quando blefar
-        
-        # Sistema de aprendizado estocástico (básico)
-        self.action_probabilities = {
-            'fold': 0.33,
-            'call': 0.33,
-            'raise': 0.34
-        }
-        self.action_results = {
-            'fold': {'wins': 0, 'total': 0},
-            'call': {'wins': 0, 'total': 0},
-            'raise': {'wins': 0, 'total': 0}
-        }
         self.last_action = None
-        self.total_rounds = 0
-        self.wins = 0
-        
-        # Carrega memória anterior se existir
-        self.load_memory()
     
     def declare_action(self, valid_actions, hole_card, round_state):
+        # Identifica oponentes
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.identify_opponents(round_state, self.uuid)
+        
         hand_strength = self._evaluate_hand_strength(hole_card)
         should_bluff = self._should_bluff()
         
+        # Atualiza valores da memória
+        self.bluff_probability = self.memory['bluff_probability']
+        
         if should_bluff:
-            return self._bluff_action(valid_actions, round_state)
+            action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            return self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+        
+        # Registra ação
+        if hasattr(self, 'uuid') and self.uuid:
+            street = round_state.get('street', 'preflop')
+            self.memory_manager.record_my_action(
+                street, action, amount, hand_strength, round_state, should_bluff
+            )
+        
+        return action, amount
     
     def _should_bluff(self):
         """Decide se deve blefar baseado na probabilidade configurada."""
@@ -91,17 +95,17 @@ class RandomPlayer(BasePokerPlayer):
         return 10
     
     def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação normal: aleatória baseada em probabilidades aprendidas."""
-        # Escolhe ação baseado em probabilidades aprendidas
+        """Ação normal: aleatória."""
+        # Escolhe ação aleatoriamente
         rand = random.random()
-        if rand < self.action_probabilities['fold']:
+        if rand < 0.33:
             action_choice = 'fold'
-        elif rand < self.action_probabilities['fold'] + self.action_probabilities['call']:
+        elif rand < 0.66:
             action_choice = 'call'
         else:
             action_choice = 'raise'
         
-        # Armazena última ação para aprendizado
+        # Armazena última ação
         self.last_action = action_choice
         
         if action_choice == 'fold':
@@ -128,89 +132,43 @@ class RandomPlayer(BasePokerPlayer):
     def receive_round_start_message(self, round_count, hole_card, seats):
         """Salva memória periodicamente."""
         if round_count % 5 == 0:
-            self.save_memory()
+            self.memory_manager.save()
     
     def receive_street_start_message(self, street, round_state):
         pass
     
     def receive_game_update_message(self, action, round_state):
-        pass
+        """Registra ações dos oponentes."""
+        player_uuid = action.get('uuid') or action.get('player_uuid')
+        if player_uuid and player_uuid != self.uuid:
+            self.memory_manager.record_opponent_action(player_uuid, action, round_state)
     
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Aprendizado estocástico: ajusta probabilidades baseado em resultados."""
-        self.total_rounds += 1
+        # Processa resultado usando gerenciador de memória
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.process_round_result(winners, hand_info, round_state, self.uuid)
         
-        # Verifica se ganhou
-        won = any(w['uuid'] == self.uuid for w in winners)
-        if won:
-            self.wins += 1
+        # Atualiza valores locais
+        self.memory = self.memory_manager.get_memory()
+        self.total_rounds = self.memory['total_rounds']
+        self.wins = self.memory['wins']
         
-        # Atualiza estatísticas da última ação
-        if self.last_action:
-            self.action_results[self.last_action]['total'] += 1
-            if won:
-                self.action_results[self.last_action]['wins'] += 1
-        
-        # Aprendizado estocástico: ajusta probabilidades lentamente
-        if self.total_rounds >= 10:
-            # Calcula win rate por ação
-            for action in ['fold', 'call', 'raise']:
-                stats = self.action_results[action]
-                if stats['total'] > 0:
-                    win_rate = stats['wins'] / stats['total']
-                    
-                    # Ajusta probabilidade baseado em win rate (aprendizado lento)
-                    if win_rate > 0.5:
-                        # Ação está funcionando: aumenta probabilidade
-                        self.action_probabilities[action] = min(0.5, 
-                            self.action_probabilities[action] + 0.02)
-                    elif win_rate < 0.3:
-                        # Ação não está funcionando: reduz probabilidade
-                        self.action_probabilities[action] = max(0.1, 
-                            self.action_probabilities[action] - 0.02)
+        # Aprendizado estocástico simples: ajusta blefe baseado em resultados
+        round_history = self.memory.get('round_history', [])
+        if len(round_history) >= 10:
+            recent_rounds = round_history[-10:]
+            win_rate = sum(1 for r in recent_rounds if r['final_result']['won']) / len(recent_rounds)
             
-            # Normaliza probabilidades
-            total = sum(self.action_probabilities.values())
-            for action in self.action_probabilities:
-                self.action_probabilities[action] /= total
+            # Ajusta blefe baseado em win rate (evolução muito lenta)
+            if win_rate > 0.5:
+                self.memory['bluff_probability'] = min(0.20, self.memory['bluff_probability'] * 1.001)
+            elif win_rate < 0.3:
+                self.memory['bluff_probability'] = max(0.12, self.memory['bluff_probability'] * 0.999)
+        
+        # Atualiza valores locais
+        self.bluff_probability = self.memory['bluff_probability']
         
         # Salva memória após ajustes
-        self.save_memory()
-    
-    def save_memory(self):
-        """Salva memória aprendida em arquivo."""
-        memory = {
-            'bluff_probability': self.bluff_probability,
-            'action_probabilities': self.action_probabilities,
-            'action_results': self.action_results,
-            'total_rounds': self.total_rounds,
-            'wins': self.wins
-        }
-        
-        try:
-            with open(self.memory_file, 'w') as f:
-                json.dump(memory, f, indent=2)
-        except Exception as e:
-            pass  # Silencioso
-    
-    def load_memory(self):
-        """Carrega memória aprendida de arquivo."""
-        if os.path.exists(self.memory_file):
-            try:
-                with open(self.memory_file, 'r') as f:
-                    memory = json.load(f)
-                
-                self.bluff_probability = memory.get('bluff_probability', 0.25)
-                self.action_probabilities = memory.get('action_probabilities', {
-                    'fold': 0.33, 'call': 0.33, 'raise': 0.34
-                })
-                self.action_results = memory.get('action_results', {
-                    'fold': {'wins': 0, 'total': 0},
-                    'call': {'wins': 0, 'total': 0},
-                    'raise': {'wins': 0, 'total': 0}
-                })
-                self.total_rounds = memory.get('total_rounds', 0)
-                self.wins = memory.get('wins', 0)
-            except Exception as e:
-                pass  # Silencioso
+        self.memory_manager.save()
 

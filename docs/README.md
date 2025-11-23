@@ -15,6 +15,25 @@ Documentação técnica completa do sistema, incluindo:
 - Fluxo do jogo
 - Detalhes técnicos
 
+### 🤖 [Funcionamento dos Bots](FUNCIONAMENTO_BOTS.md)
+Documentação detalhada sobre como os bots funcionam:
+- Estrutura base dos bots
+- Sistema de memória persistente
+- Tipos de bots e estratégias
+- Ciclo de vida de um bot
+- Sistema de aprendizado
+- Componentes compartilhados
+
+### 🛠️ [Como Criar um Novo Bot](COMO_CRIAR_NOVO_BOT.md)
+Guia passo a passo para criar um novo bot:
+- Estrutura básica
+- Implementação passo a passo
+- Adicionando sistema de memória
+- Implementando aprendizado
+- Registrando o bot
+- Testando o bot
+- Exemplos completos
+
 ### 🐛 [Guia de Debugging](DEBUGGING.md)
 Guia completo para identificar e resolver problemas:
 - Como identificar erros de serialização
