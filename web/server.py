@@ -34,13 +34,13 @@ try:
 except ImportError:
     card_utils = None
 
-# Monkey patch para acelerar avaliação de mãos usando treys
+# Monkey patch para acelerar avaliação de mãos usando PokerKit
 _original_calc_hand_info = None
 _hand_evaluator = None
 
 def _fast_calc_hand_info_flg(hole_card, community_card):
     """
-    Versão otimizada de _calc_hand_info_flg usando treys.
+    Versão otimizada de _calc_hand_info_flg usando PokerKit.
     Substitui a função lenta do PyPokerEngine.
     """
     global _hand_evaluator
@@ -52,12 +52,12 @@ def _fast_calc_hand_info_flg(hole_card, community_card):
         hole_cards = hole_card if isinstance(hole_card, list) else []
         community_cards = community_card if isinstance(community_card, list) else []
         
-        # Avalia usando treys
+        # Avalia usando PokerKit
         score = _hand_evaluator.evaluate(hole_cards, community_cards)
         
         # PyPokerEngine espera um dict com 'hand' e 'strength'
         # Retorna formato compatível
-        # Nota: treys retorna score onde menor = melhor, PyPokerEngine pode esperar diferente
+        # Nota: PokerKit retorna score onde menor = melhor, PyPokerEngine pode esperar diferente
         # Mas vamos manter compatibilidade retornando o score diretamente
         return score
     except Exception as e:
@@ -68,9 +68,9 @@ def _fast_calc_hand_info_flg(hole_card, community_card):
         # Retorna valor padrão (pior mão possível)
         return 7462
 
-def apply_treys_patch():
+def apply_pokerkit_patch():
     """
-    Aplica monkey patch para substituir _calc_hand_info_flg do PyPokerEngine por versão otimizada.
+    Aplica monkey patch para substituir _calc_hand_info_flg do PyPokerEngine por versão otimizada usando PokerKit.
     """
     global _original_calc_hand_info, _hand_evaluator
     
@@ -83,7 +83,7 @@ def apply_treys_patch():
         card_utils._calc_hand_info_flg = _fast_calc_hand_info_flg
         _hand_evaluator = HandEvaluator()
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        print(f"✅ [HandEvaluator] [{timestamp}] Monkey patch aplicado - treys ativado para avaliação rápida de mãos")
+        print(f"✅ [HandEvaluator] [{timestamp}] Monkey patch aplicado - PokerKit ativado para avaliação rápida de mãos")
     else:
         print("[HandEvaluator] _calc_hand_info_flg não encontrado em card_utils, pulando monkey patch")
 
@@ -1092,8 +1092,8 @@ def start_game():
         # Cria novo web_player
         web_player = WebPlayer()
         
-        # Aplica monkey patch do treys para acelerar avaliação de mãos
-        apply_treys_patch()
+        # Aplica monkey patch do PokerKit para acelerar avaliação de mãos
+        apply_pokerkit_patch()
         
         # Configuração do jogo (usa valores fornecidos - garantido acima)
         config = setup_config(

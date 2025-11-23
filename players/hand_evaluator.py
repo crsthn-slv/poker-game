@@ -1,124 +1,150 @@
 """
-Hand Evaluator usando treys para avaliação rápida de mãos de poker.
+Hand Evaluator usando PokerKit para avaliação rápida de mãos de poker.
 Substitui a função lenta _calc_hand_info_flg do PyPokerEngine.
 """
 
-from treys import Card, Evaluator
+from typing import List, Optional, Dict
+from functools import lru_cache
+from pokerkit import StandardHighHand
+from .constants import POKERKIT_MAX_SCORE
+
+# Mapeamentos constantes para conversão
+_RANK_MAP = {
+    '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7',
+    '8': '8', '9': '9', 'T': 'T', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A'
+}
+
+_SUIT_MAP = {
+    'S': 's',  # Spades
+    'H': 'h',  # Hearts
+    'D': 'd',  # Diamonds
+    'C': 'c'   # Clubs
+}
+
+
+@lru_cache(maxsize=128)
+def _pypoker_to_pokerkit_cached(card_str: str) -> Optional[str]:
+    """
+    Função auxiliar com cache para conversão de cartas.
+    Cache compartilhado entre todas as instâncias de HandEvaluator.
+    """
+    if not card_str or len(card_str) < 2:
+        return None
+    
+    # PyPokerEngine: primeiro caractere é suit, resto é rank
+    suit_char = card_str[0].upper()
+    rank_str = card_str[1:].upper()
+    
+    # Converte suit para lowercase (PokerKit usa lowercase)
+    pokerkit_suit = _SUIT_MAP.get(suit_char)
+    if not pokerkit_suit:
+        return None
+    
+    # Valida rank
+    pokerkit_rank = _RANK_MAP.get(rank_str)
+    if not pokerkit_rank:
+        return None
+    
+    # Cria string no formato PokerKit: 'As', 'Kh', '2c', etc.
+    pokerkit_card_str = pokerkit_rank + pokerkit_suit
+    return pokerkit_card_str
 
 
 class HandEvaluator:
     """
-    Wrapper para avaliação de mãos usando treys.
-    Converte formato de cartas do PyPokerEngine (ex: 'SA', 'HK') para formato treys.
+    Wrapper para avaliação de mãos usando PokerKit.
+    Converte formato de cartas do PyPokerEngine (ex: 'SA', 'HK') para formato PokerKit.
     """
     
     def __init__(self):
-        self.evaluator = Evaluator()
-        
-        # Mapeamento de rank: PyPokerEngine -> treys
-        # PyPokerEngine usa: '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'
-        # treys usa: '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'
-        self.rank_map = {
-            '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7',
-            '8': '8', '9': '9', 'T': 'T', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A'
-        }
-        
-        # Mapeamento de suit: PyPokerEngine -> treys
-        # PyPokerEngine usa: 'S' (Spades), 'H' (Hearts), 'D' (Diamonds), 'C' (Clubs)
-        # treys usa: 's', 'h', 'd', 'c' (lowercase)
-        self.suit_map = {
-            'S': 's',  # Spades
-            'H': 'h',  # Hearts
-            'D': 'd',  # Diamonds
-            'C': 'c'   # Clubs
-        }
+        # Mapeamentos agora são constantes globais para permitir cache compartilhado
+        pass
     
-    def pypoker_to_treys(self, card_str):
+    def pypoker_to_pokerkit(self, card_str: str) -> Optional[str]:
         """
-        Converte uma carta do formato PyPokerEngine para formato treys.
+        Converte uma carta do formato PyPokerEngine para formato PokerKit.
+        Otimizado com cache LRU compartilhado para melhor performance.
         
         Args:
             card_str: String no formato PyPokerEngine (ex: 'SA', 'HK', 'D2')
         
         Returns:
-            Int representando a carta no formato treys, ou None se inválido
+            String no formato PokerKit (ex: 'As', 'Kh', '2d'), ou None se inválido
         """
-        if not card_str or len(card_str) < 2:
-            return None
-        
-        # PyPokerEngine: primeiro caractere é suit, resto é rank
-        suit_char = card_str[0].upper()
-        rank_str = card_str[1:].upper()
-        
-        # Converte suit para lowercase (treys usa lowercase)
-        treys_suit = self.suit_map.get(suit_char)
-        if not treys_suit:
-            return None
-        
-        # Valida rank
-        treys_rank = self.rank_map.get(rank_str)
-        if not treys_rank:
-            return None
-        
-        # Cria string no formato treys: 'As', 'Kh', '2c', etc.
-        treys_card_str = treys_rank + treys_suit
-        
-        try:
-            # treys.Card.new() aceita string no formato 'As', 'Kh', etc.
-            return Card.new(treys_card_str)
-        except Exception as e:
-            print(f"[HandEvaluator] Erro ao converter carta {card_str} para treys: {e}")
-            return None
+        return _pypoker_to_pokerkit_cached(card_str)
     
-    def evaluate(self, hole_cards, community_cards):
+    def evaluate(
+        self, 
+        hole_cards: List[str], 
+        community_cards: Optional[List[str]] = None
+    ) -> int:
         """
-        Avalia uma mão de poker usando treys.
+        Avalia uma mão de poker usando PokerKit.
         
         Args:
             hole_cards: Lista de cartas do jogador no formato PyPokerEngine (ex: ['SA', 'HK'])
             community_cards: Lista de cartas comunitárias no formato PyPokerEngine (ex: ['D2', 'C3', 'S4'])
         
         Returns:
-            Int representando o rank da mão (menor = melhor mão, como treys)
+            Int representando o rank da mão (menor = melhor mão, compatível com formato anterior)
         """
         if not hole_cards or len(hole_cards) < 2:
             # Mão inválida - retorna valor alto (pior mão possível)
-            return 7462  # Valor máximo do treys
+            return POKERKIT_MAX_SCORE
         
         # Converte cartas do jogador
         hand = []
         for card_str in hole_cards[:2]:  # Apenas 2 cartas do jogador
-            treys_card = self.pypoker_to_treys(card_str)
-            if treys_card is not None:
-                hand.append(treys_card)
+            pokerkit_card = self.pypoker_to_pokerkit(card_str)
+            if pokerkit_card is not None:
+                hand.append(pokerkit_card)
         
         if len(hand) < 2:
-            return 7462  # Mão inválida
+            return POKERKIT_MAX_SCORE  # Mão inválida
         
         # Converte cartas comunitárias
         board = []
         if community_cards:
             for card_str in community_cards:
-                treys_card = self.pypoker_to_treys(card_str)
-                if treys_card is not None:
-                    board.append(treys_card)
+                pokerkit_card = self.pypoker_to_pokerkit(card_str)
+                if pokerkit_card is not None:
+                    board.append(pokerkit_card)
         
         try:
-            # Avalia a mão usando treys
-            # treys retorna um valor onde menor = melhor mão
-            score = self.evaluator.evaluate(board, hand)
-            return score
+            # Combina hole cards em uma string para PokerKit
+            hole_str = ''.join(hand)
+            board_str = ''.join(board) if board else ''
+            
+            # PokerKit StandardHighHand.from_game() cria uma mão a partir de hole cards e board
+            # Retorna um objeto Hand com entry.index (menor index = melhor mão)
+            hand_obj = StandardHighHand.from_game(hole_str, board_str)
+            
+            # Retorna o index da mão invertido (menor = melhor, compatível com formato anterior)
+            # PokerKit usa maior index = melhor mão (7461 = Royal Flush, 0 = pior mão)
+            # Invertemos para manter compatibilidade: menor = melhor (0 = Royal Flush, 7461 = pior)
+            return POKERKIT_MAX_SCORE - hand_obj.entry.index
+        except (ValueError, TypeError, AttributeError) as e:
+            # Padronização: erros de validação/entrada retornam None implicitamente
+            # mas como precisamos retornar int, retornamos valor de erro padrão
+            # Log apenas em modo debug para não poluir output
+            import os
+            if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                print(f"[HandEvaluator] Erro ao avaliar mão: {e}")
+            return POKERKIT_MAX_SCORE  # Retorna pior mão possível em caso de erro
         except Exception as e:
-            print(f"[HandEvaluator] Erro ao avaliar mão: {e}")
-            return 7462  # Retorna pior mão possível em caso de erro
+            # Erros inesperados: log e retorna valor padrão
+            import os
+            if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                print(f"[HandEvaluator] Erro inesperado ao avaliar mão: {e}")
+            return POKERKIT_MAX_SCORE  # Retorna pior mão possível em caso de erro
     
-    def compare_hands(self, hand1_score, hand2_score):
+    def compare_hands(self, hand1_score: int, hand2_score: int) -> int:
         """
-        Compara duas mãos baseado nos scores do treys.
+        Compara duas mãos baseado nos scores do PokerKit.
         
         Args:
-            hand1_score: Score da primeira mão (do treys)
-            hand2_score: Score da segunda mão (do treys)
+            hand1_score: Score da primeira mão (do PokerKit)
+            hand2_score: Score da segunda mão (do PokerKit)
         
         Returns:
             -1 se hand1 é melhor, 1 se hand2 é melhor, 0 se empate
@@ -130,7 +156,11 @@ class HandEvaluator:
         else:
             return 0   # Empate
     
-    def get_hand_rank(self, hole_cards, community_cards):
+    def get_hand_rank(
+        self, 
+        hole_cards: List[str], 
+        community_cards: Optional[List[str]] = None
+    ) -> int:
         """
         Retorna o rank numérico da mão (compatível com PyPokerEngine).
         
@@ -142,4 +172,3 @@ class HandEvaluator:
             Int representando o rank da mão
         """
         return self.evaluate(hole_cards, community_cards)
-

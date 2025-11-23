@@ -2,6 +2,7 @@
 Constantes compartilhadas para players.
 Substitui magic numbers por constantes nomeadas.
 """
+from enum import Enum
 
 # Probabilidades de blefe padrão
 BLUFF_PROBABILITY_TIGHT = 0.08
@@ -51,4 +52,69 @@ HISTORY_SIZE_LONG = 50
 
 # Cartas altas
 HIGH_CARDS = ['A', 'K', 'Q', 'J']
+
+# ============================================================================
+# Constantes do PokerKit - Score Ranges
+# ============================================================================
+# PokerKit usa scores de 0-7462, onde menor score = melhor mão
+# Nota: O código inverte o score do PokerKit para manter compatibilidade
+#       (PokerKit: maior = melhor, nosso código: menor = melhor)
+
+# Score máximo do PokerKit
+POKERKIT_MAX_SCORE = 7462
+POKERKIT_MIN_SCORE = 0
+
+# Thresholds de Score por Tipo de Mão (menor = melhor)
+# Esses valores são usados para mapear score → nome da mão
+HAND_SCORE_ROYAL_FLUSH_MAX = 1
+HAND_SCORE_STRAIGHT_FLUSH_MAX = 10
+HAND_SCORE_FOUR_OF_A_KIND_MAX = 166
+HAND_SCORE_FULL_HOUSE_MAX = 322
+HAND_SCORE_FLUSH_MAX = 1599
+HAND_SCORE_STRAIGHT_MAX = 1609
+HAND_SCORE_THREE_OF_A_KIND_MAX = 2467
+HAND_SCORE_TWO_PAIR_MAX = 3325
+HAND_SCORE_ONE_PAIR_MAX = 6185
+HAND_SCORE_HIGH_CARD_MAX = POKERKIT_MAX_SCORE
+
+# Thresholds de Nível de Força da Mão (para classificação semântica)
+HAND_STRENGTH_EXCELLENT_MAX = 166  # Royal Flush até Four of a Kind
+HAND_STRENGTH_GOOD_MAX = 2467      # Full House até Three of a Kind
+HAND_STRENGTH_FAIR_MAX = 3325      # Flush até Two Pair
+# HAND_STRENGTH_POOR = acima de 3325 (One Pair ou High Card)
+
+# Número mínimo de cartas comunitárias para avaliação completa com PokerKit
+MIN_COMMUNITY_CARDS_FOR_POKERKIT = 3
+
+# Número total de cartas comunitárias no poker
+TOTAL_COMMUNITY_CARDS = 5
+
+# Número de simulações Monte Carlo
+MONTE_CARLO_DEFAULT_SIMULATIONS = 1000
+
+
+# ============================================================================
+# Enums para Tipos de Mão e Níveis de Força
+# ============================================================================
+
+class HandType(Enum):
+    """Enum para tipos de mão de poker."""
+    ROYAL_FLUSH = "Royal Flush"
+    STRAIGHT_FLUSH = "Straight Flush"
+    FOUR_OF_A_KIND = "Four of a Kind"
+    FULL_HOUSE = "Full House"
+    FLUSH = "Flush"
+    STRAIGHT = "Straight"
+    THREE_OF_A_KIND = "Three of a Kind"
+    TWO_PAIR = "Two Pair"
+    ONE_PAIR = "One Pair"
+    HIGH_CARD = "High Card"
+
+
+class HandStrengthLevel(Enum):
+    """Enum para níveis semânticos de força da mão."""
+    EXCELLENT = "Excellent"
+    GOOD = "Good"
+    FAIR = "Fair"
+    POOR = "Poor"
 
