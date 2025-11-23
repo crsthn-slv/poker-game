@@ -1,7 +1,7 @@
 from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class RandomPlayer(BasePokerPlayer):
     """Jogador que faz decisões aleatórias. Blefa 25% das vezes. Aprendizado estocástico básico com memória persistente."""
@@ -28,6 +28,13 @@ class RandomPlayer(BasePokerPlayer):
         current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
         
         hand_strength = self._evaluate_hand_strength(hole_card)
+        
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
         should_bluff = self._should_bluff()
         
         # Atualiza valores da memória
@@ -40,7 +47,7 @@ class RandomPlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -102,18 +109,33 @@ class RandomPlayer(BasePokerPlayer):
         
         return 10
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None, bluff_analysis=None):
         """Ação normal: aleatória, mas ajustada por ações atuais."""
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 24:  # Random: paga blefe com mão razoável
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
+        
         # NOVO: Se houver muitos raises, aumenta chance de fold
         fold_prob = 0.33
         if current_actions and current_actions['has_raises']:
             fold_prob = min(0.60, 0.33 + (current_actions['raise_count'] * 0.15))
         
+        # NOVO: Campo passivo aumenta chance de raise
+        raise_prob = 0.34  # Probabilidade base de raise (1 - 0.66)
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Aumenta chance de raise quando campo está passivo
+            raise_prob = min(0.60, 0.34 + (passive_score * 0.3))
+            # Reduz chance de fold quando campo está passivo
+            fold_prob = max(0.20, fold_prob - (passive_score * 0.15))
+        
         # Escolhe ação aleatoriamente (ajustado)
         rand = random.random()
         if rand < fold_prob:
             action_choice = 'fold'
-        elif rand < 0.66:
+        elif rand < (1.0 - raise_prob):
             action_choice = 'call'
         else:
             action_choice = 'raise'

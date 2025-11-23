@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class CalculatedPlayer(BasePokerPlayer):
     """Jogador que calcula bem as probabilidades antes de agir. Analítico mas não extremo. Usa sistema de memória unificado."""
@@ -31,6 +31,13 @@ class CalculatedPlayer(BasePokerPlayer):
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
+        
         # Atualiza valores da memória
         self.bluff_probability = self.memory['bluff_probability']
         self.aggression_level = self.memory['aggression_level']
@@ -54,7 +61,7 @@ class CalculatedPlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, pot_size, active_players, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, pot_size, active_players, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -95,7 +102,7 @@ class CalculatedPlayer(BasePokerPlayer):
             call_action = valid_actions[1]
             return call_action['action'], call_action['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, pot_size, active_players, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, pot_size, active_players, current_actions=None, bluff_analysis=None):
         """Ação calculada: baseada em análise e ações atuais."""
         adjusted_threshold = self.tightness_threshold
         
@@ -106,6 +113,15 @@ class CalculatedPlayer(BasePokerPlayer):
             elif current_actions['last_action'] == 'raise':
                 adjusted_threshold += 3
         
+        # NOVO: Campo passivo reduz threshold e aumenta agressão
+        adjusted_aggression = self.aggression_level
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Reduz threshold quando campo está passivo
+            adjusted_threshold = max(22, adjusted_threshold - int(passive_score * 4))
+            # Aumenta agressão temporariamente
+            adjusted_aggression = min(0.70, adjusted_aggression + (passive_score * 0.15))
+        
         # Mão muito forte: raise calculado
         if hand_strength >= 52:
             raise_action = valid_actions[2]
@@ -113,14 +129,26 @@ class CalculatedPlayer(BasePokerPlayer):
                 min_amount = raise_action['amount']['min']
                 max_amount = raise_action['amount']['max']
                 # Calcula valor baseado em agressão
-                amount = random.randint(min_amount, min(max_amount, min_amount + int(18 * self.aggression_level)))
+                amount = random.randint(min_amount, min(max_amount, min_amount + int(18 * adjusted_aggression)))
                 return raise_action['action'], amount
         
         # Mão forte: call ou raise pequeno
         if hand_strength >= adjusted_threshold:
-            if self.aggression_level > 0.54 and valid_actions[2]['amount']['min'] != -1:
+            # NOVO: Com campo passivo, aumenta chance de raise
+            if current_actions and current_actions.get('is_passive', False):
+                passive_score = current_actions.get('passive_opportunity_score', 0.0)
+                if passive_score > 0.4 and valid_actions[2]['amount']['min'] != -1:
+                    return valid_actions[2]['action'], valid_actions[2]['amount']['min']
+            
+            if adjusted_aggression > 0.54 and valid_actions[2]['amount']['min'] != -1:
                 return valid_actions[2]['action'], valid_actions[2]['amount']['min']
             else:
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 28:  # Calculated: paga blefe com mão razoável
                 call_action = valid_actions[1]
                 return call_action['action'], call_action['amount']
         

@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class FishPlayer(BasePokerPlayer):
     """Jogador 'peixe' que aprende lentamente. Começa sempre fazendo call, mas aprende quando foldar. Usa sistema de memória unificado."""
@@ -39,6 +39,13 @@ class FishPlayer(BasePokerPlayer):
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
+        
         # NOVO: Ajusta probabilidade de fold baseado em ações atuais
         fold_threshold = 10
         if current_actions and current_actions['has_raises']:
@@ -48,6 +55,12 @@ class FishPlayer(BasePokerPlayer):
             adjusted_call_prob = self.call_probability * (0.9 ** current_actions['raise_count'])
         else:
             adjusted_call_prob = self.call_probability
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 23:  # Peixe: paga blefe com mão razoável
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
         
         # Peixe: prefere call, mas aprende quando foldar
         if hand_strength < fold_threshold and random.random() > adjusted_call_prob:

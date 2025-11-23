@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class SmartPlayer(BasePokerPlayer):
     """Jogador inteligente que ajusta estratégia dinamicamente. Usa sistema de memória unificado."""
@@ -44,6 +44,13 @@ class SmartPlayer(BasePokerPlayer):
         self.tightness_threshold = self.memory['tightness_threshold']
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
+        
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
         should_bluff = self._should_bluff()
         
         # NOVO: Ajusta blefe baseado em ações atuais
@@ -54,7 +61,7 @@ class SmartPlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -149,7 +156,7 @@ class SmartPlayer(BasePokerPlayer):
         community_cards = round_state.get('community_card', []) if round_state else None
         return evaluate_hand_strength(hole_card, community_cards)
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None, bluff_analysis=None):
         """Ação normal baseada na força da mão, contexto e ações atuais."""
         context = self._analyze_table_context(round_state)
         adjusted_threshold = self.tightness_threshold
@@ -162,6 +169,12 @@ class SmartPlayer(BasePokerPlayer):
             elif current_actions['last_action'] == 'raise':
                 # Se última ação foi raise, aumenta threshold
                 adjusted_threshold += 3
+        
+        # NOVO: Campo passivo reduz threshold e aumenta agressão
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Reduz threshold quando campo está passivo (joga mais mãos)
+            adjusted_threshold = max(20, adjusted_threshold - int(passive_score * 5))
         
         # Mão muito forte: raise agressivo
         if hand_strength >= 70:
@@ -181,10 +194,24 @@ class SmartPlayer(BasePokerPlayer):
                 call_action = valid_actions[1]
                 return call_action['action'], call_action['amount']
         
+        # NOVO: Com campo passivo, até mãos médias podem fazer raise
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            if hand_strength >= 35 and passive_score > 0.5:
+                raise_action = valid_actions[2]
+                if raise_action['amount']['min'] != -1:
+                    return raise_action['action'], raise_action['amount']['min']
+        
         # Mão média: call se acima do threshold, fold caso contrário
         if hand_strength >= adjusted_threshold:
             call_action = valid_actions[1]
             return call_action['action'], call_action['amount']
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 28:  # Smart: paga blefe com mão razoável
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
         
         # Mão fraca: fold apenas se for MUITO fraca
         if hand_strength < (adjusted_threshold - 6):

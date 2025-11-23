@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class OpportunisticPlayer(BasePokerPlayer):
     """Combina Smart (contexto) + Aggressive (oportunidades). Identifica oportunidades e ataca agressivamente. Usa sistema de memória unificado."""
@@ -38,6 +38,13 @@ class OpportunisticPlayer(BasePokerPlayer):
         opportunity = self._identify_opportunity(round_state)
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
+        
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
         should_bluff = self._should_bluff_with_opportunity(opportunity)
         
         # NOVO: Ajusta blefe baseado em ações atuais
@@ -47,7 +54,7 @@ class OpportunisticPlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state, opportunity)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, opportunity, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, opportunity, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -103,7 +110,7 @@ class OpportunisticPlayer(BasePokerPlayer):
         else:
             return valid_actions[1]['action'], valid_actions[1]['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, opportunity, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, opportunity, current_actions=None, bluff_analysis=None):
         """Ação normal considerando oportunidades e ações atuais."""
         # NOVO: Ajusta threshold baseado em ações do round atual
         adjusted_threshold = self.tightness_threshold
@@ -112,6 +119,13 @@ class OpportunisticPlayer(BasePokerPlayer):
                 adjusted_threshold += 5 + (current_actions['raise_count'] * 2)
             elif current_actions['last_action'] == 'raise':
                 adjusted_threshold += 3
+        
+        # NOVO: Campo passivo aumenta oportunidade significativamente
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Adiciona ao score de oportunidade existente
+            opportunity['score'] += passive_score * 40  # Campo passivo é uma grande oportunidade
+        
         # Mão muito forte: sempre ataca
         if hand_strength >= 55:
             raise_action = valid_actions[2]
@@ -127,6 +141,14 @@ class OpportunisticPlayer(BasePokerPlayer):
             if raise_action['amount']['min'] != -1:
                 return raise_action['action'], raise_action['amount']['min']
         
+        # NOVO: Com campo passivo, até mãos médias podem atacar
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            if hand_strength >= 25 and passive_score > 0.5:
+                raise_action = valid_actions[2]
+                if raise_action['amount']['min'] != -1:
+                    return raise_action['action'], raise_action['amount']['min']
+        
         # Mão forte: call
         if hand_strength >= 30:
             return valid_actions[1]['action'], valid_actions[1]['amount']
@@ -134,6 +156,11 @@ class OpportunisticPlayer(BasePokerPlayer):
         # Mão média-fraca: call se houver alguma oportunidade
         if hand_strength >= 20 and opportunity['score'] > 20:
             return valid_actions[1]['action'], valid_actions[1]['amount']
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 23:  # Oportunista: paga blefe com mão razoável
+                return valid_actions[1]['action'], valid_actions[1]['amount']
         
         # Mão fraca: fold apenas se for MUITO fraca E sem oportunidades
         if hand_strength < 15 and opportunity['score'] <= 30:

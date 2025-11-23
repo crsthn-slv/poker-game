@@ -1,7 +1,7 @@
 from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class AggressivePlayer(BasePokerPlayer):
     """Jogador agressivo que joga muitas mãos e blefa frequentemente (35%). Aprendizado agressivo intermediário com memória persistente."""
@@ -30,6 +30,13 @@ class AggressivePlayer(BasePokerPlayer):
         current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
         
         hand_strength = self._evaluate_hand_strength(hole_card)
+        
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
         should_bluff = self._should_bluff()
         
         # Atualiza valores da memória
@@ -39,7 +46,7 @@ class AggressivePlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -115,8 +122,14 @@ class AggressivePlayer(BasePokerPlayer):
         # Qualquer coisa
         return 10
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None, bluff_analysis=None):
         """Ação normal: ajusta agressão baseado no aprendizado e ações atuais."""
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 22:  # Agressivo: paga blefe com mão mais fraca
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
+        
         # NOVO: Ajusta baseado em ações do round atual
         fold_threshold = 15  # Threshold base para fold
         
@@ -136,6 +149,20 @@ class AggressivePlayer(BasePokerPlayer):
         # NOVO: Se houver muitos raises, reduz um pouco a agressão
         if current_actions and current_actions['raise_count'] >= 2:
             adjusted_aggression *= 0.9  # Reduz 10% da agressão
+        
+        # NOVO: Se campo está passivo, aumenta agressão significativamente
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Aumenta agressão baseado no score de oportunidade
+            adjusted_aggression = min(0.95, adjusted_aggression + (passive_score * 0.3))
+            # Com campo passivo, até mãos médias podem fazer raise
+            if hand_strength >= 20 and passive_score > 0.4:
+                raise_action = valid_actions[2]
+                if raise_action['amount']['min'] != -1:
+                    min_amount = raise_action['amount']['min']
+                    max_amount = raise_action['amount']['max']
+                    amount = random.randint(min_amount, min(max_amount, min_amount + 20))
+                    return raise_action['action'], amount
         
         # Sempre tenta fazer raise se possível (ajustado pelo aprendizado)
         raise_action = valid_actions[2]

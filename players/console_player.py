@@ -1,4 +1,5 @@
 from typing import Tuple
+import re
 
 from pypokerengine.players import BasePokerPlayer  # type: ignore[reportMissingImports]
 from utils.console_formatter import ConsoleFormatter
@@ -22,8 +23,11 @@ class ConsolePlayer(BasePokerPlayer):
         self.small_blind = small_blind  # Blind pequeno (pode ser None)
         self.big_blind = big_blind  # Blind grande (pode ser None)
         self.last_pot_printed = 0  # Rastreia último pot impresso para evitar repetições
+        self.pot_line_printed = False  # Indica se já imprimiu linha de pot atual
+        self.pot_updates = []  # Lista de atualizações do pot para exibir na mesma linha
         self.my_hole_cards = None  # Cache das cartas do jogador atual
         self.players_hole_cards = {}  # Cache de cartas de todos os jogadores (UUID -> cartas)
+        self.i_folded = False  # Flag para rastrear se o jogador deu fold no round atual
         # Cache de probabilidade de vitória: {cache_key: win_probability_data}
         self.win_probability_cache = {}
         self.last_cache_key = None  # Chave de cache usada na última vez
@@ -336,6 +340,12 @@ class ConsolePlayer(BasePokerPlayer):
         print()
         action, amount = self.__receive_action_from_console(valid_actions)  # type: ignore[assignment]
         
+        # Marca se o jogador deu fold
+        if action == 'fold':
+            self.i_folded = True
+        else:
+            self.i_folded = False
+        
         # Registra ação no histórico
         if self.game_history and hasattr(self, 'uuid') and self.uuid:
             # Obtém probabilidade de vitória se disponível
@@ -371,6 +381,8 @@ class ConsolePlayer(BasePokerPlayer):
         pass
 
     def receive_round_start_message(self, round_count, hole_card, seats):
+        # Reseta flag de linha de pot no início de novo round
+        self.pot_line_printed = False
         """Mostra divisor de round e inicializa novo round."""
         # Mostra divisor de round de forma destacada
         print("\n" + self.formatter.format_round_divider(round_count))
@@ -378,6 +390,8 @@ class ConsolePlayer(BasePokerPlayer):
         
         # Reseta pot impresso para novo round
         self.last_pot_printed = 0
+        self.pot_line_printed = False  # Reseta flag de linha de pot
+        self.pot_updates = []  # Limpa atualizações acumuladas do pot
         # Limpa cache de probabilidade para novo round
         self.win_probability_cache = {}
         self.last_cache_key = None
@@ -447,6 +461,8 @@ class ConsolePlayer(BasePokerPlayer):
             button_position = 0  # Default, pode ser ajustado se houver informação disponível
             self.game_history.start_round(round_count, seats, button_position)
         
+        # Reseta flag de fold no início de cada round
+        self.i_folded = False
         pass
 
     def receive_street_start_message(self, street, round_state):
@@ -472,11 +488,29 @@ class ConsolePlayer(BasePokerPlayer):
             print(f"Community cards: {community_display}")
         
         # Mostra pot apenas quando a street muda
+        # Se já tinha pot na linha anterior, quebra linha antes de nova street
+        if self.pot_line_printed:
+            # Se há atualizações acumuladas do pot, exibe todas antes de quebrar linha
+            if self.pot_updates:
+                pot_line = " -> ".join([f"Pot {p}" for p in self.pot_updates])
+                print(pot_line)  # Quebra linha após mostrar todas as atualizações
+            else:
+                print()  # Quebra linha
+            self.pot_line_printed = False
+        
+        # Limpa atualizações acumuladas e inicia nova lista para a nova street
+        self.pot_updates = []
+        
         action_histories = round_state.get('action_histories', {})
         pot_amount, _ = self.formatter.calculate_pot_composition(round_state, action_histories)
         pot_display = self.formatter.format_pot_with_color(pot_amount)
-        print(f"Pot {pot_display}")
+        # Adiciona à lista de atualizações
+        self.pot_updates.append(pot_display)
         self.last_pot_printed = pot_amount
+        
+        # Exibe pot inicial da street (sem quebrar linha)
+        print(f"Pot {pot_display}", end='', flush=True)
+        self.pot_line_printed = True  # Marca que pot está na linha atual
         
         # Registra início de nova street no histórico
         if self.game_history:
@@ -526,15 +560,37 @@ class ConsolePlayer(BasePokerPlayer):
         elif action_type == 'CHECK':
             action_parts.append(f"{player_name} {action_name}")
         
-        # Mostra pot apenas se mudou significativamente
-        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
-        if pot > 0 and abs(pot - self.last_pot_printed) > 5:  # Só mostra se mudou mais que 5 chips
-            pot_display = self.formatter.format_pot_with_color(pot)
-            action_parts.append(f"Pot {pot_display}")
-            self.last_pot_printed = pot
-        
+        # Imprime ações primeiro (se houver)
         if action_parts:
+            # Se já tinha pot na linha, quebra linha antes das ações
+            if self.pot_line_printed:
+                # Se há atualizações acumuladas do pot, exibe todas antes de quebrar linha
+                if self.pot_updates:
+                    pot_line = " -> ".join([f"Pot {p}" for p in self.pot_updates])
+                    print(pot_line)  # Quebra linha após mostrar todas as atualizações
+                    self.pot_updates = []  # Limpa após exibir
+                else:
+                    print()  # Quebra linha
+                self.pot_line_printed = False
             print(" | ".join(action_parts))
+        
+        # Atualiza pot na mesma linha (sempre que mudar)
+        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+        if pot > 0 and pot != self.last_pot_printed:
+            pot_display = self.formatter.format_pot_with_color(pot)
+            # Adiciona à lista de atualizações
+            self.pot_updates.append(pot_display)
+            self.last_pot_printed = pot
+            
+            # Exibe atualização na mesma linha
+            if self.pot_line_printed:
+                # Continua na mesma linha, adicionando mais atualizações
+                print(f" -> Pot {pot_display}", end='', flush=True)
+            else:
+                # Primeira vez, imprime todas as atualizações acumuladas (sem quebrar linha)
+                pot_line = " -> ".join([f"Pot {p}" for p in self.pot_updates])
+                print(f"{pot_line}", end='', flush=True)
+                self.pot_line_printed = True
         
         # Registra ação no histórico (de outros jogadores)
         if self.game_history:
@@ -706,12 +762,25 @@ class ConsolePlayer(BasePokerPlayer):
                         hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
                         # Se o jogador humano deu fold, adiciona indicador de folded mas mostra cartas
                         folded_indicator = " (folded)" if is_folded and is_player else ""
-                        print(f"  {name}: {cards_display} | {hand_desc}{folded_indicator}")
+                        # Aplica cor cinza se jogador deu fold
+                        if is_folded:
+                            # Remove todos os códigos ANSI de cor das cartas para aplicar DIM em toda a linha
+                            # Remove todos os códigos ANSI (cores e reset) das cartas
+                            cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
+                            # Monta a linha completa sem cores nas cartas
+                            full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
+                            # Aplica DIM em toda a linha
+                            dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                            print(dim_line)
+                        else:
+                            print(f"  {name}: {cards_display} | {hand_desc}{folded_indicator}")
                     else:
                         # Se não encontrou cartas em nenhum lugar, mostra erro
                         # Mas se for o jogador humano que deu fold, mostra folded mesmo sem cartas
                         if is_folded and is_player:
-                            print(f"  {name}: folded (cards not found)")
+                            full_line = f"  {name}: folded (cards not found)"
+                            dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                            print(dim_line)
                         else:
                             print(f"  {name}: [error: cards not found]")
             

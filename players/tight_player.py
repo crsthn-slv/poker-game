@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 from utils.constants import (
     BLUFF_PROBABILITY_TIGHT, TIGHTNESS_THRESHOLD_DEFAULT,
     HAND_STRENGTH_VERY_STRONG, HAND_STRENGTH_STRONG
@@ -35,6 +35,14 @@ class TightPlayer(BasePokerPlayer):
         current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
+        
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
+        
         should_bluff = self._should_bluff()
         
         # Atualiza valores da memória
@@ -48,7 +56,7 @@ class TightPlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -104,7 +112,7 @@ class TightPlayer(BasePokerPlayer):
         community_cards = round_state.get('community_card', []) if round_state else None
         return evaluate_hand_strength(hole_card, community_cards)
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None, bluff_analysis=None):
         """Ação normal baseada na força das cartas (ajustada pelo aprendizado e ações atuais)."""
         # Ajusta threshold baseado no aprendizado conservador
         adjusted_threshold = self.tightness_threshold
@@ -118,11 +126,31 @@ class TightPlayer(BasePokerPlayer):
                 # Se última ação foi raise, aumenta threshold
                 adjusted_threshold += 5
         
+        # NOVO: Campo passivo reduz threshold (TightPlayer fica um pouco menos conservador)
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Reduz threshold moderadamente (TightPlayer é conservador)
+            adjusted_threshold = max(28, adjusted_threshold - int(passive_score * 3))
+        
         # Mão muito forte: tenta fazer raise
         if hand_strength >= HAND_STRENGTH_STRONG:
             raise_action = valid_actions[2]
             if raise_action['amount']['min'] != -1:
                 return raise_action['action'], raise_action['amount']['min']
+        
+        # NOVO: Com campo passivo, TightPlayer pode fazer raise com mão forte
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            if hand_strength >= 45 and passive_score > 0.6:
+                raise_action = valid_actions[2]
+                if raise_action['amount']['min'] != -1:
+                    return raise_action['action'], raise_action['amount']['min']
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 32:  # Tight: paga blefe com mão razoável (mais seletivo)
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
         
         # Mão forte: faz call (threshold ajustado pelo aprendizado)
         if hand_strength >= adjusted_threshold:

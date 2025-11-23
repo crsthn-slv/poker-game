@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class LearningPlayer(BasePokerPlayer):
     """IA que aprende e se adapta baseado no histórico de jogos. Usa sistema de memória unificado."""
@@ -35,6 +35,13 @@ class LearningPlayer(BasePokerPlayer):
         # Avalia força da mão
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
+        
         # Atualiza valores da memória
         self.bluff_probability = self.memory['bluff_probability']
         self.aggression_level = self.memory['aggression_level']
@@ -46,7 +53,7 @@ class LearningPlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action_with_learning(valid_actions, hand_strength, round_state, current_actions)
+            action, amount = self._normal_action_with_learning(valid_actions, hand_strength, round_state, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -96,7 +103,7 @@ class LearningPlayer(BasePokerPlayer):
         
         return random.random() < base_probability
     
-    def _normal_action_with_learning(self, valid_actions, hand_strength, round_state, current_actions=None):
+    def _normal_action_with_learning(self, valid_actions, hand_strength, round_state, current_actions=None, bluff_analysis=None):
         """Ação normal considerando aprendizado e ações atuais."""
         adjusted_threshold = self.tightness_threshold
         
@@ -109,6 +116,21 @@ class LearningPlayer(BasePokerPlayer):
                 # Se última ação foi raise, aumenta threshold
                 adjusted_threshold += 3
         
+        # NOVO: Campo passivo reduz threshold e aumenta agressão
+        adjusted_aggression = self.aggression_level
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Reduz threshold quando campo está passivo
+            adjusted_threshold = max(20, adjusted_threshold - int(passive_score * 5))
+            # Aumenta agressão temporariamente
+            adjusted_aggression = min(0.75, adjusted_aggression + (passive_score * 0.2))
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 27:  # Learning: paga blefe com mão razoável
+                call_action = valid_actions[1]
+                return call_action['action'], call_action['amount']
+        
         # Mão muito forte: raise
         if hand_strength >= 60:
             raise_action = valid_actions[2]
@@ -117,11 +139,25 @@ class LearningPlayer(BasePokerPlayer):
         
         # Mão forte: call ou raise moderado
         if hand_strength >= 40:
-            if self.aggression_level > 0.55 and valid_actions[2]['amount']['min'] != -1:
+            # NOVO: Com campo passivo, aumenta chance de raise
+            if current_actions and current_actions.get('is_passive', False):
+                passive_score = current_actions.get('passive_opportunity_score', 0.0)
+                if passive_score > 0.5 and valid_actions[2]['amount']['min'] != -1:
+                    return valid_actions[2]['action'], valid_actions[2]['amount']['min']
+            
+            if adjusted_aggression > 0.55 and valid_actions[2]['amount']['min'] != -1:
                 return valid_actions[2]['action'], valid_actions[2]['amount']['min']
             else:
                 call_action = valid_actions[1]
                 return call_action['action'], call_action['amount']
+        
+        # NOVO: Com campo passivo, até mãos médias podem fazer raise
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            if hand_strength >= 30 and passive_score > 0.5:
+                raise_action = valid_actions[2]
+                if raise_action['amount']['min'] != -1:
+                    return raise_action['action'], raise_action['amount']['min']
         
         # Mão média: depende do threshold
         if hand_strength >= adjusted_threshold:

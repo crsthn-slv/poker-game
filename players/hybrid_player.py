@@ -3,13 +3,22 @@ import random
 import json
 import os
 from utils.memory_utils import get_memory_path
-from utils.action_analyzer import analyze_current_round_actions
+from utils.memory_manager import UnifiedMemoryManager
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class HybridPlayer(BasePokerPlayer):
     """Combina todas as abordagens. Alterna entre estratégias baseado em contexto. Mais versátil e adaptável. Com memória persistente."""
     
     def __init__(self, memory_file="hybrid_player_memory.json"):
         self.memory_file = get_memory_path(memory_file)
+        
+        # Inicializa gerenciador de memória unificada (para análise de blefe)
+        self.memory_manager = UnifiedMemoryManager(
+            memory_file,
+            default_bluff=0.15,
+            default_aggression=0.60,
+            default_tightness=25
+        )
         
         # Múltiplas estratégias
         self.strategies = {
@@ -45,6 +54,13 @@ class HybridPlayer(BasePokerPlayer):
         strategy = self.strategies[self.current_strategy]
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
+        
         should_bluff = random.random() < strategy['bluff_prob']
         
         # NOVO: Ajusta blefe baseado em ações atuais
@@ -54,7 +70,7 @@ class HybridPlayer(BasePokerPlayer):
         if should_bluff:
             return self._bluff_action(valid_actions, round_state, strategy)
         else:
-            return self._normal_action(valid_actions, hand_strength, round_state, strategy, current_actions)
+            return self._normal_action(valid_actions, hand_strength, round_state, strategy, current_actions, bluff_analysis)
     
     def _analyze_context(self, round_state):
         """Analisa contexto da mesa."""
@@ -117,7 +133,7 @@ class HybridPlayer(BasePokerPlayer):
         
         return valid_actions[1]['action'], valid_actions[1]['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, strategy, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, strategy, current_actions=None, bluff_analysis=None):
         """Ação baseada na estratégia atual e ações atuais."""
         threshold = strategy['threshold']
         aggression = strategy['aggression']
@@ -128,6 +144,14 @@ class HybridPlayer(BasePokerPlayer):
                 threshold += 5 + (current_actions['raise_count'] * 2)
             elif current_actions['last_action'] == 'raise':
                 threshold += 3
+        
+        # NOVO: Se campo está passivo, aumenta agressão e reduz threshold
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Reduz threshold (joga mais mãos) quando campo está passivo
+            threshold = max(15, threshold - int(passive_score * 8))
+            # Aumenta agressão temporariamente
+            aggression = min(0.85, aggression + (passive_score * 0.2))
         
         # Mão muito forte: sempre raise
         if hand_strength >= 55:
@@ -140,9 +164,21 @@ class HybridPlayer(BasePokerPlayer):
         
         # Mão forte: depende da estratégia
         if hand_strength >= threshold:
+            # NOVO: Com campo passivo, aumenta chance de raise mesmo com mãos médias
+            if current_actions and current_actions.get('is_passive', False):
+                passive_score = current_actions.get('passive_opportunity_score', 0.0)
+                if passive_score > 0.5 and valid_actions[2]['amount']['min'] != -1:
+                    # Campo muito passivo: raise mesmo com mão média-forte
+                    return valid_actions[2]['action'], valid_actions[2]['amount']['min']
+            
             if aggression > 0.65 and valid_actions[2]['amount']['min'] != -1:
                 return valid_actions[2]['action'], valid_actions[2]['amount']['min']
             else:
+                return valid_actions[1]['action'], valid_actions[1]['amount']
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 25:  # Híbrido: paga blefe com mão razoável
                 return valid_actions[1]['action'], valid_actions[1]['amount']
         
         # Mão fraca: fold apenas se for MUITO fraca
@@ -214,10 +250,18 @@ class HybridPlayer(BasePokerPlayer):
         pass
     
     def receive_game_update_message(self, action, round_state):
-        pass
+        """Registra ações dos oponentes."""
+        if hasattr(self, 'uuid') and self.uuid:
+            player_uuid = action.get('uuid') or action.get('player_uuid')
+            if player_uuid and player_uuid != self.uuid:
+                self.memory_manager.record_opponent_action(player_uuid, action, round_state)
     
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Aprende qual estratégia funciona melhor."""
+        # Processa resultado no memory_manager
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.process_round_result(winners, hand_info, round_state, self.uuid)
+        
         self.total_rounds += 1
         
         # Atualiza stack

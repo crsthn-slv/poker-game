@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
-from utils.action_analyzer import analyze_current_round_actions
+from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 
 class ConservativeAggressivePlayer(BasePokerPlayer):
     """Combina Tight (conservador) + Aggressive (agressão seletiva). Conservador no início, agressivo quando ganha. Usa sistema de memória unificado."""
@@ -37,6 +37,13 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
         self.conservative_mode = self.memory.get('conservative_mode', True)
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
+        
+        # NOVO: Analisa possível blefe dos oponentes
+        bluff_analysis = None
+        if hasattr(self, 'uuid') and self.uuid:
+            bluff_analysis = analyze_possible_bluff(
+                round_state, self.uuid, hand_strength, self.memory_manager
+            )
         should_bluff = self._should_bluff()
         
         # NOVO: Ajusta blefe baseado em ações atuais (conservador fica mais conservador)
@@ -46,7 +53,7 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions, bluff_analysis)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -77,7 +84,7 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
             else:
                 return valid_actions[1]['action'], valid_actions[1]['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None, bluff_analysis=None):
         """Ação baseada no modo (conservador ou agressivo) e ações atuais."""
         # NOVO: Ajusta threshold baseado em ações do round atual
         adjusted_threshold = self.tightness_threshold
@@ -87,6 +94,17 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
                 adjusted_threshold += 8 + (current_actions['raise_count'] * 3)
             elif current_actions['last_action'] == 'raise':
                 adjusted_threshold += 5
+        
+        # NOVO: Campo passivo reduz threshold (especialmente em modo agressivo)
+        if current_actions and current_actions.get('is_passive', False):
+            passive_score = current_actions.get('passive_opportunity_score', 0.0)
+            # Reduz threshold quando campo está passivo
+            if not self.conservative_mode:
+                # Modo agressivo: reduz mais
+                adjusted_threshold = max(22, adjusted_threshold - int(passive_score * 6))
+            else:
+                # Modo conservador: reduz menos
+                adjusted_threshold = max(28, adjusted_threshold - int(passive_score * 3))
         
         # Mão muito forte: sempre raise
         if hand_strength >= 55:
@@ -99,6 +117,12 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
         
         # Mão forte: depende do modo
         if hand_strength >= adjusted_threshold:
+            # NOVO: Com campo passivo, aumenta chance de raise mesmo em modo conservador
+            if current_actions and current_actions.get('is_passive', False):
+                passive_score = current_actions.get('passive_opportunity_score', 0.0)
+                if passive_score > 0.5 and valid_actions[2]['amount']['min'] != -1:
+                    return valid_actions[2]['action'], valid_actions[2]['amount']['min']
+            
             if not self.conservative_mode and self.aggression_level > 0.6:
                 # Modo agressivo: pode fazer raise
                 if valid_actions[2]['amount']['min'] != -1:
@@ -106,6 +130,11 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
             
             # Sempre faz call se passou do threshold
             return valid_actions[1]['action'], valid_actions[1]['amount']
+        
+        # NOVO: Se análise indica possível blefe e deve pagar, considera call mesmo com mão média
+        if bluff_analysis and bluff_analysis['should_call_bluff']:
+            if hand_strength >= 29:  # ConservativeAggressive: paga blefe com mão razoável
+                return valid_actions[1]['action'], valid_actions[1]['amount']
         
         # Mão fraca: fold apenas se for MUITO fraca
         if hand_strength < (self.tightness_threshold - 5):

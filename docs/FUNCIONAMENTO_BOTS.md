@@ -10,7 +10,8 @@ Esta documentação explica em detalhes como os bots funcionam, suas estruturas,
 4. [Ciclo de Vida de um Bot](#ciclo-de-vida-de-um-bot)
 5. [Sistema de Aprendizado](#sistema-de-aprendizado)
 6. [Reação em Tempo Real às Ações dos Oponentes](#reação-em-tempo-real-às-ações-dos-oponentes)
-7. [Componentes Compartilhados](#componentes-compartilhados)
+7. [Análise de Blefe em Tempo Real](#análise-de-blefe-em-tempo-real)
+8. [Componentes Compartilhados](#componentes-compartilhados)
 
 ---
 
@@ -934,6 +935,8 @@ def declare_action(self, valid_actions, hole_card, round_state):
     # - call_count: int (quantos calls)
     # - last_action: str ('raise', 'call', 'fold' ou None)
     # - total_aggression: float (0.0 a 1.0)
+    # - is_passive: bool (se campo está passivo - muitos calls, nenhum raise)
+    # - passive_opportunity_score: float (0.0 a 1.0, oportunidade de agressão)
 ```
 
 #### 2. Ajuste de Comportamento
@@ -1082,11 +1085,96 @@ def declare_action(self, valid_actions, hole_card, round_state):
 3. **Adaptação imediata**: Não precisa esperar fim do round para ajustar
 4. **Reação a todos os oponentes**: Analisa ações de bots e jogador humano igualmente
 
+### Detecção de Campo Passivo
+
+**NOVO:** Os bots agora detectam quando o campo está passivo (muitos calls, nenhum raise) e aumentam sua agressão para aproveitar a oportunidade.
+
+#### O que é Campo Passivo?
+
+Campo passivo é detectado quando:
+- Há **muitos calls/checks** na street atual
+- **Nenhum raise** foi feito
+- Isso indica que os oponentes estão jogando de forma conservadora
+
+#### Como Funciona
+
+A função `analyze_current_round_actions()` agora retorna:
+- `is_passive`: `True` quando campo está passivo (raises == 0 e calls >= 2)
+- `passive_opportunity_score`: Score de 0.0 a 1.0 indicando a oportunidade de agressão
+  - Baseado no número de calls (mais calls = mais oportunidade)
+  - Aumentado se pot é pequeno (< 100)
+  - Aumentado em streets iniciais (preflop/flop)
+
+#### Reação dos Bots a Campo Passivo
+
+**Bots Agressivos** (AggressivePlayer, OpportunisticPlayer, SteadyAggressivePlayer):
+- **Reduzem threshold significativamente** (jogam mais mãos)
+- **Aumentam agressão temporariamente** (+20% a +30%)
+- **Fazem raise com mãos médias** (hand_strength >= 20-25) quando score > 0.4-0.5
+
+**Bots Moderados** (SmartPlayer, BalancedPlayer, ModeratePlayer):
+- **Reduzem threshold moderadamente** (jogam mais mãos)
+- **Aumentam agressão temporariamente** (+15% a +20%)
+- **Fazem raise com mãos médias-fortes** (hand_strength >= 30-35) quando score > 0.4-0.5
+
+**Bots Conservadores** (TightPlayer, CautiousPlayer, PatientPlayer):
+- **Reduzem threshold levemente** (jogam um pouco mais mãos)
+- **Fazem raise apenas com mãos fortes** (hand_strength >= 45-50) quando score > 0.6-0.7
+
+#### Exemplo de Implementação
+
+```python
+def _normal_action(self, valid_actions, hand_strength, round_state, 
+                   current_actions=None, bluff_analysis=None):
+    adjusted_threshold = self.tightness_threshold
+    
+    # Campo passivo reduz threshold e aumenta agressão
+    adjusted_aggression = self.aggression_level
+    if current_actions and current_actions.get('is_passive', False):
+        passive_score = current_actions.get('passive_opportunity_score', 0.0)
+        # Reduz threshold quando campo está passivo
+        adjusted_threshold = max(20, adjusted_threshold - int(passive_score * 5))
+        # Aumenta agressão temporariamente
+        adjusted_aggression = min(0.80, adjusted_aggression + (passive_score * 0.2))
+    
+    # Com campo passivo, até mãos médias podem fazer raise
+    if current_actions and current_actions.get('is_passive', False):
+        passive_score = current_actions.get('passive_opportunity_score', 0.0)
+        if hand_strength >= 25 and passive_score > 0.5:
+            raise_action = valid_actions[2]
+            if raise_action['amount']['min'] != -1:
+                return raise_action['action'], raise_action['amount']['min']
+    
+    # ... resto da lógica normal ...
+```
+
+#### Cenários Práticos
+
+**Cenário 1: Campo Passivo (apenas calls)**
+```
+Ações observadas: [CALL, CALL, CALL]
+- is_passive: True
+- passive_opportunity_score: ~0.8 (alto)
+- Comportamento:
+  - AggressivePlayer: threshold reduzido, faz raise com mão >= 20
+  - SmartPlayer: threshold reduzido, faz raise com mão >= 35
+  - TightPlayer: threshold reduzido levemente, faz raise com mão >= 45
+```
+
+**Cenário 2: Campo Agressivo (com raises)**
+```
+Ações observadas: [RAISE, CALL]
+- is_passive: False
+- passive_opportunity_score: 0.0
+- Comportamento: Normal, sem ajustes de campo passivo
+```
+
 ### Limitações
 
 - Análise é **por street**: Não considera ações de streets anteriores no mesmo round
 - Análise é **simples**: Não considera valores dos raises, apenas a presença
 - Não diferencia **quem** fez raise: Trata todos os oponentes igualmente
+- Campo passivo é detectado apenas quando há **2+ calls e 0 raises**
 
 ### Testes
 
@@ -1098,6 +1186,197 @@ Para executar:
 ```bash
 python3 tests/test_action_reaction.py
 python3 tests/test_action_reaction_integration.py
+```
+
+---
+
+## Análise de Blefe em Tempo Real
+
+### Visão Geral
+
+Todos os bots agora **analisam se os oponentes podem estar blefando** antes de tomar sua decisão. Isso permite que os bots paguem blefes quando têm mãos razoáveis, tornando o jogo mais estratégico e realista.
+
+### Como Funciona
+
+#### 1. Análise de Possível Blefe
+
+Antes de decidir sua ação, cada bot analisa se os oponentes podem estar blefando usando a função `analyze_possible_bluff()`:
+
+```python
+from utils.action_analyzer import analyze_possible_bluff
+
+def declare_action(self, valid_actions, hole_card, round_state):
+    hand_strength = self._evaluate_hand_strength(hole_card, round_state)
+    
+    # Analisa possível blefe dos oponentes
+    bluff_analysis = analyze_possible_bluff(
+        round_state, self.uuid, hand_strength, self.memory_manager
+    )
+    
+    # bluff_analysis contém:
+    # - possible_bluff_probability: float (0.0 a 1.0)
+    # - should_call_bluff: bool (se deve pagar possível blefe)
+    # - bluff_confidence: float (confiança na análise)
+    # - analysis_factors: dict (fatores que indicam blefe)
+```
+
+#### 2. Fatores que Indicam Possível Blefe
+
+A análise considera múltiplos fatores:
+
+**Múltiplos raises (2+):**
+- Alta probabilidade de blefe (+0.4)
+- Indica que oponente pode estar tentando intimidar
+
+**Alta agressão (>60% raises vs calls):**
+- Probabilidade moderada de blefe (+0.2)
+- Muitos raises em relação a calls
+
+**Street inicial (preflop/flop):**
+- Probabilidade baixa de blefe (+0.1)
+- Mais comum blefar em streets iniciais
+
+**Pot pequeno (<50):**
+- Probabilidade baixa de blefe (+0.1)
+- Mais fácil blefar em pots pequenos
+
+**Histórico de blefes do oponente:**
+- Se oponente tem histórico de blefes bem-sucedidos (+0.1)
+- Usa memória para identificar oponentes que blefam frequentemente
+
+#### 3. Decisão de Pagar Blefe
+
+A análise recomenda pagar blefe quando:
+
+```python
+# Com mão forte (≥40): sempre paga
+if hand_strength >= 40:
+    should_call = True
+
+# Com mão média (≥30) + alta probabilidade (>0.5): paga
+elif hand_strength >= 30 and bluff_prob > 0.5:
+    should_call = True
+
+# Com mão média-fraca (≥25) + muito alta probabilidade (>0.7): paga
+elif hand_strength >= 25 and bluff_prob > 0.7:
+    should_call = True
+```
+
+#### 4. Integração na Lógica do Bot
+
+A análise é usada na lógica de `_normal_action()`:
+
+```python
+def _normal_action(self, valid_actions, hand_strength, round_state, 
+                   current_actions=None, bluff_analysis=None):
+    # Se análise indica possível blefe e deve pagar, considera call
+    if bluff_analysis and bluff_analysis['should_call_bluff']:
+        if hand_strength >= threshold_personalizado:  # Threshold por personalidade
+            call_action = valid_actions[1]
+            return call_action['action'], call_action['amount']
+    
+    # ... resto da lógica normal ...
+```
+
+### Valores por Personalidade
+
+Cada bot tem um **threshold personalizado** para pagar blefe, refletindo sua personalidade:
+
+#### Conservadores (mais seletivos)
+- **TightPlayer**: 32
+- **CautiousPlayer**: 30
+- **PatientPlayer**: 28
+- **ConservativeAggressivePlayer**: 29
+
+#### Agressivos (pagam blefe mais facilmente)
+- **AggressivePlayer**: 22
+- **SteadyAggressivePlayer**: 24
+- **OpportunisticPlayer**: 23
+- **RandomPlayer**: 24
+- **FishPlayer**: 23
+
+#### Inteligentes (análise balanceada)
+- **SmartPlayer**: 28
+- **LearningPlayer**: 27
+- **CalculatedPlayer**: 28
+- **ThoughtfulPlayer**: 27
+- **CalmPlayer**: 27
+
+#### Balanceados (valores médios)
+- **BalancedPlayer**: 26
+- **ModeratePlayer**: 26
+- **FlexiblePlayer**: 25
+- **SteadyPlayer**: 26
+- **ObservantPlayer**: 26
+
+#### Outros
+- **AdaptivePlayer**: 25
+- **HybridPlayer**: 25
+
+### Exemplos Práticos
+
+#### Cenário 1: Múltiplos Raises (Alta Probabilidade de Blefe)
+```
+Ações: [RAISE, RAISE]
+- possible_bluff_probability: ~0.6-0.8
+- should_call_bluff: True (se mão ≥ threshold personalizado)
+- Comportamento: Bot paga blefe se tiver mão razoável
+```
+
+#### Cenário 2: Um Raise (Probabilidade Moderada)
+```
+Ações: [RAISE]
+- possible_bluff_probability: ~0.2-0.4
+- should_call_bluff: True (se mão forte ≥40)
+- Comportamento: Bot paga apenas com mão forte
+```
+
+#### Cenário 3: Sem Raises (Baixa Probabilidade)
+```
+Ações: [CALL, CALL]
+- possible_bluff_probability: ~0.0-0.2
+- should_call_bluff: False
+- Comportamento: Segue lógica normal
+```
+
+### Diferença da Análise de Ações
+
+**Análise de Ações (`analyze_current_round_actions`):**
+- Detecta **quantos raises** foram feitos
+- Ajusta **threshold de seletividade** do bot
+- Reduz **probabilidade de blefe** do próprio bot
+
+**Análise de Blefe (`analyze_possible_bluff`):**
+- Detecta se **oponentes podem estar blefando**
+- Calcula **probabilidade de blefe** dos oponentes
+- Recomenda se deve **pagar o blefe** baseado na mão própria
+
+### Vantagens
+
+1. **Jogo mais estratégico**: Bots pagam blefes quando têm mão razoável
+2. **Mais realista**: Comportamento similar a jogadores humanos experientes
+3. **Personalidade preservada**: Cada bot tem threshold diferente
+4. **Aprende com histórico**: Usa memória de blefes anteriores dos oponentes
+
+### Limitações
+
+- Análise é **probabilística**: Não garante que oponente está blefando
+- Não considera **valores dos raises**: Apenas quantidade
+- Não diferencia **quem** fez raise: Trata todos igualmente
+- Histórico é **limitado**: Apenas últimos 5 rounds por oponente
+
+### Testes
+
+A funcionalidade é testada automaticamente:
+- `tests/test_bluff_analysis.py`: Testes básicos da função
+- `tests/test_bluff_analysis_complete.py`: Testes completos de integração
+- `tests/test_bluff_personality_values.py`: Validação de valores por personalidade
+
+Para executar:
+```bash
+python3 tests/test_bluff_analysis.py
+python3 tests/test_bluff_analysis_complete.py
+python3 tests/test_bluff_personality_values.py
 ```
 
 ---
@@ -1138,12 +1417,19 @@ Utilitários para gerenciamento de memória:
 
 ### 5. `action_analyzer.py`
 
-Utilitário para análise de ações do round atual:
+Utilitário para análise de ações do round atual e possível blefe:
 
 - `analyze_current_round_actions(round_state, my_uuid)`: Analisa ações dos oponentes na street atual
   - Retorna informações sobre raises, calls, e nível de agressão
+  - **NOVO:** Detecta campo passivo (`is_passive`, `passive_opportunity_score`)
   - Exclui ações próprias da análise
   - Funciona em todas as streets (preflop, flop, turn, river)
+
+- `analyze_possible_bluff(round_state, my_uuid, my_hand_strength, memory_manager)`: Analisa se oponentes podem estar blefando
+  - Calcula probabilidade de blefe baseado em múltiplos fatores
+  - Considera histórico de blefes dos oponentes (se disponível)
+  - Recomenda se deve pagar blefe baseado na força da mão própria
+  - Retorna: probabilidade, recomendação, confiança e fatores analisados
 
 ---
 
@@ -1158,21 +1444,28 @@ Para entender como um bot decide sua ação, siga este fluxo:
    - Conta quantos raises foram feitos
    - Identifica última ação dos oponentes
 4. **Avalia força da mão** usando `evaluate_hand_strength()`
-5. **Ajusta threshold baseado em ações atuais**
+5. **NOVO: Analisa possível blefe dos oponentes** usando `analyze_possible_bluff()`
+   - Calcula probabilidade de blefe baseado em múltiplos fatores
+   - Determina se deve pagar blefe baseado na mão própria
+6. **Ajusta threshold baseado em ações atuais**
    - Se há raises: aumenta threshold (fica mais seletivo)
    - Se 2+ raises: aumenta threshold significativamente
-6. **Analisa contexto** (pot size, jogadores ativos, street)
-7. **Decide se deve blefar** baseado em probabilidade
+7. **Analisa contexto** (pot size, jogadores ativos, street)
+8. **Decide se deve blefar** baseado em probabilidade
    - **NOVO: Se 2+ raises, evita blefe completamente**
-8. **Se blefar:**
+9. **Se blefar:**
    - Analisa contexto da mesa
    - Escolhe entre CALL ou RAISE
    - Retorna ação
-9. **Se não blefar:**
-   - Compara força da mão com **threshold ajustado**
-   - Escolhe FOLD, CALL ou RAISE
-   - Retorna ação
-10. **Após o round:**
+10. **Se não blefar:**
+    - **NOVO: Se análise indica possível blefe e deve pagar:**
+      - Compara mão com threshold personalizado
+      - Se mão ≥ threshold: faz CALL (paga blefe)
+    - Caso contrário:
+      - Compara força da mão com **threshold ajustado**
+      - Escolhe FOLD, CALL ou RAISE
+    - Retorna ação
+11. **Após o round:**
     - Recebe resultado em `receive_round_result_message`
     - Atualiza estatísticas
     - Aprende com resultado
