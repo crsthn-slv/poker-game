@@ -597,4 +597,59 @@ class ConsoleFormatter:
         # Remove UUIDs e caracteres especiais se presentes
         # Normalmente o nome já vem limpo, mas por segurança
         return str(name).strip()
+    
+    def format_round_divider(self, round_number, width=80):
+        """Formata divisor de round com tracejado e número do round no meio.
+        
+        Args:
+            round_number: Número do round
+            width: Largura total da linha (padrão 80)
+        
+        Returns:
+            String formatada com divisor de round
+        """
+        # Calcula quantos traços de cada lado para centralizar "Round X"
+        round_text = f" Round {round_number} "
+        text_length = len(round_text)
+        total_dashes = width - text_length
+        
+        # Divide os traços igualmente (ou quase) de cada lado
+        left_dashes = total_dashes // 2
+        right_dashes = total_dashes - left_dashes
+        
+        # Cria linha com tracejado e texto centralizado
+        divider = f"{self.CYAN}{'─' * left_dashes}{self.RESET}{self.BOLD}{self.CYAN}{round_text}{self.RESET}{self.CYAN}{'─' * right_dashes}{self.RESET}"
+        return divider
+    
+    def format_round_winner(self, round_number, winner_name, pot_amount, hand_desc=None):
+        """Formata mensagem de vitória do round de forma destacada.
+        
+        Args:
+            round_number: Número do round
+            winner_name: Nome do jogador vencedor
+            pot_amount: Valor do pot ganho
+            hand_desc: Descrição da mão vencedora (opcional)
+        
+        Returns:
+            String formatada com mensagem de vitória destacada
+        """
+        # Usa cor verde para destacar vitória
+        color = self.GREEN
+        
+        # Monta partes da mensagem
+        message_parts = [f"Round {round_number}: {winner_name} WON THE ROUND!"]
+        
+        # Adiciona pot ganho (sem cor adicional, já que está dentro do bloco colorido)
+        pot_display = self.format_pot_with_color(pot_amount)
+        message_parts.append(f"Pot: {pot_display}")
+        
+        # Adiciona descrição da mão se disponível
+        if hand_desc:
+            message_parts.append(f"Hand: {hand_desc}")
+        
+        # Cria linha única com todas as informações
+        message_line = " | ".join(message_parts)
+        
+        # Retorna mensagem formatada com bordas destacadas
+        return f"{color}{'─' * 80}{self.RESET}\n{color}{self.BOLD}{message_line}{self.RESET}\n{color}{'─' * 80}{self.RESET}"
 

@@ -5,6 +5,7 @@ from utils.console_formatter import ConsoleFormatter
 from utils.cards_registry import store_player_cards, get_all_cards, clear_registry
 from utils.win_probability_calculator import calculate_win_probability_for_player
 from utils.hand_utils import get_community_cards, normalize_hole_cards
+from utils.game_history import GameHistory
 
 
 class QuitGameException(Exception):
@@ -14,10 +15,12 @@ class QuitGameException(Exception):
 
 class ConsolePlayer(BasePokerPlayer):
 
-    def __init__(self, input_receiver=None, initial_stack=100):
+    def __init__(self, input_receiver=None, initial_stack=100, small_blind=None, big_blind=None):
         self.input_receiver = input_receiver if input_receiver else self.__gen_raw_input_wrapper()
         self.formatter = ConsoleFormatter()
         self.initial_stack = initial_stack
+        self.small_blind = small_blind  # Blind pequeno (pode ser None)
+        self.big_blind = big_blind  # Blind grande (pode ser None)
         self.last_pot_printed = 0  # Rastreia último pot impresso para evitar repetições
         self.my_hole_cards = None  # Cache das cartas do jogador atual
         self.players_hole_cards = {}  # Cache de cartas de todos os jogadores (UUID -> cartas)
@@ -26,6 +29,8 @@ class ConsolePlayer(BasePokerPlayer):
         self.last_cache_key = None  # Chave de cache usada na última vez
         self.preflop_active_count = None  # Número de jogadores ativos no preflop (para garantir estabilidade)
         self.preflop_active_count = None  # Número de jogadores ativos no preflop (para garantir estabilidade)
+        # Sistema de histórico
+        self.game_history = None  # Será inicializado quando UUID for definido
 
     def _get_win_probability_cache_key(self, round_state):
         """Gera chave de cache baseada em street, número de jogadores ativos e cartas comunitárias.
@@ -330,6 +335,34 @@ class ConsolePlayer(BasePokerPlayer):
         # Solicitar ação
         print()
         action, amount = self.__receive_action_from_console(valid_actions)  # type: ignore[assignment]
+        
+        # Registra ação no histórico
+        if self.game_history and hasattr(self, 'uuid') and self.uuid:
+            # Obtém probabilidade de vitória se disponível
+            win_prob = None
+            if win_probability_display is not None:
+                # Tenta extrair valor numérico da probabilidade
+                try:
+                    if '-' in win_probability_display:
+                        # Intervalo de confiança (ex: "25–30%")
+                        parts = win_probability_display.replace('%', '').split('–')
+                        if len(parts) == 2:
+                            win_prob = (float(parts[0]) + float(parts[1])) / 2 / 100
+                    else:
+                        # Valor único (ex: "45%")
+                        win_prob = float(win_probability_display.replace('%', '')) / 100
+                except (ValueError, AttributeError):
+                    pass
+            
+            self.game_history.record_action(
+                player_uuid=self.uuid,
+                action=action,
+                amount=amount,
+                round_state=round_state,
+                my_hole_cards=hole_cards if hole_cards else None,
+                my_win_probability=win_prob
+            )
+        
         return action, amount
 
     def receive_game_start_message(self, game_info):
@@ -338,8 +371,11 @@ class ConsolePlayer(BasePokerPlayer):
         pass
 
     def receive_round_start_message(self, round_count, hole_card, seats):
-        """Não imprime nada - HUD será mostrado no turno do jogador."""
-        # Silencioso - informações aparecerão no HUD do declare_action
+        """Mostra divisor de round e inicializa novo round."""
+        # Mostra divisor de round de forma destacada
+        print("\n" + self.formatter.format_round_divider(round_count))
+        print()
+        
         # Reseta pot impresso para novo round
         self.last_pot_printed = 0
         # Limpa cache de probabilidade para novo round
@@ -369,6 +405,48 @@ class ConsolePlayer(BasePokerPlayer):
                         if normalized_cards:
                             self.players_hole_cards[seat_uuid] = normalized_cards
                             store_player_cards(seat_uuid, normalized_cards)
+        
+        # Inicializa histórico se ainda não foi inicializado
+        if not self.game_history and hasattr(self, 'uuid') and self.uuid:
+            self.game_history = GameHistory(self.uuid, self.initial_stack)
+            # Registra jogadores
+            if seats:
+                self.game_history.register_players(seats)
+                # Tenta obter configurações do jogo dos seats
+                num_players = len([s for s in seats if isinstance(s, dict)])
+                
+                # Tenta obter blinds: primeiro dos parâmetros, depois calcula como fallback
+                small_blind_value = self.small_blind
+                big_blind_value = self.big_blind
+                
+                # Se não foram passados, tenta calcular usando BlindManager
+                if small_blind_value is None or big_blind_value is None:
+                    try:
+                        from game.blind_manager import BlindManager
+                        blind_manager = BlindManager(initial_reference_stack=self.initial_stack)
+                        calculated_sb, calculated_bb = blind_manager.get_blinds()
+                        if small_blind_value is None:
+                            small_blind_value = calculated_sb
+                        if big_blind_value is None:
+                            big_blind_value = calculated_bb
+                    except Exception:
+                        # Se falhar, usa 0 (será atualizado quando detectar ações de blind)
+                        small_blind_value = small_blind_value or 0
+                        big_blind_value = big_blind_value or 0
+                
+                self.game_history.set_game_config(
+                    small_blind=small_blind_value,
+                    big_blind=big_blind_value,
+                    max_rounds=10,  # Default, pode ser ajustado
+                    num_players=num_players
+                )
+        
+        # Inicia novo round no histórico
+        if self.game_history and seats:
+            # Tenta encontrar posição do botão (geralmente é o primeiro seat ou pode ser calculado)
+            button_position = 0  # Default, pode ser ajustado se houver informação disponível
+            self.game_history.start_round(round_count, seats, button_position)
+        
         pass
 
     def receive_street_start_message(self, street, round_state):
@@ -399,6 +477,10 @@ class ConsolePlayer(BasePokerPlayer):
         pot_display = self.formatter.format_pot_with_color(pot_amount)
         print(f"Pot {pot_display}")
         self.last_pot_printed = pot_amount
+        
+        # Registra início de nova street no histórico
+        if self.game_history:
+            self.game_history.start_street(street, round_state)
 
     def receive_game_update_message(self, new_action, round_state):
         """Exibe apenas quem agiu e a ação, de forma simplificada."""
@@ -453,6 +535,41 @@ class ConsolePlayer(BasePokerPlayer):
         
         if action_parts:
             print(" | ".join(action_parts))
+        
+        # Registra ação no histórico (de outros jogadores)
+        if self.game_history:
+            # Tenta obter UUID do jogador que fez a ação
+            player_uuid = None
+            seats = round_state.get('seats', [])
+            for seat in seats:
+                if isinstance(seat, dict):
+                    seat_name = seat.get('name', '')
+                    if seat_name == player_name or self.formatter.clean_player_name(seat_name) == player_name:
+                        player_uuid = seat.get('uuid')
+                        break
+            
+            if player_uuid:
+                # Usa 'paid' para CALL, 'amount' para outras ações
+                action_amount = paid if action_type == 'CALL' and paid > 0 else amount
+                self.game_history.record_action(
+                    player_uuid=player_uuid,
+                    action=action_type,
+                    amount=action_amount,
+                    round_state=round_state
+                )
+                
+                # Atualiza configurações de blinds se detectar SMALLBLIND ou BIGBLIND
+                # Melhorado: captura de qualquer jogador e atualiza se necessário
+                if action_type == 'SMALLBLIND' and amount > 0:
+                    # Só atualiza se ainda não foi definido ou se o valor é maior (blind structure)
+                    current_sb = self.game_history.history["game_config"]["small_blind"]
+                    if current_sb == 0 or amount > current_sb:
+                        self.game_history.history["game_config"]["small_blind"] = amount
+                elif action_type == 'BIGBLIND' and amount > 0:
+                    # Só atualiza se ainda não foi definido ou se o valor é maior (blind structure)
+                    current_bb = self.game_history.history["game_config"]["big_blind"]
+                    if current_bb == 0 or amount > current_bb:
+                        self.game_history.history["game_config"]["big_blind"] = amount
 
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Mostra resultado final humanizado sem JSON bruto."""
@@ -505,7 +622,24 @@ class ConsolePlayer(BasePokerPlayer):
                                         break
         
         if winner_uuids or seats:
+            # Mostra última street e community cards antes do resultado
+            street_pt = self.formatter.format_street_pt(current_street)
+            if street_pt:
+                print(f"\n–– {street_pt.upper()} ––")
+            else:
+                print(f"\n–– {current_street.upper() if current_street else 'UNKNOWN'} ––")
+            
+            # Mostra community cards
+            if community_cards:
+                community_display = self.formatter.format_cards_display_with_color(community_cards)
+                print(f"Community cards: {community_display}")
+            
             print("\n–––– ROUND RESULT ––––")
+            
+            # Mostra community cards novamente no resultado
+            if community_cards:
+                community_display = self.formatter.format_cards_display_with_color(community_cards)
+                print(f"\nCommunity cards: {community_display}")
             
             # Mostra cartas dos participantes que não desistiram
             print("\nParticipant cards:")
@@ -521,10 +655,11 @@ class ConsolePlayer(BasePokerPlayer):
                     # Determina se deve mostrar as cartas deste jogador
                     is_winner = seat_uuid in winner_uuids
                     is_folded = state == 'folded'
+                    is_player = hasattr(self, 'uuid') and self.uuid and seat_uuid == self.uuid
                     
-                    # Se o jogador deu fold, mostra apenas o nome com "folded" (sem cartas)
-                    # Linha inteira em tom opaco para indicar que está desabilitado
-                    if is_folded:
+                    # Se o jogador deu fold mas não é o jogador humano, mostra apenas "folded" (sem cartas)
+                    # Se for o jogador humano que deu fold, mostra as cartas mesmo assim para análise
+                    if is_folded and not is_player:
                         full_line = f"  {name}: folded"
                         dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                         print(dim_line)
@@ -569,10 +704,16 @@ class ConsolePlayer(BasePokerPlayer):
                     if hole_cards and len(hole_cards) >= 2:
                         cards_display = self.formatter.format_cards_display_with_color(hole_cards)
                         hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
-                        print(f"  {name}: {cards_display} | {hand_desc}")
+                        # Se o jogador humano deu fold, adiciona indicador de folded mas mostra cartas
+                        folded_indicator = " (folded)" if is_folded and is_player else ""
+                        print(f"  {name}: {cards_display} | {hand_desc}{folded_indicator}")
                     else:
                         # Se não encontrou cartas em nenhum lugar, mostra erro
-                        print(f"  {name}: [error: cards not found]")
+                        # Mas se for o jogador humano que deu fold, mostra folded mesmo sem cartas
+                        if is_folded and is_player:
+                            print(f"  {name}: folded (cards not found)")
+                        else:
+                            print(f"  {name}: [error: cards not found]")
             
             # Limpa cache de cartas para próximo round (registry será limpo no próximo round_start)
             self.players_hole_cards.clear()
@@ -581,7 +722,20 @@ class ConsolePlayer(BasePokerPlayer):
             # Mostra ganhador(es)
             if winner_uuids:
                 winner_names = []
+                player_won = False  # Verifica se o jogador humano venceu
+                player_hand_desc = None
+                num_winners = len(winner_uuids)
+                
                 for winner_uuid in winner_uuids:
+                    # Verifica se o jogador humano venceu
+                    if hasattr(self, 'uuid') and self.uuid and winner_uuid == self.uuid:
+                        player_won = True
+                        # Obtém descrição da mão do jogador
+                        all_cards = get_all_cards()
+                        hole_cards = all_cards.get(winner_uuid)
+                        if hole_cards:
+                            player_hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
+                    
                     for seat in seats:
                         if isinstance(seat, dict) and seat.get('uuid') == winner_uuid:
                             name = self.formatter.clean_player_name(seat.get('name', ''))
@@ -603,6 +757,18 @@ class ConsolePlayer(BasePokerPlayer):
                     winner_line = " | ".join(winner_names)
                     pot_display = self.formatter.format_pot_with_color(pot)
                     print(f"\nWinner(s): {winner_line} | Pot: {pot_display}")
+                
+                # Mostra mensagem destacada se o jogador humano venceu
+                if player_won:
+                    # Calcula pot ganho pelo jogador (dividido igualmente se houver múltiplos vencedores)
+                    player_pot = pot // num_winners if num_winners > 0 else pot
+                    # Obtém número do round do histórico
+                    round_number = 0
+                    if self.game_history and self.game_history.current_round:
+                        round_number = self.game_history.current_round.get("round_number", 0)
+                    print()
+                    print(self.formatter.format_round_winner(round_number, "You", player_pot, player_hand_desc))
+                    print()
             
             # Mostra stacks finais
             final_stacks = []
@@ -615,6 +781,20 @@ class ConsolePlayer(BasePokerPlayer):
             if final_stacks:
                 print(f"\nFinal stacks:")
                 print(" | ".join(final_stacks))
+            
+            # Registra resultado do round no histórico
+            if self.game_history:
+                self.game_history.record_round_result(winners, hand_info, round_state)
+                
+                # Verifica se é o último round (10 rounds é o padrão)
+                round_number = self.game_history.current_round.get("round_number", 0) if self.game_history.current_round else 0
+                if round_number >= 10:
+                    # Salva histórico ao final do jogo
+                    try:
+                        history_file = self.game_history.save()
+                        print(f"\n[Histórico salvo em: {history_file}]")
+                    except Exception as e:
+                        print(f"\n[Erro ao salvar histórico: {e}]")
             
             # Pausa para aguardar input antes de continuar
             print()

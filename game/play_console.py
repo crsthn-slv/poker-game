@@ -11,65 +11,125 @@ from players.conservative_aggressive_player import ConservativeAggressivePlayer
 from players.opportunistic_player import OpportunisticPlayer
 from players.hybrid_player import HybridPlayer
 from players.fish_player import FishPlayer
+from players.cautious_player import CautiousPlayer
+from players.moderate_player import ModeratePlayer
+from players.patient_player import PatientPlayer
+from players.calculated_player import CalculatedPlayer
+from players.steady_player import SteadyPlayer
+from players.observant_player import ObservantPlayer
+from players.flexible_player import FlexiblePlayer
+from players.calm_player import CalmPlayer
+from players.thoughtful_player import ThoughtfulPlayer
+from players.steady_aggressive_player import SteadyAggressivePlayer
 from game.blind_manager import BlindManager
 import random
 
-# Lista de bots disponíveis com suas descrições
+# Lista de bots disponíveis com suas descrições e nomes fixos
 AVAILABLE_BOTS = [
     {
         'class': TightPlayer,
-        'name': 'Tight',
+        'name': 'Blaze',
         'description': 'Conservador, blefa 8% das vezes'
     },
     {
         'class': AggressivePlayer,
-        'name': 'Aggressive',
+        'name': 'Riley',
         'description': 'Agressivo, blefa 35% das vezes'
     },
     {
         'class': RandomPlayer,
-        'name': 'Random',
+        'name': 'Sloan',
         'description': 'Jogador aleatório'
     },
     {
         'class': SmartPlayer,
-        'name': 'Smart',
+        'name': 'Dexter',
         'description': 'Inteligente, blefe dinâmico (15% base)'
     },
     {
         'class': LearningPlayer,
-        'name': 'Learning',
+        'name': 'Ivory',
         'description': 'Aprende e se adapta com o tempo'
     },
     {
         'class': BalancedPlayer,
-        'name': 'Balanced',
+        'name': 'Maverick',
         'description': 'Jogador equilibrado'
     },
     {
         'class': AdaptivePlayer,
-        'name': 'Adaptive',
+        'name': 'Nova',
         'description': 'Adapta-se às situações do jogo'
     },
     {
         'class': ConservativeAggressivePlayer,
-        'name': 'ConservativeAggressive',
+        'name': 'Jett',
         'description': 'Conservador-agressivo misto'
     },
     {
         'class': OpportunisticPlayer,
-        'name': 'Opportunistic',
+        'name': 'Harper',
         'description': 'Procura oportunidades para ganhar'
     },
     {
         'class': HybridPlayer,
-        'name': 'Hybrid',
+        'name': 'Knox',
         'description': 'Estratégia híbrida combinada'
     },
     {
         'class': FishPlayer,
-        'name': 'Fish',
+        'name': 'Sable',
         'description': 'Jogador iniciante'
+    },
+    {
+        'class': CautiousPlayer,
+        'name': 'Phoenix',
+        'description': 'Jogador cauteloso'
+    },
+    {
+        'class': ModeratePlayer,
+        'name': 'Avery',
+        'description': 'Jogador moderado'
+    },
+    {
+        'class': PatientPlayer,
+        'name': 'Sterling',
+        'description': 'Jogador paciente'
+    },
+    {
+        'class': CalculatedPlayer,
+        'name': 'Reign',
+        'description': 'Jogador calculado'
+    },
+    {
+        'class': SteadyPlayer,
+        'name': 'Jaxon',
+        'description': 'Jogador estável'
+    },
+    {
+        'class': ObservantPlayer,
+        'name': 'Blair',
+        'description': 'Jogador observador'
+    },
+    {
+        'class': FlexiblePlayer,
+        'name': 'Lennox',
+        'description': 'Jogador flexível'
+    },
+    {
+        'class': CalmPlayer,
+        'name': 'Karter',
+        'description': 'Jogador calmo'
+    },
+    {
+        'class': ThoughtfulPlayer,
+        'name': 'Ember',
+        'description': 'Jogador pensativo'
+    },
+    {
+        'class': SteadyAggressivePlayer,
+        'name': 'Talon',
+        'description': 'Jogador agressivo mas controlado'
     }
 ]
 
@@ -208,8 +268,15 @@ if __name__ == "__main__":
     # Configura o jogo com os blinds calculados automaticamente
     config = setup_config(max_round=10, initial_stack=initial_stack, small_blind_amount=small_blind)
     
-    # Registra o jogador humano
-    config.register_player(name="You", algorithm=ConsolePlayer(initial_stack=initial_stack))
+    # Registra o jogador humano com os blinds calculados
+    config.register_player(
+        name="You", 
+        algorithm=ConsolePlayer(
+            initial_stack=initial_stack,
+            small_blind=small_blind,
+            big_blind=big_blind
+        )
+    )
     
     # Registra os bots selecionados aleatoriamente
     for bot_info in selected_bots:

@@ -2,6 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
+from utils.action_analyzer import analyze_current_round_actions
 
 class SmartPlayer(BasePokerPlayer):
     """Jogador inteligente que ajusta estratégia dinamicamente. Usa sistema de memória unificado."""
@@ -28,6 +29,9 @@ class SmartPlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         # Atualiza stack atual
         self._update_stack(round_state)
         
@@ -42,10 +46,15 @@ class SmartPlayer(BasePokerPlayer):
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         should_bluff = self._should_bluff()
         
+        # NOVO: Ajusta blefe baseado em ações atuais
+        if current_actions and current_actions['has_raises']:
+            if current_actions['raise_count'] >= 2:
+                should_bluff = False  # Não blefa se muito agressão
+        
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -140,10 +149,19 @@ class SmartPlayer(BasePokerPlayer):
         community_cards = round_state.get('community_card', []) if round_state else None
         return evaluate_hand_strength(hole_card, community_cards)
     
-    def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação normal baseada na força da mão e contexto."""
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+        """Ação normal baseada na força da mão, contexto e ações atuais."""
         context = self._analyze_table_context(round_state)
         adjusted_threshold = self.tightness_threshold
+        
+        # NOVO: Ajusta threshold baseado em ações do round atual
+        if current_actions:
+            if current_actions['has_raises']:
+                # Se alguém fez raise, fica mais seletivo
+                adjusted_threshold += 5 + (current_actions['raise_count'] * 2)
+            elif current_actions['last_action'] == 'raise':
+                # Se última ação foi raise, aumenta threshold
+                adjusted_threshold += 3
         
         # Mão muito forte: raise agressivo
         if hand_strength >= 70:
@@ -168,9 +186,14 @@ class SmartPlayer(BasePokerPlayer):
             call_action = valid_actions[1]
             return call_action['action'], call_action['amount']
         
-        # Mão fraca: fold
-        fold_action = valid_actions[0]
-        return fold_action['action'], fold_action['amount']
+        # Mão fraca: fold apenas se for MUITO fraca
+        if hand_strength < (adjusted_threshold - 6):
+            fold_action = valid_actions[0]
+            return fold_action['action'], fold_action['amount']
+        
+        # Mão média-fraca: call (não desiste tão fácil)
+        call_action = valid_actions[1]
+        return call_action['action'], call_action['amount']
     
     def receive_game_start_message(self, game_info):
         """Inicializa stack inicial."""

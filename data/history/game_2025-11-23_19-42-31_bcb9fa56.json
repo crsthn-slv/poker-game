@@ -1,0 +1,1306 @@
+{
+  "game_id": "bcb9fa56-b0f9-4809-bf7a-5099ada4e65c",
+  "timestamp": "2025-11-23T19:42:31.232406",
+  "player_uuid": "uncesjkznuwastbggjyzen",
+  "game_config": {
+    "initial_stack": 1000,
+    "small_blind": 0,
+    "big_blind": 0,
+    "max_rounds": 10,
+    "num_players": 6
+  },
+  "players": [
+    "uncesjkznuwastbggjyzen",
+    "depwrjmsjxqhymsklfnppe",
+    "hxdzqelvcvimhzeneyvmqf",
+    "gkatvddohzisgdesajemzj",
+    "dqqktkmuinwifoefuaqlzy",
+    "fxtwljlgohignhpmpcbvgl"
+  ],
+  "rounds": [
+    {
+      "round_number": 1,
+      "timestamp": "2025-11-23T19:42:31.232518",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 1000,
+        "depwrjmsjxqhymsklfnppe": 975,
+        "hxdzqelvcvimhzeneyvmqf": 950,
+        "gkatvddohzisgdesajemzj": 1000,
+        "dqqktkmuinwifoefuaqlzy": 1000,
+        "fxtwljlgohignhpmpcbvgl": 1000
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 75,
+              "pot_before": 175,
+              "pot_after": 250,
+              "stack_before": 1000,
+              "stack_after": 1000,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "CA",
+                "C4"
+              ],
+              "pot_odds": 0.3
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "S9",
+            "S2",
+            "H8"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 325,
+              "pot_after": 325,
+              "stack_before": 925,
+              "stack_after": 925,
+              "num_active_players": 4,
+              "my_hole_cards": [
+                "CA",
+                "C4"
+              ],
+              "my_win_probability": 0.15
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "S9",
+            "S2",
+            "H8",
+            "SQ"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 325,
+              "pot_after": 325,
+              "stack_before": 925,
+              "stack_after": 925,
+              "num_active_players": 4,
+              "my_hole_cards": [
+                "CA",
+                "C4"
+              ],
+              "my_win_probability": 0.07
+            }
+          ]
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "S9",
+            "S2",
+            "H8",
+            "SQ",
+            "D6"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "hxdzqelvcvimhzeneyvmqf"
+        ],
+        "pot_amount": 325,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 925,
+          "depwrjmsjxqhymsklfnppe": 975,
+          "hxdzqelvcvimhzeneyvmqf": 1250,
+          "gkatvddohzisgdesajemzj": 1000,
+          "dqqktkmuinwifoefuaqlzy": 925,
+          "fxtwljlgohignhpmpcbvgl": 925
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": -75,
+          "final_stack": 925,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 2,
+      "timestamp": "2025-11-23T19:44:10.997137",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 925,
+        "depwrjmsjxqhymsklfnppe": 975,
+        "hxdzqelvcvimhzeneyvmqf": 1225,
+        "gkatvddohzisgdesajemzj": 950,
+        "dqqktkmuinwifoefuaqlzy": 925,
+        "fxtwljlgohignhpmpcbvgl": 925
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 50,
+              "pot_before": 125,
+              "pot_after": 175,
+              "stack_before": 925,
+              "stack_after": 925,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "SK",
+                "CJ"
+              ],
+              "pot_odds": 0.2857142857142857
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "S3",
+            "H2",
+            "D4"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 200,
+              "pot_after": 200,
+              "stack_before": 875,
+              "stack_after": 875,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "SK",
+                "CJ"
+              ],
+              "my_win_probability": 0.21
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "S3",
+            "H2",
+            "D4",
+            "C2"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 200,
+              "pot_after": 200,
+              "stack_before": 875,
+              "stack_after": 875,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "SK",
+                "CJ"
+              ],
+              "my_win_probability": 0.23
+            }
+          ]
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "S3",
+            "H2",
+            "D4",
+            "C2",
+            "H3"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "hxdzqelvcvimhzeneyvmqf"
+        ],
+        "pot_amount": 308,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 875,
+          "depwrjmsjxqhymsklfnppe": 975,
+          "hxdzqelvcvimhzeneyvmqf": 1454,
+          "gkatvddohzisgdesajemzj": 950,
+          "dqqktkmuinwifoefuaqlzy": 821,
+          "fxtwljlgohignhpmpcbvgl": 925
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": -50,
+          "final_stack": 875,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 3,
+      "timestamp": "2025-11-23T19:44:34.905340",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 875,
+        "depwrjmsjxqhymsklfnppe": 975,
+        "hxdzqelvcvimhzeneyvmqf": 1454,
+        "gkatvddohzisgdesajemzj": 925,
+        "dqqktkmuinwifoefuaqlzy": 771,
+        "fxtwljlgohignhpmpcbvgl": 925
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 50,
+              "pot_before": 75,
+              "pot_after": 125,
+              "stack_before": 875,
+              "stack_after": 875,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "SA",
+                "D2"
+              ],
+              "pot_odds": 0.4
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "SJ",
+            "S7",
+            "D7"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 70,
+              "pot_before": 200,
+              "pot_after": 270,
+              "stack_before": 825,
+              "stack_after": 825,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "SA",
+                "D2"
+              ],
+              "my_win_probability": 0.38,
+              "pot_odds": 0.25925925925925924
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "SJ",
+            "S7",
+            "D7",
+            "S6"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 410,
+              "pot_after": 410,
+              "stack_before": 755,
+              "stack_after": 755,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "SA",
+                "D2"
+              ],
+              "my_win_probability": 0.47
+            }
+          ]
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "SJ",
+            "S7",
+            "D7",
+            "S6",
+            "D9"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 410,
+              "pot_after": 410,
+              "stack_before": 755,
+              "stack_after": 755,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "SA",
+                "D2"
+              ],
+              "my_win_probability": 0.16
+            }
+          ]
+        }
+      ],
+      "result": {
+        "winners": [
+          "gkatvddohzisgdesajemzj"
+        ],
+        "pot_amount": 410,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 755,
+          "depwrjmsjxqhymsklfnppe": 855,
+          "hxdzqelvcvimhzeneyvmqf": 1454,
+          "gkatvddohzisgdesajemzj": 1240,
+          "dqqktkmuinwifoefuaqlzy": 771,
+          "fxtwljlgohignhpmpcbvgl": 925
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": -120,
+          "final_stack": 755,
+          "reached_showdown": true,
+          "final_hand": "One Pair",
+          "final_hand_strength": 4886,
+          "my_hole_cards": [
+            "SA",
+            "D2"
+          ],
+          "opponents_at_showdown": [
+            {
+              "uuid": "depwrjmsjxqhymsklfnppe",
+              "hole_cards": [
+                "ST",
+                "CQ"
+              ],
+              "hand": "One Pair",
+              "hand_strength": 4966
+            },
+            {
+              "uuid": "gkatvddohzisgdesajemzj",
+              "hole_cards": [
+                "H2",
+                "DJ"
+              ],
+              "hand": "Two Pair",
+              "hand_strength": 2868
+            }
+          ]
+        }
+      }
+    },
+    {
+      "round_number": 4,
+      "timestamp": "2025-11-23T19:46:11.197896",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 755,
+        "depwrjmsjxqhymsklfnppe": 855,
+        "hxdzqelvcvimhzeneyvmqf": 1454,
+        "gkatvddohzisgdesajemzj": 1240,
+        "dqqktkmuinwifoefuaqlzy": 746,
+        "fxtwljlgohignhpmpcbvgl": 875
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 75,
+              "pot_after": 75,
+              "stack_before": 755,
+              "stack_after": 755,
+              "num_active_players": 6,
+              "my_hole_cards": [
+                "H8",
+                "D4"
+              ]
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "HK",
+            "S8",
+            "C7"
+          ],
+          "actions": []
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "HK",
+            "S8",
+            "C7",
+            "H2"
+          ],
+          "actions": []
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "HK",
+            "S8",
+            "C7",
+            "H2",
+            "H7"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "depwrjmsjxqhymsklfnppe"
+        ],
+        "pot_amount": 337,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 755,
+          "depwrjmsjxqhymsklfnppe": 1061,
+          "hxdzqelvcvimhzeneyvmqf": 1323,
+          "gkatvddohzisgdesajemzj": 1240,
+          "dqqktkmuinwifoefuaqlzy": 746,
+          "fxtwljlgohignhpmpcbvgl": 875
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": 0,
+          "final_stack": 755,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 5,
+      "timestamp": "2025-11-23T19:46:27.866455",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 705,
+        "depwrjmsjxqhymsklfnppe": 1061,
+        "hxdzqelvcvimhzeneyvmqf": 1323,
+        "gkatvddohzisgdesajemzj": 1240,
+        "dqqktkmuinwifoefuaqlzy": 746,
+        "fxtwljlgohignhpmpcbvgl": 850
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 146,
+              "pot_before": 356,
+              "pot_after": 502,
+              "stack_before": 705,
+              "stack_after": 705,
+              "num_active_players": 4,
+              "my_hole_cards": [
+                "HQ",
+                "SQ"
+              ],
+              "pot_odds": 0.2908366533864542
+            },
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 191,
+              "pot_before": 608,
+              "pot_after": 799,
+              "stack_before": 609,
+              "stack_after": 609,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "HQ",
+                "SQ"
+              ],
+              "pot_odds": 0.2390488110137672
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "HT",
+            "C4",
+            "D9"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 653,
+              "pot_after": 653,
+              "stack_before": 564,
+              "stack_after": 564,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "HQ",
+                "SQ"
+              ],
+              "my_win_probability": 0.67
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "HT",
+            "C4",
+            "D9",
+            "DQ"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 200,
+              "pot_before": 653,
+              "pot_after": 853,
+              "stack_before": 564,
+              "stack_after": 564,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "HQ",
+                "SQ"
+              ],
+              "my_win_probability": 0.83,
+              "pot_odds": 0.23446658851113716
+            },
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 413,
+              "pot_before": 1679,
+              "pot_after": 2092,
+              "stack_before": 364,
+              "stack_after": 364,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "HQ",
+                "SQ"
+              ],
+              "my_win_probability": 0.83,
+              "pot_odds": 0.1974187380497132
+            }
+          ]
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "HT",
+            "C4",
+            "D9",
+            "DQ",
+            "CT"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 100,
+              "pot_before": 1892,
+              "pot_after": 1992,
+              "stack_before": 151,
+              "stack_after": 151,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "HQ",
+                "SQ"
+              ],
+              "my_win_probability": 1.0,
+              "pot_odds": 0.050200803212851405
+            }
+          ]
+        }
+      ],
+      "result": {
+        "winners": [
+          "uncesjkznuwastbggjyzen"
+        ],
+        "pot_amount": 2192,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 2243,
+          "depwrjmsjxqhymsklfnppe": 1061,
+          "hxdzqelvcvimhzeneyvmqf": 1323,
+          "gkatvddohzisgdesajemzj": 1160,
+          "dqqktkmuinwifoefuaqlzy": 42,
+          "fxtwljlgohignhpmpcbvgl": 171
+        },
+        "showdown": true,
+        "my_result": {
+          "won": true,
+          "pot_won": 2192,
+          "stack_change": 1538,
+          "final_stack": 2243,
+          "reached_showdown": true,
+          "final_hand": "Full House",
+          "final_hand_strength": 194,
+          "my_hole_cards": [
+            "HQ",
+            "SQ"
+          ],
+          "opponents_at_showdown": [
+            {
+              "uuid": "dqqktkmuinwifoefuaqlzy",
+              "hole_cards": [
+                "D7",
+                "H7"
+              ],
+              "hand": "Two Pair",
+              "hand_strength": 2954
+            },
+            {
+              "uuid": "fxtwljlgohignhpmpcbvgl",
+              "hole_cards": [
+                "SA",
+                "H8"
+              ],
+              "hand": "One Pair",
+              "hand_strength": 4217
+            }
+          ]
+        }
+      }
+    },
+    {
+      "round_number": 6,
+      "timestamp": "2025-11-23T19:47:24.551902",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 2218,
+        "depwrjmsjxqhymsklfnppe": 1011,
+        "hxdzqelvcvimhzeneyvmqf": 1323,
+        "gkatvddohzisgdesajemzj": 1160,
+        "dqqktkmuinwifoefuaqlzy": 42,
+        "fxtwljlgohignhpmpcbvgl": 171
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 50,
+              "pot_before": 193,
+              "pot_after": 243,
+              "stack_before": 2218,
+              "stack_after": 2218,
+              "num_active_players": 4,
+              "my_hole_cards": [
+                "CA",
+                "D9"
+              ],
+              "pot_odds": 0.205761316872428
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "C8",
+            "D6",
+            "HT"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 210,
+              "pot_after": 210,
+              "stack_before": 2193,
+              "stack_after": 2193,
+              "num_active_players": 3,
+              "my_hole_cards": [
+                "CA",
+                "D9"
+              ],
+              "my_win_probability": 0.4
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "C8",
+            "D6",
+            "HT",
+            "D4"
+          ],
+          "actions": []
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "C8",
+            "D6",
+            "HT",
+            "D4",
+            "C4"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "dqqktkmuinwifoefuaqlzy"
+        ],
+        "pot_amount": 210,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 2193,
+          "depwrjmsjxqhymsklfnppe": 1011,
+          "hxdzqelvcvimhzeneyvmqf": 1305,
+          "gkatvddohzisgdesajemzj": 1160,
+          "dqqktkmuinwifoefuaqlzy": 210,
+          "fxtwljlgohignhpmpcbvgl": 121
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": -25,
+          "final_stack": 2193,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 7,
+      "timestamp": "2025-11-23T19:48:50.925492",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 2193,
+        "depwrjmsjxqhymsklfnppe": 986,
+        "hxdzqelvcvimhzeneyvmqf": 1255,
+        "gkatvddohzisgdesajemzj": 1160,
+        "dqqktkmuinwifoefuaqlzy": 210,
+        "fxtwljlgohignhpmpcbvgl": 121
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 175,
+              "pot_after": 175,
+              "stack_before": 2193,
+              "stack_after": 2193,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "D4",
+                "ST"
+              ]
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "S4",
+            "D3",
+            "S6"
+          ],
+          "actions": []
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "S4",
+            "D3",
+            "S6",
+            "CJ"
+          ],
+          "actions": []
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "S4",
+            "D3",
+            "S6",
+            "CJ",
+            "D6"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "hxdzqelvcvimhzeneyvmqf"
+        ],
+        "pot_amount": 444,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 2193,
+          "depwrjmsjxqhymsklfnppe": 900,
+          "hxdzqelvcvimhzeneyvmqf": 1638,
+          "gkatvddohzisgdesajemzj": 1049,
+          "dqqktkmuinwifoefuaqlzy": 99,
+          "fxtwljlgohignhpmpcbvgl": 121
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": 0,
+          "final_stack": 2193,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 8,
+      "timestamp": "2025-11-23T19:51:24.201040",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 2193,
+        "depwrjmsjxqhymsklfnppe": 900,
+        "hxdzqelvcvimhzeneyvmqf": 1613,
+        "gkatvddohzisgdesajemzj": 999,
+        "dqqktkmuinwifoefuaqlzy": 99,
+        "fxtwljlgohignhpmpcbvgl": 121
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 75,
+              "pot_after": 75,
+              "stack_before": 2193,
+              "stack_after": 2193,
+              "num_active_players": 4,
+              "my_hole_cards": [
+                "S9",
+                "H2"
+              ]
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "DJ",
+            "SK",
+            "H6"
+          ],
+          "actions": []
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "DJ",
+            "SK",
+            "H6",
+            "DK"
+          ],
+          "actions": []
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "DJ",
+            "SK",
+            "H6",
+            "DK",
+            "S5"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "depwrjmsjxqhymsklfnppe"
+        ],
+        "pot_amount": 125,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 2193,
+          "depwrjmsjxqhymsklfnppe": 975,
+          "hxdzqelvcvimhzeneyvmqf": 1613,
+          "gkatvddohzisgdesajemzj": 999,
+          "dqqktkmuinwifoefuaqlzy": 99,
+          "fxtwljlgohignhpmpcbvgl": 121
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": 0,
+          "final_stack": 2193,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 9,
+      "timestamp": "2025-11-23T19:51:31.092565",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 2193,
+        "depwrjmsjxqhymsklfnppe": 975,
+        "hxdzqelvcvimhzeneyvmqf": 1613,
+        "gkatvddohzisgdesajemzj": 974,
+        "dqqktkmuinwifoefuaqlzy": 49,
+        "fxtwljlgohignhpmpcbvgl": 121
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 75,
+              "pot_before": 75,
+              "pot_after": 150,
+              "stack_before": 2193,
+              "stack_after": 2193,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "HQ",
+                "H8"
+              ],
+              "pot_odds": 0.5
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "CK",
+            "D4",
+            "H6"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 375,
+              "pot_after": 375,
+              "stack_before": 2118,
+              "stack_after": 2118,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "HQ",
+                "H8"
+              ],
+              "my_win_probability": 0.14
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "CK",
+            "D4",
+            "H6",
+            "DA"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "fold",
+              "amount": 0,
+              "pot_before": 375,
+              "pot_after": 375,
+              "stack_before": 2118,
+              "stack_after": 2118,
+              "num_active_players": 4,
+              "my_hole_cards": [
+                "HQ",
+                "H8"
+              ],
+              "my_win_probability": 0.07
+            }
+          ]
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "CK",
+            "D4",
+            "H6",
+            "DA",
+            "H3"
+          ],
+          "actions": []
+        }
+      ],
+      "result": {
+        "winners": [
+          "dqqktkmuinwifoefuaqlzy"
+        ],
+        "pot_amount": 447,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 2118,
+          "depwrjmsjxqhymsklfnppe": 906,
+          "hxdzqelvcvimhzeneyvmqf": 1538,
+          "gkatvddohzisgdesajemzj": 870,
+          "dqqktkmuinwifoefuaqlzy": 447,
+          "fxtwljlgohignhpmpcbvgl": 121
+        },
+        "showdown": true,
+        "my_result": {
+          "won": false,
+          "pot_won": 0,
+          "stack_change": -75,
+          "final_stack": 2118,
+          "reached_showdown": true
+        }
+      }
+    },
+    {
+      "round_number": 10,
+      "timestamp": "2025-11-23T19:51:55.131257",
+      "button_position": 0,
+      "small_blind_player": "depwrjmsjxqhymsklfnppe",
+      "big_blind_player": "hxdzqelvcvimhzeneyvmqf",
+      "initial_stacks": {
+        "uncesjkznuwastbggjyzen": 2118,
+        "depwrjmsjxqhymsklfnppe": 906,
+        "hxdzqelvcvimhzeneyvmqf": 1538,
+        "gkatvddohzisgdesajemzj": 870,
+        "dqqktkmuinwifoefuaqlzy": 422,
+        "fxtwljlgohignhpmpcbvgl": 71
+      },
+      "streets": [
+        {
+          "street": "preflop",
+          "community_cards": [],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 50,
+              "pot_before": 75,
+              "pot_after": 125,
+              "stack_before": 2118,
+              "stack_after": 2118,
+              "num_active_players": 6,
+              "my_hole_cards": [
+                "HQ",
+                "H7"
+              ],
+              "pot_odds": 0.4
+            }
+          ]
+        },
+        {
+          "street": "flop",
+          "community_cards": [
+            "SQ",
+            "H5",
+            "S2"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "raise",
+              "amount": 200,
+              "pot_before": 300,
+              "pot_after": 500,
+              "stack_before": 2068,
+              "stack_after": 2068,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "HQ",
+                "H7"
+              ],
+              "my_win_probability": 0.45,
+              "pot_odds": 0.4
+            }
+          ]
+        },
+        {
+          "street": "turn",
+          "community_cards": [
+            "SQ",
+            "H5",
+            "S2",
+            "S8"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 1300,
+              "pot_after": 1300,
+              "stack_before": 1868,
+              "stack_after": 1868,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "HQ",
+                "H7"
+              ],
+              "my_win_probability": 0.32
+            }
+          ]
+        },
+        {
+          "street": "river",
+          "community_cards": [
+            "SQ",
+            "H5",
+            "S2",
+            "S8",
+            "D6"
+          ],
+          "actions": [
+            {
+              "player_uuid": "uncesjkznuwastbggjyzen",
+              "action": "call",
+              "amount": 0,
+              "pot_before": 1300,
+              "pot_after": 1300,
+              "stack_before": 1868,
+              "stack_after": 1868,
+              "num_active_players": 5,
+              "my_hole_cards": [
+                "HQ",
+                "H7"
+              ],
+              "my_win_probability": 0.34
+            }
+          ]
+        }
+      ],
+      "result": {
+        "winners": [
+          "uncesjkznuwastbggjyzen"
+        ],
+        "pot_amount": 1300,
+        "final_stacks": {
+          "uncesjkznuwastbggjyzen": 3168,
+          "depwrjmsjxqhymsklfnppe": 656,
+          "hxdzqelvcvimhzeneyvmqf": 1288,
+          "gkatvddohzisgdesajemzj": 620,
+          "dqqktkmuinwifoefuaqlzy": 197,
+          "fxtwljlgohignhpmpcbvgl": 71
+        },
+        "showdown": true,
+        "my_result": {
+          "won": true,
+          "pot_won": 1300,
+          "stack_change": 1050,
+          "final_stack": 3168,
+          "reached_showdown": true,
+          "final_hand": "One Pair",
+          "final_hand_strength": 3951,
+          "my_hole_cards": [
+            "HQ",
+            "H7"
+          ],
+          "opponents_at_showdown": [
+            {
+              "uuid": "depwrjmsjxqhymsklfnppe",
+              "hole_cards": [
+                "SK",
+                "C7"
+              ],
+              "hand": "High Card",
+              "hand_strength": 6763
+            },
+            {
+              "uuid": "hxdzqelvcvimhzeneyvmqf",
+              "hole_cards": [
+                "C9",
+                "SA"
+              ],
+              "hand": "High Card",
+              "hand_strength": 6415
+            },
+            {
+              "uuid": "gkatvddohzisgdesajemzj",
+              "hole_cards": [
+                "H2",
+                "DA"
+              ],
+              "hand": "One Pair",
+              "hand_strength": 5979
+            },
+            {
+              "uuid": "dqqktkmuinwifoefuaqlzy",
+              "hole_cards": [
+                "CK",
+                "C6"
+              ],
+              "hand": "One Pair",
+              "hand_strength": 5144
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
+from utils.action_analyzer import analyze_current_round_actions
 
 class OpportunisticPlayer(BasePokerPlayer):
     """Combina Smart (contexto) + Aggressive (oportunidades). Identifica oportunidades e ataca agressivamente. Usa sistema de memória unificado."""
@@ -25,6 +26,9 @@ class OpportunisticPlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         # Atualiza valores da memória
         self.bluff_probability = self.memory['bluff_probability']
         self.aggression_level = self.memory['aggression_level']
@@ -36,10 +40,14 @@ class OpportunisticPlayer(BasePokerPlayer):
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         should_bluff = self._should_bluff_with_opportunity(opportunity)
         
+        # NOVO: Ajusta blefe baseado em ações atuais
+        if current_actions and current_actions['has_raises'] and current_actions['raise_count'] >= 2:
+            should_bluff = False  # Não blefa se muito agressão
+        
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state, opportunity)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state, opportunity)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, opportunity, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -95,8 +103,15 @@ class OpportunisticPlayer(BasePokerPlayer):
         else:
             return valid_actions[1]['action'], valid_actions[1]['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, opportunity):
-        """Ação normal considerando oportunidades."""
+    def _normal_action(self, valid_actions, hand_strength, round_state, opportunity, current_actions=None):
+        """Ação normal considerando oportunidades e ações atuais."""
+        # NOVO: Ajusta threshold baseado em ações do round atual
+        adjusted_threshold = self.tightness_threshold
+        if current_actions:
+            if current_actions['has_raises']:
+                adjusted_threshold += 5 + (current_actions['raise_count'] * 2)
+            elif current_actions['last_action'] == 'raise':
+                adjusted_threshold += 3
         # Mão muito forte: sempre ataca
         if hand_strength >= 55:
             raise_action = valid_actions[2]
@@ -116,11 +131,16 @@ class OpportunisticPlayer(BasePokerPlayer):
         if hand_strength >= 30:
             return valid_actions[1]['action'], valid_actions[1]['amount']
         
-        # Mão fraca: fold (a menos que oportunidade muito alta)
-        if opportunity['score'] > 50:
+        # Mão média-fraca: call se houver alguma oportunidade
+        if hand_strength >= 20 and opportunity['score'] > 20:
             return valid_actions[1]['action'], valid_actions[1]['amount']
         
-        return valid_actions[0]['action'], valid_actions[0]['amount']
+        # Mão fraca: fold apenas se for MUITO fraca E sem oportunidades
+        if hand_strength < 15 and opportunity['score'] <= 30:
+            return valid_actions[0]['action'], valid_actions[0]['amount']
+        
+        # Mão média-fraca ou com oportunidades: call (não desiste tão fácil)
+        return valid_actions[1]['action'], valid_actions[1]['amount']
     
     def _evaluate_hand_strength(self, hole_card, round_state=None):
         """Avalia força da mão usando utilitário compartilhado."""

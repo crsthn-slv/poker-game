@@ -1,6 +1,7 @@
 from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
+from utils.action_analyzer import analyze_current_round_actions
 
 class RandomPlayer(BasePokerPlayer):
     """Jogador que faz decisões aleatórias. Blefa 25% das vezes. Aprendizado estocástico básico com memória persistente."""
@@ -23,16 +24,23 @@ class RandomPlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         hand_strength = self._evaluate_hand_strength(hole_card)
         should_bluff = self._should_bluff()
         
         # Atualiza valores da memória
         self.bluff_probability = self.memory['bluff_probability']
         
+        # NOVO: Ajusta blefe baseado em ações atuais
+        if current_actions and current_actions['has_raises'] and current_actions['raise_count'] >= 2:
+            should_bluff = False  # Não blefa se muito agressão
+        
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -94,11 +102,16 @@ class RandomPlayer(BasePokerPlayer):
         
         return 10
     
-    def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação normal: aleatória."""
-        # Escolhe ação aleatoriamente
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+        """Ação normal: aleatória, mas ajustada por ações atuais."""
+        # NOVO: Se houver muitos raises, aumenta chance de fold
+        fold_prob = 0.33
+        if current_actions and current_actions['has_raises']:
+            fold_prob = min(0.60, 0.33 + (current_actions['raise_count'] * 0.15))
+        
+        # Escolhe ação aleatoriamente (ajustado)
         rand = random.random()
-        if rand < 0.33:
+        if rand < fold_prob:
             action_choice = 'fold'
         elif rand < 0.66:
             action_choice = 'call'

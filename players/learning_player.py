@@ -2,6 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
+from utils.action_analyzer import analyze_current_round_actions
 
 class LearningPlayer(BasePokerPlayer):
     """IA que aprende e se adapta baseado no histórico de jogos. Usa sistema de memória unificado."""
@@ -28,6 +29,9 @@ class LearningPlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         # Avalia força da mão
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         
@@ -37,12 +41,12 @@ class LearningPlayer(BasePokerPlayer):
         self.tightness_threshold = self.memory['tightness_threshold']
         
         # Decide se deve blefar baseado no aprendizado
-        should_bluff = self._should_bluff_with_learning(round_state)
+        should_bluff = self._should_bluff_with_learning(round_state, current_actions)
         
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action_with_learning(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action_with_learning(valid_actions, hand_strength, round_state, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -53,9 +57,18 @@ class LearningPlayer(BasePokerPlayer):
         
         return action, amount
     
-    def _should_bluff_with_learning(self, round_state):
-        """Decide se deve blefar considerando o aprendizado."""
+    def _should_bluff_with_learning(self, round_state, current_actions=None):
+        """Decide se deve blefar considerando o aprendizado e ações atuais."""
         base_probability = self.bluff_probability
+        
+        # NOVO: Ajusta baseado em ações do round atual
+        if current_actions:
+            if current_actions['has_raises']:
+                # Se alguém fez raise, reduz chance de blefe
+                if current_actions['raise_count'] >= 2:
+                    base_probability *= 0.5  # Muito agressão: reduz bastante
+                else:
+                    base_probability *= 0.8  # Um raise: reduz moderadamente
         
         # Ajusta baseado nos oponentes (análise simples)
         active_opponents = [s for s in round_state['seats'] 
@@ -83,9 +96,18 @@ class LearningPlayer(BasePokerPlayer):
         
         return random.random() < base_probability
     
-    def _normal_action_with_learning(self, valid_actions, hand_strength, round_state):
-        """Ação normal considerando aprendizado."""
+    def _normal_action_with_learning(self, valid_actions, hand_strength, round_state, current_actions=None):
+        """Ação normal considerando aprendizado e ações atuais."""
         adjusted_threshold = self.tightness_threshold
+        
+        # NOVO: Ajusta threshold baseado em ações do round atual
+        if current_actions:
+            if current_actions['has_raises']:
+                # Se alguém fez raise, fica mais seletivo
+                adjusted_threshold += 5 + (current_actions['raise_count'] * 2)
+            elif current_actions['last_action'] == 'raise':
+                # Se última ação foi raise, aumenta threshold
+                adjusted_threshold += 3
         
         # Mão muito forte: raise
         if hand_strength >= 60:
@@ -106,9 +128,14 @@ class LearningPlayer(BasePokerPlayer):
             call_action = valid_actions[1]
             return call_action['action'], call_action['amount']
         
-        # Mão fraca: fold
-        fold_action = valid_actions[0]
-        return fold_action['action'], fold_action['amount']
+        # Mão fraca: fold apenas se for MUITO fraca
+        if hand_strength < (adjusted_threshold - 7):
+            fold_action = valid_actions[0]
+            return fold_action['action'], fold_action['amount']
+        
+        # Mão média-fraca: call (não desiste tão fácil)
+        call_action = valid_actions[1]
+        return call_action['action'], call_action['amount']
     
     def _bluff_action(self, valid_actions, round_state):
         """Executa blefe considerando aprendizado."""

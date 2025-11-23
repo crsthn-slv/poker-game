@@ -2,6 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
+from utils.action_analyzer import analyze_current_round_actions
 from utils.constants import (
     BLUFF_PROBABILITY_TIGHT, TIGHTNESS_THRESHOLD_DEFAULT,
     HAND_STRENGTH_VERY_STRONG, HAND_STRENGTH_STRONG
@@ -30,6 +31,9 @@ class TightPlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         should_bluff = self._should_bluff()
         
@@ -37,10 +41,14 @@ class TightPlayer(BasePokerPlayer):
         self.bluff_probability = self.memory['bluff_probability']
         self.tightness_threshold = self.memory['tightness_threshold']
         
+        # NOVO: Ajusta blefe baseado em ações atuais
+        if current_actions and current_actions['has_raises']:
+            should_bluff = False  # Não blefa se alguém fez raise
+        
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -96,10 +104,19 @@ class TightPlayer(BasePokerPlayer):
         community_cards = round_state.get('community_card', []) if round_state else None
         return evaluate_hand_strength(hole_card, community_cards)
     
-    def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação normal baseada na força das cartas (ajustada pelo aprendizado)."""
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+        """Ação normal baseada na força das cartas (ajustada pelo aprendizado e ações atuais)."""
         # Ajusta threshold baseado no aprendizado conservador
         adjusted_threshold = self.tightness_threshold
+        
+        # NOVO: Ajusta threshold baseado em ações do round atual
+        if current_actions:
+            if current_actions['has_raises']:
+                # Se alguém fez raise, fica mais seletivo (conservador)
+                adjusted_threshold += 8 + (current_actions['raise_count'] * 3)
+            elif current_actions['last_action'] == 'raise':
+                # Se última ação foi raise, aumenta threshold
+                adjusted_threshold += 5
         
         # Mão muito forte: tenta fazer raise
         if hand_strength >= HAND_STRENGTH_STRONG:
@@ -112,9 +129,15 @@ class TightPlayer(BasePokerPlayer):
             call_action = valid_actions[1]
             return call_action['action'], call_action['amount']
         
-        # Mão fraca: faz fold
-        fold_action = valid_actions[0]
-        return fold_action['action'], fold_action['amount']
+        # Mão fraca: fold apenas se for MUITO fraca (reduzido de threshold direto)
+        # Antes: foldava se < threshold. Agora: folda apenas se < threshold - 5
+        if hand_strength < (adjusted_threshold - 5):
+            fold_action = valid_actions[0]
+            return fold_action['action'], fold_action['amount']
+        
+        # Mão média-fraca: call (não desiste tão fácil)
+        call_action = valid_actions[1]
+        return call_action['action'], call_action['amount']
     
     def receive_game_start_message(self, game_info):
         """Inicializa stack inicial."""

@@ -9,7 +9,8 @@ Esta documentação explica em detalhes como os bots funcionam, suas estruturas,
 3. [Tipos de Bots e Estratégias](#tipos-de-bots-e-estratégias)
 4. [Ciclo de Vida de um Bot](#ciclo-de-vida-de-um-bot)
 5. [Sistema de Aprendizado](#sistema-de-aprendizado)
-6. [Componentes Compartilhados](#componentes-compartilhados)
+6. [Reação em Tempo Real às Ações dos Oponentes](#reação-em-tempo-real-às-ações-dos-oponentes)
+7. [Componentes Compartilhados](#componentes-compartilhados)
 
 ---
 
@@ -280,6 +281,27 @@ O método `save()` do `UnifiedMemoryManager`:
 2. Escreve no arquivo de memória
 3. Falha silenciosamente em caso de erro (não quebra o jogo)
 
+### Reação em Tempo Real
+
+**NOVO:** Durante `declare_action()`, os bots também:
+
+1. **Analisam ações do round atual** antes de decidir:
+```python
+def declare_action(self, valid_actions, hole_card, round_state):
+    # Analisa ações que já aconteceram nesta street
+    current_actions = analyze_current_round_actions(round_state, self.uuid)
+    
+    # Ajusta comportamento baseado nas ações observadas
+    if current_actions['has_raises']:
+        # Fica mais conservador
+        adjusted_threshold = self.tightness_threshold + 5 + (current_actions['raise_count'] * 2)
+        # Evita blefe se muita agressão
+        if current_actions['raise_count'] >= 2:
+            should_bluff = False
+```
+
+Isso permite que os bots **reajam imediatamente** às ações dos oponentes, não apenas aprendam após o round.
+
 ### Registro de Ações e Oponentes
 
 Durante o jogo, os bots registram:
@@ -326,6 +348,8 @@ Para cada oponente, o bot registra:
 - **Análise simples** (ex: "blefe_sucesso" se tinha mão ruim mas ganhou)
 
 Isso permite que o bot aprenda padrões observados sem inferir valores abstratos.
+
+**Nota:** O histórico de oponentes é usado para aprendizado de longo prazo. Para reação em tempo real, os bots usam `analyze_current_round_actions()` que analisa apenas as ações do round atual.
 
 ---
 
@@ -885,6 +909,199 @@ for action in self.action_probabilities:
 
 ---
 
+## Reação em Tempo Real às Ações dos Oponentes
+
+### Visão Geral
+
+Todos os bots agora **reagem em tempo real** às ações dos oponentes no mesmo round antes de tomar sua decisão. Isso torna o jogo mais dinâmico e realista, pois os bots ajustam seu comportamento baseado no que está acontecendo na mesa.
+
+### Como Funciona
+
+#### 1. Análise de Ações do Round Atual
+
+Antes de decidir sua ação, cada bot analisa as ações que já aconteceram na street atual usando a função `analyze_current_round_actions()`:
+
+```python
+from utils.action_analyzer import analyze_current_round_actions
+
+def declare_action(self, valid_actions, hole_card, round_state):
+    # Analisa ações do round atual
+    current_actions = analyze_current_round_actions(round_state, self.uuid)
+    
+    # current_actions contém:
+    # - has_raises: bool (se alguém fez raise)
+    # - raise_count: int (quantos raises)
+    # - call_count: int (quantos calls)
+    # - last_action: str ('raise', 'call', 'fold' ou None)
+    # - total_aggression: float (0.0 a 1.0)
+```
+
+#### 2. Ajuste de Comportamento
+
+Baseado nas ações observadas, os bots ajustam:
+
+**Quando detectam raises:**
+- **Aumentam threshold de seletividade** (ficam mais conservadores)
+- **Reduzem ou evitam blefe** (especialmente com 2+ raises)
+- **Ajustam agressão** (reduzem quando há muita agressão na mesa)
+
+**Exemplo de ajuste:**
+```python
+# TightPlayer: muito conservador quando há raises
+if current_actions['has_raises']:
+    adjusted_threshold = self.tightness_threshold + 8 + (current_actions['raise_count'] * 3)
+    if current_actions['raise_count'] >= 2:
+        should_bluff = False  # Não blefa com 2+ raises
+
+# AggressivePlayer: ainda agressivo, mas um pouco mais seletivo
+if current_actions['has_raises']:
+    adjusted_threshold = 20 + 3 + (current_actions['raise_count'] * 2)
+    # Reduz agressão em 10% se muitos raises
+    if current_actions['raise_count'] >= 2:
+        adjusted_aggression = self.aggression_level * 0.9
+```
+
+#### 3. Análise por Street
+
+A análise funciona em todas as streets (preflop, flop, turn, river):
+- Cada street é analisada **independentemente**
+- Ações de streets anteriores não afetam a análise da street atual
+- O bot reage apenas às ações que aconteceram na street atual
+
+### Comportamento por Tipo de Bot
+
+#### Bots Conservadores (TightPlayer, ConservativeAggressivePlayer, CautiousPlayer)
+- **Reação forte a raises**: Aumentam threshold significativamente (+8 a +17 pontos)
+- **Evitam blefe completamente** quando há 2+ raises
+- **Ficam ainda mais seletivos** em situações agressivas
+
+#### Bots Agressivos (AggressivePlayer, SteadyAggressivePlayer)
+- **Reação moderada**: Aumentam threshold, mas mantêm agressão
+- **Reduzem agressão em 10%** quando há 2+ raises
+- **Ainda tentam raise**, mas com mais seletividade
+
+#### Bots Inteligentes (SmartPlayer, LearningPlayer, AdaptivePlayer)
+- **Análise balanceada**: Ajustam threshold baseado em contexto
+- **Evitam blefe** quando há muita agressão (2+ raises)
+- **Ajustam estratégia** considerando múltiplos fatores
+
+#### Bots Balanceados (BalancedPlayer, ModeratePlayer)
+- **Reação equilibrada**: Ajustam threshold moderadamente (+5 a +9 pontos)
+- **Evitam blefe** com 2+ raises
+- **Mantêm estilo balanceado** mesmo com agressão
+
+### Exemplos Práticos
+
+#### Cenário 1: Sem Raises (Situação Normal)
+```
+Ações observadas: [CALL, CALL]
+- has_raises: False
+- raise_count: 0
+- Comportamento: Normal, sem ajustes
+```
+
+#### Cenário 2: 1 Raise (Situação Moderada)
+```
+Ações observadas: [RAISE]
+- has_raises: True
+- raise_count: 1
+- Comportamento: 
+  - TightPlayer: threshold +11 (35 → 46)
+  - AggressivePlayer: threshold +5 (20 → 25)
+  - SmartPlayer: threshold +7 (27 → 34)
+```
+
+#### Cenário 3: 2+ Raises (Situação Agressiva)
+```
+Ações observadas: [RAISE, RAISE]
+- has_raises: True
+- raise_count: 2
+- Comportamento:
+  - Todos os bots: threshold aumenta significativamente
+  - Blefe DESABILITADO (should_bluff = False)
+  - Muito mais seletivos
+```
+
+### Implementação Técnica
+
+#### Módulo: `utils/action_analyzer.py`
+
+Função principal:
+```python
+def analyze_current_round_actions(round_state, my_uuid):
+    """
+    Analisa ações do round atual antes da decisão do bot.
+    
+    Args:
+        round_state: Estado atual do round (do PyPokerEngine)
+        my_uuid: UUID do bot que está analisando
+    
+    Returns:
+        dict com informações sobre ações dos oponentes
+    """
+```
+
+#### Integração nos Bots
+
+Todos os bots seguem este padrão:
+```python
+def declare_action(self, valid_actions, hole_card, round_state):
+    # 1. Analisa ações do round atual
+    current_actions = analyze_current_round_actions(round_state, self.uuid)
+    
+    # 2. Ajusta comportamento baseado nas ações
+    if current_actions['has_raises']:
+        adjusted_threshold = self.tightness_threshold + 5 + (current_actions['raise_count'] * 2)
+        if current_actions['raise_count'] >= 2:
+            should_bluff = False
+    
+    # 3. Usa threshold ajustado na decisão
+    # ...
+```
+
+### Diferença do Sistema Anterior
+
+**Antes:**
+- Bots decidiam apenas baseado em:
+  - Força da mão
+  - Parâmetros aprendidos (blefe, agressão, threshold)
+  - Contexto geral (pot size, número de jogadores)
+  - Histórico de rounds anteriores
+
+**Agora:**
+- Bots também consideram:
+  - **Ações que aconteceram no round atual**
+  - **Quantidade de raises observados**
+  - **Última ação dos oponentes**
+  - **Nível de agressão na mesa**
+
+### Vantagens
+
+1. **Jogo mais dinâmico**: Bots reagem ao que está acontecendo agora
+2. **Mais realista**: Comportamento similar a jogadores humanos
+3. **Adaptação imediata**: Não precisa esperar fim do round para ajustar
+4. **Reação a todos os oponentes**: Analisa ações de bots e jogador humano igualmente
+
+### Limitações
+
+- Análise é **por street**: Não considera ações de streets anteriores no mesmo round
+- Análise é **simples**: Não considera valores dos raises, apenas a presença
+- Não diferencia **quem** fez raise: Trata todos os oponentes igualmente
+
+### Testes
+
+A funcionalidade é testada automaticamente:
+- `tests/test_action_reaction.py`: Testes básicos da função
+- `tests/test_action_reaction_integration.py`: Testes de integração com bots
+
+Para executar:
+```bash
+python3 tests/test_action_reaction.py
+python3 tests/test_action_reaction_integration.py
+```
+
+---
+
 ## Componentes Compartilhados
 
 ### 1. `hand_utils.py`
@@ -919,6 +1136,15 @@ Utilitários para gerenciamento de memória:
 
 - `get_memory_path(filename)`: Retorna caminho completo para arquivo de memória
 
+### 5. `action_analyzer.py`
+
+Utilitário para análise de ações do round atual:
+
+- `analyze_current_round_actions(round_state, my_uuid)`: Analisa ações dos oponentes na street atual
+  - Retorna informações sobre raises, calls, e nível de agressão
+  - Exclui ações próprias da análise
+  - Funciona em todas as streets (preflop, flop, turn, river)
+
 ---
 
 ## Resumo do Fluxo de Decisão
@@ -927,23 +1153,31 @@ Para entender como um bot decide sua ação, siga este fluxo:
 
 1. **Recebe `declare_action`** com estado atual
 2. **Atualiza informações internas** (stack, contexto)
-3. **Avalia força da mão** usando `evaluate_hand_strength()`
-4. **Analisa contexto** (pot size, jogadores ativos, street)
-5. **Decide se deve blefar** baseado em probabilidade
-6. **Se blefar:**
+3. **NOVO: Analisa ações do round atual** usando `analyze_current_round_actions()`
+   - Detecta se há raises na street atual
+   - Conta quantos raises foram feitos
+   - Identifica última ação dos oponentes
+4. **Avalia força da mão** usando `evaluate_hand_strength()`
+5. **Ajusta threshold baseado em ações atuais**
+   - Se há raises: aumenta threshold (fica mais seletivo)
+   - Se 2+ raises: aumenta threshold significativamente
+6. **Analisa contexto** (pot size, jogadores ativos, street)
+7. **Decide se deve blefar** baseado em probabilidade
+   - **NOVO: Se 2+ raises, evita blefe completamente**
+8. **Se blefar:**
    - Analisa contexto da mesa
    - Escolhe entre CALL ou RAISE
    - Retorna ação
-7. **Se não blefar:**
-   - Compara força da mão com threshold
+9. **Se não blefar:**
+   - Compara força da mão com **threshold ajustado**
    - Escolhe FOLD, CALL ou RAISE
    - Retorna ação
-8. **Após o round:**
-   - Recebe resultado em `receive_round_result_message`
-   - Atualiza estatísticas
-   - Aprende com resultado
-   - Ajusta estratégia
-   - Salva memória
+10. **Após o round:**
+    - Recebe resultado em `receive_round_result_message`
+    - Atualiza estatísticas
+    - Aprende com resultado
+    - Ajusta estratégia
+    - Salva memória
 
 ---
 

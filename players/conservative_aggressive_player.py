@@ -2,6 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
+from utils.action_analyzer import analyze_current_round_actions
 
 class ConservativeAggressivePlayer(BasePokerPlayer):
     """Combina Tight (conservador) + Aggressive (agressão seletiva). Conservador no início, agressivo quando ganha. Usa sistema de memória unificado."""
@@ -26,6 +27,9 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         # Atualiza valores da memória
         self.bluff_probability = self.memory['bluff_probability']
         self.aggression_level = self.memory['aggression_level']
@@ -35,10 +39,14 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         should_bluff = self._should_bluff()
         
+        # NOVO: Ajusta blefe baseado em ações atuais (conservador fica mais conservador)
+        if current_actions and current_actions['has_raises']:
+            should_bluff = False  # Não blefa se alguém fez raise
+        
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -69,8 +77,17 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
             else:
                 return valid_actions[1]['action'], valid_actions[1]['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação baseada no modo (conservador ou agressivo)."""
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+        """Ação baseada no modo (conservador ou agressivo) e ações atuais."""
+        # NOVO: Ajusta threshold baseado em ações do round atual
+        adjusted_threshold = self.tightness_threshold
+        if current_actions:
+            if current_actions['has_raises']:
+                # Conservador fica ainda mais conservador
+                adjusted_threshold += 8 + (current_actions['raise_count'] * 3)
+            elif current_actions['last_action'] == 'raise':
+                adjusted_threshold += 5
+        
         # Mão muito forte: sempre raise
         if hand_strength >= 55:
             raise_action = valid_actions[2]
@@ -81,7 +98,7 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
                 return raise_action['action'], amount
         
         # Mão forte: depende do modo
-        if hand_strength >= self.tightness_threshold:
+        if hand_strength >= adjusted_threshold:
             if not self.conservative_mode and self.aggression_level > 0.6:
                 # Modo agressivo: pode fazer raise
                 if valid_actions[2]['amount']['min'] != -1:
@@ -90,8 +107,12 @@ class ConservativeAggressivePlayer(BasePokerPlayer):
             # Sempre faz call se passou do threshold
             return valid_actions[1]['action'], valid_actions[1]['amount']
         
-        # Mão fraca: fold
-        return valid_actions[0]['action'], valid_actions[0]['amount']
+        # Mão fraca: fold apenas se for MUITO fraca
+        if hand_strength < (self.tightness_threshold - 5):
+            return valid_actions[0]['action'], valid_actions[0]['amount']
+        
+        # Mão média-fraca: call (não desiste tão fácil)
+        return valid_actions[1]['action'], valid_actions[1]['amount']
     
     def _evaluate_hand_strength(self, hole_card, round_state=None):
         """Avalia força da mão usando utilitário compartilhado."""

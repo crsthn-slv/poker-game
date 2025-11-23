@@ -1,6 +1,7 @@
 from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
+from utils.action_analyzer import analyze_current_round_actions
 
 class AggressivePlayer(BasePokerPlayer):
     """Jogador agressivo que joga muitas mãos e blefa frequentemente (35%). Aprendizado agressivo intermediário com memória persistente."""
@@ -25,6 +26,9 @@ class AggressivePlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         hand_strength = self._evaluate_hand_strength(hole_card)
         should_bluff = self._should_bluff()
         
@@ -35,7 +39,7 @@ class AggressivePlayer(BasePokerPlayer):
         if should_bluff:
             action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state, current_actions)
         
         # Registra ação
         if hasattr(self, 'uuid') and self.uuid:
@@ -111,10 +115,27 @@ class AggressivePlayer(BasePokerPlayer):
         # Qualquer coisa
         return 10
     
-    def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação normal: ajusta agressão baseado no aprendizado."""
+    def _normal_action(self, valid_actions, hand_strength, round_state, current_actions=None):
+        """Ação normal: ajusta agressão baseado no aprendizado e ações atuais."""
+        # NOVO: Ajusta baseado em ações do round atual
+        fold_threshold = 15  # Threshold base para fold
+        
+        if current_actions:
+            if current_actions['has_raises']:
+                # Se alguém fez raise, aumenta um pouco o threshold de fold (mais seletivo)
+                fold_threshold += 3 + (current_actions['raise_count'] * 2)
+        
+        # Mão MUITO fraca: fold (mesmo sendo agressivo, não joga mãos terríveis)
+        if hand_strength < fold_threshold:
+            fold_action = valid_actions[0]
+            return fold_action['action'], fold_action['amount']
+        
         # Ajusta agressão baseado no aprendizado
         adjusted_aggression = self.aggression_level
+        
+        # NOVO: Se houver muitos raises, reduz um pouco a agressão
+        if current_actions and current_actions['raise_count'] >= 2:
+            adjusted_aggression *= 0.9  # Reduz 10% da agressão
         
         # Sempre tenta fazer raise se possível (ajustado pelo aprendizado)
         raise_action = valid_actions[2]

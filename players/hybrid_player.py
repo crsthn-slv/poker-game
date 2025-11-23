@@ -3,6 +3,7 @@ import random
 import json
 import os
 from utils.memory_utils import get_memory_path
+from utils.action_analyzer import analyze_current_round_actions
 
 class HybridPlayer(BasePokerPlayer):
     """Combina todas as abordagens. Alterna entre estratégias baseado em contexto. Mais versátil e adaptável. Com memória persistente."""
@@ -33,6 +34,9 @@ class HybridPlayer(BasePokerPlayer):
         self.load_memory()
     
     def declare_action(self, valid_actions, hole_card, round_state):
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         # Analisa contexto e escolhe melhor estratégia
         context = self._analyze_context(round_state)
         self._select_strategy(context)
@@ -43,10 +47,14 @@ class HybridPlayer(BasePokerPlayer):
         
         should_bluff = random.random() < strategy['bluff_prob']
         
+        # NOVO: Ajusta blefe baseado em ações atuais
+        if current_actions and current_actions['has_raises'] and current_actions['raise_count'] >= 2:
+            should_bluff = False  # Não blefa se muito agressão
+        
         if should_bluff:
             return self._bluff_action(valid_actions, round_state, strategy)
         else:
-            return self._normal_action(valid_actions, hand_strength, round_state, strategy)
+            return self._normal_action(valid_actions, hand_strength, round_state, strategy, current_actions)
     
     def _analyze_context(self, round_state):
         """Analisa contexto da mesa."""
@@ -109,10 +117,17 @@ class HybridPlayer(BasePokerPlayer):
         
         return valid_actions[1]['action'], valid_actions[1]['amount']
     
-    def _normal_action(self, valid_actions, hand_strength, round_state, strategy):
-        """Ação baseada na estratégia atual."""
+    def _normal_action(self, valid_actions, hand_strength, round_state, strategy, current_actions=None):
+        """Ação baseada na estratégia atual e ações atuais."""
         threshold = strategy['threshold']
         aggression = strategy['aggression']
+        
+        # NOVO: Ajusta threshold baseado em ações do round atual
+        if current_actions:
+            if current_actions['has_raises']:
+                threshold += 5 + (current_actions['raise_count'] * 2)
+            elif current_actions['last_action'] == 'raise':
+                threshold += 3
         
         # Mão muito forte: sempre raise
         if hand_strength >= 55:
@@ -130,8 +145,12 @@ class HybridPlayer(BasePokerPlayer):
             else:
                 return valid_actions[1]['action'], valid_actions[1]['amount']
         
-        # Mão fraca: fold
-        return valid_actions[0]['action'], valid_actions[0]['amount']
+        # Mão fraca: fold apenas se for MUITO fraca
+        if hand_strength < (threshold - 8):
+            return valid_actions[0]['action'], valid_actions[0]['amount']
+        
+        # Mão média-fraca: call (não desiste tão fácil)
+        return valid_actions[1]['action'], valid_actions[1]['amount']
     
     def _evaluate_hand_strength(self, hole_card, round_state):
         """Avalia força da mão."""

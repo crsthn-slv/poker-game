@@ -2,6 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 import random
 from utils.memory_manager import UnifiedMemoryManager
 from utils.hand_utils import evaluate_hand_strength
+from utils.action_analyzer import analyze_current_round_actions
 
 class FishPlayer(BasePokerPlayer):
     """Jogador 'peixe' que aprende lentamente. Começa sempre fazendo call, mas aprende quando foldar. Usa sistema de memória unificado."""
@@ -27,6 +28,9 @@ class FishPlayer(BasePokerPlayer):
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
         
+        # NOVO: Analisa ações do round atual
+        current_actions = analyze_current_round_actions(round_state, self.uuid) if hasattr(self, 'uuid') and self.uuid else None
+        
         # Atualiza valores da memória
         self.bluff_probability = self.memory['bluff_probability']
         self.aggression_level = self.memory['aggression_level']
@@ -35,8 +39,18 @@ class FishPlayer(BasePokerPlayer):
         
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         
+        # NOVO: Ajusta probabilidade de fold baseado em ações atuais
+        fold_threshold = 10
+        if current_actions and current_actions['has_raises']:
+            # Se alguém fez raise, aumenta chance de fold (peixe aprende)
+            fold_threshold += 5 + (current_actions['raise_count'] * 3)
+            # Reduz probabilidade de call se muitos raises
+            adjusted_call_prob = self.call_probability * (0.9 ** current_actions['raise_count'])
+        else:
+            adjusted_call_prob = self.call_probability
+        
         # Peixe: prefere call, mas aprende quando foldar
-        if hand_strength < 10 and random.random() > self.call_probability:
+        if hand_strength < fold_threshold and random.random() > adjusted_call_prob:
             # Mão muito fraca e probabilidade de fold
             action, amount = valid_actions[0]['action'], valid_actions[0]['amount']
         else:
