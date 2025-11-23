@@ -1,37 +1,50 @@
 from pypokerengine.players import BasePokerPlayer
 import random
-import json
-import os
-from .memory_utils import get_memory_path
+from .memory_manager import UnifiedMemoryManager
 
 class AggressivePlayer(BasePokerPlayer):
     """Jogador agressivo que joga muitas mãos e blefa frequentemente (35%). Aprendizado agressivo intermediário com memória persistente."""
     
     def __init__(self, memory_file="aggressive_player_memory.json"):
-        self.memory_file = get_memory_path(memory_file)
-        self.bluff_probability = 0.35  # 35% de chance de blefar
+        # Inicializa gerenciador de memória unificada
+        self.memory_manager = UnifiedMemoryManager(
+            memory_file,
+            default_bluff=0.18,  # Nivelado: ligeiramente acima da média
+            default_aggression=0.58,  # Nivelado: ligeiramente acima da média
+            default_tightness=26  # Nivelado: ligeiramente abaixo da média
+        )
+        self.memory = self.memory_manager.get_memory()
+        self.bluff_probability = self.memory['bluff_probability']
+        self.aggression_level = self.memory['aggression_level']
         self.bluff_call_ratio = 0.40  # 40% CALL / 60% RAISE quando blefar
-        
-        # Sistema de aprendizado agressivo (intermediário)
-        self.round_results = []  # Histórico de 20 rodadas
-        self.aggression_level = 0.70  # Nível de agressão (0-1)
-        self.opponent_bluff_patterns = {}  # Padrões de blefe dos oponentes
-        self.total_rounds = 0
-        self.wins = 0
         self.initial_stack = None
         self.current_stack = None
-        
-        # Carrega memória anterior se existir
-        self.load_memory()
     
     def declare_action(self, valid_actions, hole_card, round_state):
+        # Identifica oponentes
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.identify_opponents(round_state, self.uuid)
+        
         hand_strength = self._evaluate_hand_strength(hole_card)
         should_bluff = self._should_bluff()
         
+        # Atualiza valores da memória
+        self.bluff_probability = self.memory['bluff_probability']
+        self.aggression_level = self.memory['aggression_level']
+        
         if should_bluff:
-            return self._bluff_action(valid_actions, round_state)
+            action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            return self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+        
+        # Registra ação
+        if hasattr(self, 'uuid') and self.uuid:
+            street = round_state.get('street', 'preflop')
+            self.memory_manager.record_my_action(
+                street, action, amount, hand_strength, round_state, should_bluff
+            )
+        
+        return action, amount
     
     def _should_bluff(self):
         """Decide se deve blefar baseado na probabilidade configurada."""
@@ -134,7 +147,7 @@ class AggressivePlayer(BasePokerPlayer):
     def receive_round_start_message(self, round_count, hole_card, seats):
         """Salva memória periodicamente e armazena cartas no registry."""
         if round_count % 5 == 0:
-            self.save_memory()
+            self.memory_manager.save()
         # Armazena cartas no registry global para exibição no final do round
         if hole_card and hasattr(self, 'uuid') and self.uuid:
             from .cards_registry import store_player_cards
@@ -147,102 +160,59 @@ class AggressivePlayer(BasePokerPlayer):
         pass
     
     def receive_game_update_message(self, action, round_state):
-        """Aprende padrões de blefe dos oponentes."""
+        """Registra ações dos oponentes."""
         player_uuid = action.get('uuid') or action.get('player_uuid')
-        if not player_uuid or player_uuid == self.uuid:
-            return
-        
-        # Analisa se oponente está blefando (raise com mão fraca aparente)
-        if action.get('action') == 'raise':
-            if player_uuid not in self.opponent_bluff_patterns:
-                self.opponent_bluff_patterns[player_uuid] = {'bluff_count': 0, 'total_raises': 0}
-            
-            self.opponent_bluff_patterns[player_uuid]['total_raises'] += 1
-            # Se raise em pot pequeno ou com poucos jogadores, pode ser blefe
-            pot_size = round_state.get('pot', {}).get('main', {}).get('amount', 0)
-            if pot_size < 50:
-                self.opponent_bluff_patterns[player_uuid]['bluff_count'] += 1
+        if player_uuid and player_uuid != self.uuid:
+            self.memory_manager.record_opponent_action(player_uuid, action, round_state)
     
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Aprendizado agressivo: ajusta rapidamente baseado em resultados."""
-        self.total_rounds += 1
-        
         # Atualiza stack
         for seat in round_state['seats']:
             if seat['uuid'] == self.uuid:
                 if self.initial_stack is None:
                     self.initial_stack = seat['stack']
+                    self.memory_manager.initial_stack = self.initial_stack
                 self.current_stack = seat['stack']
                 break
         
-        # Verifica se ganhou
-        won = any(w['uuid'] == self.uuid for w in winners)
-        if won:
-            self.wins += 1
+        # Processa resultado usando gerenciador de memória
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.process_round_result(winners, hand_info, round_state, self.uuid)
         
-        # Registra resultado (mantém apenas últimas 20)
-        self.round_results.append({
-            'won': won,
-            'round': self.total_rounds,
-            'stack': self.current_stack if self.current_stack else 100
-        })
-        if len(self.round_results) > 20:
-            self.round_results = self.round_results[-20:]
+        # Atualiza valores locais
+        self.memory = self.memory_manager.get_memory()
+        self.total_rounds = self.memory['total_rounds']
+        self.wins = self.memory['wins']
         
         # Aprendizado agressivo: ajusta rapidamente
-        if len(self.round_results) >= 5:
-            recent_results = self.round_results[-10:] if len(self.round_results) >= 10 else self.round_results
-            win_rate = sum(1 for r in recent_results if r['won']) / len(recent_results)
+        round_history = self.memory.get('round_history', [])
+        if len(round_history) >= 5:
+            recent_rounds = round_history[-10:] if len(round_history) >= 10 else round_history
+            win_rate = sum(1 for r in recent_rounds if r['final_result']['won']) / len(recent_rounds)
             
-            # Aumenta agressão quando ganha
+            # Aumenta agressão quando ganha (evolução muito lenta)
             if win_rate > 0.6:
-                self.aggression_level = min(0.90, self.aggression_level + 0.10)
-                self.bluff_probability = min(0.45, self.bluff_probability * 1.1)
-            # Reduz agressão quando perde muito
+                self.memory['aggression_level'] = min(0.70, self.memory['aggression_level'] * 1.001)
+                self.memory['bluff_probability'] = min(0.20, self.memory['bluff_probability'] * 1.001)
+            # Reduz agressão quando perde muito (evolução muito lenta)
             elif win_rate < 0.3:
-                self.aggression_level = max(0.30, self.aggression_level - 0.15)
-                self.bluff_probability = max(0.20, self.bluff_probability * 0.9)
+                self.memory['aggression_level'] = max(0.40, self.memory['aggression_level'] * 0.999)
+                self.memory['bluff_probability'] = max(0.12, self.memory['bluff_probability'] * 0.999)
             
-            # Ajusta baseado em stack
+            # Ajusta baseado em stack (evolução muito lenta)
             if self.initial_stack and self.current_stack:
                 stack_ratio = self.current_stack / self.initial_stack
                 if stack_ratio < 0.7:
                     # Stack baixo: reduz agressão
-                    self.aggression_level = max(0.40, self.aggression_level - 0.10)
+                    self.memory['aggression_level'] = max(0.40, self.memory['aggression_level'] * 0.999)
+        
+        # Atualiza valores locais
+        self.bluff_probability = self.memory['bluff_probability']
+        self.aggression_level = self.memory['aggression_level']
         
         # Salva memória após ajustes
-        self.save_memory()
-    
-    def save_memory(self):
-        """Salva memória aprendida em arquivo."""
-        memory = {
-            'bluff_probability': self.bluff_probability,
-            'aggression_level': self.aggression_level,
-            'total_rounds': self.total_rounds,
-            'wins': self.wins,
-            'opponent_bluff_patterns': self.opponent_bluff_patterns
-        }
-        
-        try:
-            with open(self.memory_file, 'w') as f:
-                json.dump(memory, f, indent=2)
-        except Exception as e:
-            pass  # Silencioso
-    
-    def load_memory(self):
-        """Carrega memória aprendida de arquivo."""
-        if os.path.exists(self.memory_file):
-            try:
-                with open(self.memory_file, 'r') as f:
-                    memory = json.load(f)
-                
-                self.bluff_probability = memory.get('bluff_probability', 0.35)
-                self.aggression_level = memory.get('aggression_level', 0.70)
-                self.total_rounds = memory.get('total_rounds', 0)
-                self.wins = memory.get('wins', 0)
-                self.opponent_bluff_patterns = memory.get('opponent_bluff_patterns', {})
-            except Exception as e:
-                pass  # Silencioso
+        self.memory_manager.save()
     
     def receive_game_start_message(self, game_info):
         """Inicializa stack."""
@@ -251,5 +221,6 @@ class AggressivePlayer(BasePokerPlayer):
             for player in seats:
                 if player.get('uuid') == self.uuid:
                     self.initial_stack = player.get('stack', 100)
+                    self.memory_manager.initial_stack = self.initial_stack
                     break
 

@@ -1,39 +1,55 @@
 from pypokerengine.players import BasePokerPlayer
 import random
-from .memory_utils import get_memory_path
-from .hand_utils import evaluate_hand_strength, get_rank_value
+from .memory_manager import UnifiedMemoryManager
+from .hand_utils import evaluate_hand_strength
 from .constants import (
     BLUFF_PROBABILITY_TIGHT, TIGHTNESS_THRESHOLD_DEFAULT,
     HAND_STRENGTH_VERY_STRONG, HAND_STRENGTH_STRONG
 )
-from .error_handling import safe_memory_save, safe_memory_load
 
 class TightPlayer(BasePokerPlayer):
     """Jogador conservador que joga apenas com mãos fortes. Blefa raramente (8%). Aprendizado conservador básico com memória persistente."""
     
     def __init__(self, memory_file="tight_player_memory.json"):
-        self.memory_file = get_memory_path(memory_file)
-        self.bluff_probability = BLUFF_PROBABILITY_TIGHT
+        # Inicializa gerenciador de memória unificada
+        self.memory_manager = UnifiedMemoryManager(
+            memory_file,
+            default_bluff=0.15,  # Nivelado: ligeiramente abaixo da média
+            default_aggression=0.54,  # Nivelado: ligeiramente abaixo da média
+            default_tightness=29  # Nivelado: ligeiramente acima da média
+        )
+        self.memory = self.memory_manager.get_memory()
+        self.bluff_probability = self.memory['bluff_probability']
+        self.tightness_threshold = self.memory['tightness_threshold']
         self.bluff_call_ratio = 0.70  # 70% CALL / 30% RAISE quando blefar
-        
-        # Sistema de aprendizado conservador (básico)
-        self.round_results = []  # Histórico simples (últimas 10 rodadas)
         self.consecutive_losses = 0
-        self.tightness_threshold = TIGHTNESS_THRESHOLD_DEFAULT
-        self.total_rounds = 0
-        self.wins = 0
-        
-        # Carrega memória anterior se existir
-        self.load_memory()
+        self.initial_stack = None
     
     def declare_action(self, valid_actions, hole_card, round_state):
+        # Identifica oponentes
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.identify_opponents(round_state, self.uuid)
+        
         hand_strength = self._evaluate_hand_strength(hole_card, round_state)
         should_bluff = self._should_bluff()
         
+        # Atualiza valores da memória
+        self.bluff_probability = self.memory['bluff_probability']
+        self.tightness_threshold = self.memory['tightness_threshold']
+        
         if should_bluff:
-            return self._bluff_action(valid_actions, round_state)
+            action, amount = self._bluff_action(valid_actions, round_state)
         else:
-            return self._normal_action(valid_actions, hand_strength, round_state)
+            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
+        
+        # Registra ação
+        if hasattr(self, 'uuid') and self.uuid:
+            street = round_state.get('street', 'preflop')
+            self.memory_manager.record_my_action(
+                street, action, amount, hand_strength, round_state, should_bluff
+            )
+        
+        return action, amount
     
     def _should_bluff(self):
         """Decide se deve blefar baseado na probabilidade configurada."""
@@ -101,12 +117,20 @@ class TightPlayer(BasePokerPlayer):
         return fold_action['action'], fold_action['amount']
     
     def receive_game_start_message(self, game_info):
-        pass
+        """Inicializa stack inicial."""
+        seats = game_info.get('seats', [])
+        if isinstance(seats, list):
+            for player in seats:
+                if player.get('uuid') == self.uuid:
+                    self.initial_stack = player.get('stack', 100)
+                    if not hasattr(self.memory_manager, 'initial_stack'):
+                        self.memory_manager.initial_stack = self.initial_stack
+                    break
     
     def receive_round_start_message(self, round_count, hole_card, seats):
         """Salva memória periodicamente e armazena cartas no registry."""
         if round_count % 5 == 0:
-            self.save_memory()
+            self.memory_manager.save()
         # Armazena cartas no registry global para exibição no final do round
         if hole_card and hasattr(self, 'uuid') and self.uuid:
             from .cards_registry import store_player_cards
@@ -119,67 +143,51 @@ class TightPlayer(BasePokerPlayer):
         pass
     
     def receive_game_update_message(self, action, round_state):
-        pass
+        """Registra ações dos oponentes."""
+        player_uuid = action.get('uuid') or action.get('player_uuid')
+        if player_uuid and player_uuid != self.uuid:
+            self.memory_manager.record_opponent_action(player_uuid, action, round_state)
     
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Aprendizado conservador: ajusta apenas quando perde muito."""
-        self.total_rounds += 1
+        # Processa resultado usando gerenciador de memória
+        if hasattr(self, 'uuid') and self.uuid:
+            self.memory_manager.process_round_result(winners, hand_info, round_state, self.uuid)
+        
+        # Atualiza valores locais
+        self.memory = self.memory_manager.get_memory()
+        self.total_rounds = self.memory['total_rounds']
+        self.wins = self.memory['wins']
         
         # Verifica se ganhou
-        won = any(w['uuid'] == self.uuid for w in winners)
+        won = any(
+            (w.get('uuid') if isinstance(w, dict) else getattr(w, 'uuid', None)) == self.uuid
+            for w in winners
+        )
+        
         if won:
-            self.wins += 1
             self.consecutive_losses = 0
         else:
             self.consecutive_losses += 1
         
-        # Registra resultado (mantém apenas últimas 10)
-        self.round_results.append({'won': won, 'round': self.total_rounds})
-        if len(self.round_results) > 10:
-            self.round_results = self.round_results[-10:]
-        
         # Aprendizado conservador: só ajusta quando win rate < 30% OU 3+ perdas seguidas
-        if len(self.round_results) >= 5:
-            win_rate = sum(1 for r in self.round_results if r['won']) / len(self.round_results)
+        round_history = self.memory.get('round_history', [])
+        if len(round_history) >= 5:
+            recent_rounds = round_history[-10:] if len(round_history) >= 10 else round_history
+            win_rate = sum(1 for r in recent_rounds if r['final_result']['won']) / len(recent_rounds)
             
-            # Aumenta seletividade quando win rate < 30% (threshold mais alto)
+            # Aumenta seletividade quando win rate < 30% (evolução lenta)
             if win_rate < 0.30:
-                self.tightness_threshold = min(35, self.tightness_threshold + 5)
+                self.memory['tightness_threshold'] = min(35, self.memory['tightness_threshold'] + 1)
             
-            # Reduz blefe quando perde 3+ rodadas seguidas
+            # Reduz blefe quando perde 3+ rodadas seguidas (evolução muito lenta)
             if self.consecutive_losses >= 3:
-                self.bluff_probability = max(0.02, self.bluff_probability * 0.7)
+                self.memory['bluff_probability'] = max(0.10, self.memory['bluff_probability'] * 0.999)
+        
+        # Atualiza valores locais
+        self.bluff_probability = self.memory['bluff_probability']
+        self.tightness_threshold = self.memory['tightness_threshold']
         
         # Salva memória após ajustes
-        self.save_memory()
-    
-    def save_memory(self):
-        """Salva memória aprendida em arquivo com tratamento de erros melhorado."""
-        memory = {
-            'bluff_probability': self.bluff_probability,
-            'tightness_threshold': self.tightness_threshold,
-            'total_rounds': self.total_rounds,
-            'wins': self.wins,
-            'consecutive_losses': self.consecutive_losses
-        }
-        
-        safe_memory_save(self.memory_file, memory)
-    
-    def load_memory(self):
-        """Carrega memória aprendida de arquivo com tratamento de erros melhorado."""
-        default_memory = {
-            'bluff_probability': BLUFF_PROBABILITY_TIGHT,
-            'tightness_threshold': TIGHTNESS_THRESHOLD_DEFAULT,
-            'total_rounds': 0,
-            'wins': 0,
-            'consecutive_losses': 0
-        }
-        
-        memory = safe_memory_load(self.memory_file, default_memory)
-        
-        self.bluff_probability = memory.get('bluff_probability', BLUFF_PROBABILITY_TIGHT)
-        self.tightness_threshold = memory.get('tightness_threshold', TIGHTNESS_THRESHOLD_DEFAULT)
-        self.total_rounds = memory.get('total_rounds', 0)
-        self.wins = memory.get('wins', 0)
-        self.consecutive_losses = memory.get('consecutive_losses', 0)
+        self.memory_manager.save()
 
