@@ -1,8 +1,10 @@
-from pypokerengine.players import BasePokerPlayer
-from .console_formatter import ConsoleFormatter
-from .cards_registry import store_player_cards, get_all_cards, clear_registry
-from .win_probability_calculator import calculate_win_probability_for_player
-from .hand_utils import get_community_cards, normalize_hole_cards
+from typing import Tuple
+
+from pypokerengine.players import BasePokerPlayer  # type: ignore[reportMissingImports]
+from utils.console_formatter import ConsoleFormatter
+from utils.cards_registry import store_player_cards, get_all_cards, clear_registry
+from utils.win_probability_calculator import calculate_win_probability_for_player
+from utils.hand_utils import get_community_cards, normalize_hole_cards
 
 
 class QuitGameException(Exception):
@@ -102,7 +104,7 @@ class ConsolePlayer(BasePokerPlayer):
                 store_player_cards(player_uuid_for_storage, hole_cards)
                 import os
                 if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
-                    from .cards_registry import get_all_cards
+                    from utils.cards_registry import get_all_cards
                     all_cards_after = get_all_cards()
                     print(f"[DEBUG] Cartas armazenadas: uuid={player_uuid_for_storage}, hole_cards={hole_cards}, registry_has={player_uuid_for_storage in all_cards_after}")
         
@@ -327,7 +329,7 @@ class ConsolePlayer(BasePokerPlayer):
         
         # Solicitar ação
         print()
-        action, amount = self.__receive_action_from_console(valid_actions)
+        action, amount = self.__receive_action_from_console(valid_actions)  # type: ignore[assignment]
         return action, amount
 
     def receive_game_start_message(self, game_info):
@@ -372,7 +374,10 @@ class ConsolePlayer(BasePokerPlayer):
     def receive_street_start_message(self, street, round_state):
         """Imprime bloco novo para nova street sem repetir dados estáticos."""
         street_pt = self.formatter.format_street_pt(street)
-        print(f"\n–– {street_pt.upper()} ––")
+        if street_pt:
+            print(f"\n–– {street_pt.upper()} ––")
+        else:
+            print(f"\n–– {street.upper() if street else 'UNKNOWN'} ––")
         
         # Limpa cache de probabilidade quando a street muda
         # (a probabilidade mudará porque as cartas comunitárias mudaram)
@@ -638,8 +643,12 @@ class ConsolePlayer(BasePokerPlayer):
     def __gen_raw_input_wrapper(self):
         return lambda msg: input(msg)
 
-    def __receive_action_from_console(self, valid_actions):
-        """Solicita ação do jogador de forma limpa."""
+    def __receive_action_from_console(self, valid_actions) -> Tuple[str, int]:
+        """Solicita ação do jogador de forma limpa.
+        
+        Returns:
+            tuple[str, int]: Tupla com (action, amount)
+        """
         try:
             flg = self.input_receiver('>> ').strip().lower()
             # Verifica se o jogador quer sair
@@ -655,9 +664,10 @@ class ConsolePlayer(BasePokerPlayer):
                     valid_amounts = valid_actions[2]['amount']
                     raise_amount = self.__receive_raise_amount_from_console(valid_amounts['min'], valid_amounts['max'])
                     return valid_actions[2]['action'], raise_amount
-            else:
-                print("Invalid action. Use [f], [c], [r] or [q] to quit")
-                return self.__receive_action_from_console(valid_actions)
+            
+            # Se chegou aqui, a ação é inválida - solicita novamente
+            print("Invalid action. Use [f], [c], [r] or [q] to quit")
+            return self.__receive_action_from_console(valid_actions)
         except QuitGameException:
             # Re-raise para ser capturado no nível superior
             raise

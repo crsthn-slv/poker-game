@@ -1,7 +1,7 @@
 from pypokerengine.players import BasePokerPlayer
 import random
-from .memory_manager import UnifiedMemoryManager
-from .hand_utils import evaluate_hand_strength
+from utils.memory_manager import UnifiedMemoryManager
+from utils.hand_utils import evaluate_hand_strength
 
 class FishPlayer(BasePokerPlayer):
     """Jogador 'peixe' que aprende lentamente. Começa sempre fazendo call, mas aprende quando foldar. Usa sistema de memória unificado."""
@@ -76,8 +76,8 @@ class FishPlayer(BasePokerPlayer):
             self.memory_manager.save()
         # Armazena cartas no registry global para exibição no final do round
         if hole_card and hasattr(self, 'uuid') and self.uuid:
-            from .cards_registry import store_player_cards
-            from .hand_utils import normalize_hole_cards
+            from utils.cards_registry import store_player_cards
+            from utils.hand_utils import normalize_hole_cards
             hole_cards = normalize_hole_cards(hole_card)
             if hole_cards:
                 store_player_cards(self.uuid, hole_cards)

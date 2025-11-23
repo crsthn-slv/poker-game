@@ -33,7 +33,7 @@ def test_2_hand_evaluator_import():
     try:
         # Adiciona o diretório atual ao path
         sys.path.insert(0, os.getcwd())
-        from players.hand_evaluator import HandEvaluator
+        from utils.hand_evaluator import HandEvaluator
         print("✓ HandEvaluator importado com sucesso")
         evaluator = HandEvaluator()
         print("✓ HandEvaluator instanciado com sucesso")
@@ -50,7 +50,7 @@ def test_3_win_probability_calculator_import():
     print("="*60)
     try:
         sys.path.insert(0, os.getcwd())
-        from players.win_probability_calculator import HAS_POKERKIT, HandEvaluator
+        from utils.win_probability_calculator import HAS_POKERKIT, HandEvaluator
         print(f"✓ win_probability_calculator importado")
         print(f"  HAS_POKERKIT: {HAS_POKERKIT}")
         print(f"  HandEvaluator: {HandEvaluator}")
@@ -80,7 +80,7 @@ def test_4_module_execution_without_debug():
         result = subprocess.run(
             [sys.executable, '-c', 
              'import sys; sys.path.insert(0, "."); '
-             'from players.win_probability_calculator import HAS_POKERKIT; '
+             'from utils.win_probability_calculator import HAS_POKERKIT; '
              'print(f"HAS_POKERKIT={HAS_POKERKIT}")'],
             cwd=os.getcwd(),
             env=env,
@@ -116,7 +116,7 @@ def test_5_module_execution_with_debug():
         result = subprocess.run(
             [sys.executable, '-c', 
              'import sys; sys.path.insert(0, "."); '
-             'from players.win_probability_calculator import HAS_POKERKIT; '
+             'from utils.win_probability_calculator import HAS_POKERKIT; '
              'print(f"HAS_POKERKIT={HAS_POKERKIT}")'],
             cwd=os.getcwd(),
             env=env,
@@ -183,7 +183,7 @@ def test_7_import_order():
         print("✓ pypokerengine importado")
         
         # Depois tenta importar HandEvaluator
-        from players.hand_evaluator import HandEvaluator
+        from utils.hand_evaluator import HandEvaluator
         print("✓ HandEvaluator importado após pypokerengine")
         
         # Depois tenta importar win_probability_calculator

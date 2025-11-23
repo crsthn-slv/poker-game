@@ -103,3 +103,7 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+[tool.basedpyright]
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
+

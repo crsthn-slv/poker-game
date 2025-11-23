@@ -129,7 +129,7 @@ if script_dir not in sys.path:
 
 # Tenta importar como o jogo faz
 try:
-    from players.win_probability_calculator import HAS_POKERKIT, HandEvaluator
+    from utils.win_probability_calculator import HAS_POKERKIT, HandEvaluator
     print(f"Importação bem-sucedida: HAS_POKERKIT={HAS_POKERKIT}")
     if HAS_POKERKIT:
         print("SUCCESS: PokerKit disponível")
@@ -183,7 +183,7 @@ from pypokerengine.api.game import setup_config
 print("✓ pypokerengine importado")
 
 # Depois tenta importar win_probability_calculator
-from players.win_probability_calculator import HAS_POKERKIT, HandEvaluator
+from utils.win_probability_calculator import HAS_POKERKIT, HandEvaluator
 print(f"✓ win_probability_calculator importado: HAS_POKERKIT={HAS_POKERKIT}")
 
 if HAS_POKERKIT:

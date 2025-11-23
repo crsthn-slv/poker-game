@@ -36,12 +36,12 @@ def test_force_reimport():
         print(f"✓ pokerkit importado: {pokerkit.__file__}")
         
         # Força importação do HandEvaluator
-        from players.hand_evaluator import HandEvaluator
+        from utils.hand_evaluator import HandEvaluator
         print("✓ HandEvaluator importado")
         
         # Força importação do win_probability_calculator
         importlib.reload(sys.modules.get('players.win_probability_calculator', None))
-        from players.win_probability_calculator import HAS_POKERKIT, HandEvaluator as HE
+        from utils.win_probability_calculator import HAS_POKERKIT, HandEvaluator as HE
         print(f"✓ win_probability_calculator importado: HAS_POKERKIT={HAS_POKERKIT}")
         
         if HAS_POKERKIT:
@@ -78,10 +78,10 @@ def test_import_with_explicit_path():
         import pokerkit
         print(f"✓ pokerkit importado: {pokerkit.__file__}")
         
-        from players.hand_evaluator import HandEvaluator
+        from utils.hand_evaluator import HandEvaluator
         print("✓ HandEvaluator importado")
         
-        from players.win_probability_calculator import HAS_POKERKIT
+        from utils.win_probability_calculator import HAS_POKERKIT
         print(f"✓ HAS_POKERKIT={HAS_POKERKIT}")
         
         if HAS_POKERKIT:

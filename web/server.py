@@ -26,7 +26,7 @@ from players.adaptive_player import AdaptivePlayer
 from players.conservative_aggressive_player import ConservativeAggressivePlayer
 from players.opportunistic_player import OpportunisticPlayer
 from players.hybrid_player import HybridPlayer
-from players.hand_evaluator import HandEvaluator
+from utils.hand_evaluator import HandEvaluator
 
 # Importa módulo de card_utils do PyPokerEngine para monkey patch
 try:

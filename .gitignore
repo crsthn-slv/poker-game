@@ -97,3 +97,8 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+
+
+# Davia
+.davia/
+.cursor/rules/davia-documentation.mdc

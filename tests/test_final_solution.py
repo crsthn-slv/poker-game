@@ -21,7 +21,7 @@ def test_solution():
     result1 = subprocess.run(
         [sys.executable, '-c', 
          'import sys; sys.path.insert(0, "."); '
-         'from players.hand_evaluator import HandEvaluator; '
+         'from utils.hand_evaluator import HandEvaluator; '
          'print("✓ HandEvaluator importado")'],
         cwd=os.getcwd(),
         env=env,
@@ -41,7 +41,7 @@ def test_solution():
     result2 = subprocess.run(
         [sys.executable, '-c', 
          'import sys; sys.path.insert(0, "."); '
-         'from players.win_probability_calculator import HAS_POKERKIT; '
+         'from utils.win_probability_calculator import HAS_POKERKIT; '
          'print(f"HAS_POKERKIT={HAS_POKERKIT}")'],
         cwd=os.getcwd(),
         env=env,
