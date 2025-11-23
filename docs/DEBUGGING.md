@@ -111,7 +111,7 @@ const DEBUG_MODE = true; // Mude de false para true
 - Servidor retorna erro 500
 
 **Verificações**:
-- [ ] Verifique se todas as dependências estão instaladas: `pip install -r requirements.txt`
+- [ ] Verifique se todas as dependências estão instaladas: `make install` ou `pip install -r requirements.txt`
 - [ ] Verifique se o servidor está rodando na porta 5000
 - [ ] Verifique os logs do servidor
 - [ ] Verifique se há bots suficientes disponíveis
@@ -145,6 +145,12 @@ const DEBUG_MODE = true; // Mude de false para true
 
 Execute os testes unitários:
 
+**Com Makefile:**
+```bash
+make test
+```
+
+**Ou manualmente:**
 ```bash
 cd /caminho/para/poker_test
 python3 -m pytest tests/test_serialization.py -v
@@ -154,6 +160,12 @@ python3 -m pytest tests/test_serialization.py -v
 
 Execute os testes de fluxo:
 
+**Com Makefile:**
+```bash
+make test
+```
+
+**Ou manualmente:**
 ```bash
 python3 -m pytest tests/test_game_flow.py -v
 ```
@@ -161,12 +173,19 @@ python3 -m pytest tests/test_game_flow.py -v
 ### 3. Testar no Navegador
 
 1. Inicie o servidor:
+
+   **Com Makefile:**
+   ```bash
+   make run-server
+   ```
+
+   **Ou manualmente:**
    ```bash
    cd web
    python3 server.py
    ```
 
-2. Abra o navegador em `http://localhost:5000`
+2. Abra o navegador em `http://localhost:5002` (ou porta configurada)
 
 3. Abra o console do navegador (F12)
 
@@ -179,14 +198,28 @@ python3 -m pytest tests/test_game_flow.py -v
 ### 4. Testar com Modo Debug
 
 1. Ative o modo debug no backend:
+
+   **Com Makefile:**
+   ```bash
+   export POKER_DEBUG=true
+   make run-server
+   ```
+
+   **Ou manualmente:**
    ```bash
    export POKER_DEBUG=true
    python3 web/server.py
    ```
 
-2. Ative o modo debug no frontend (edite `game.js`)
+2. Para o jogo console:
+   ```bash
+   export POKER_DEBUG=true
+   make run-console
+   ```
 
-3. Execute o jogo e monitore os logs
+3. Ative o modo debug no frontend (edite `game.js`)
+
+4. Execute o jogo e monitore os logs
 
 ## Logs e Mensagens de Erro
 
@@ -243,18 +276,26 @@ Erro em função: ...
 
 ## Executando Testes
 
-Para executar todos os testes:
-
+**Com Makefile (Recomendado):**
 ```bash
-python3 -m pytest tests/ -v
+# Todos os testes
+make test
+
+# Teste com cobertura
+make test-cov
 ```
 
-Para executar testes específicos:
-
+**Ou manualmente:**
 ```bash
+# Todos os testes
+python3 -m pytest tests/ -v
+
+# Teste específico
 python3 -m pytest tests/test_serialization.py -v
 python3 -m pytest tests/test_game_flow.py -v
 ```
+
+**Nota:** O Makefile detecta automaticamente o Python correto (com pokerkit instalado) para executar os testes.
 
 ## Contato e Suporte
 

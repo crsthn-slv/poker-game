@@ -519,11 +519,16 @@ Exemplo (TightPlayer):
 
 ### 1. Modo Web (Recomendado)
 
-**Como usar:**
+**Como usar (com Makefile):**
+```bash
+make run-server
+# Acesse http://localhost:5002 (ou a porta configurada na variável de ambiente PORT)
+```
+
+**Ou manualmente:**
 ```bash
 cd web
 python3 server.py
-# Acesse http://localhost:5002 (ou a porta configurada na variável de ambiente PORT)
 ```
 
 **Configuração:**
@@ -542,7 +547,12 @@ O servidor pode ser configurado através de variáveis de ambiente ou arquivo `.
 
 ### 2. Modo Terminal Interativo
 
-**Como usar:**
+**Como usar (com Makefile - Recomendado):**
+```bash
+make run-console
+```
+
+**Ou manualmente:**
 ```bash
 python3 -m game.play_console
 ```
@@ -552,10 +562,18 @@ python3 -m game.play_console
 - 3 bots (Tight, Aggressive, Smart)
 - Comandos: 'f' (fold), 'c' (call), 'r' (raise)
 - Output textual do jogo
+- Mostra probabilidade de vitória (se pokerkit estiver disponível)
+
+**Nota:** O Makefile detecta automaticamente o Python correto e mostra informações úteis ao iniciar.
 
 ### 3. Modo AI vs AI Básico
 
-**Como usar:**
+**Como usar (com Makefile):**
+```bash
+make run-game
+```
+
+**Ou manualmente:**
 ```bash
 python3 -m game.game
 ```
@@ -567,7 +585,12 @@ python3 -m game.game
 
 ### 4. Modo AI vs AI Avançado
 
-**Como usar:**
+**Como usar (com Makefile):**
+```bash
+make run-game-advanced
+```
+
+**Ou manualmente:**
 ```bash
 python3 -m game.game_advanced
 ```
@@ -716,6 +739,16 @@ tests/
 
 ### Executar Testes
 
+**Com Makefile (Recomendado):**
+```bash
+# Todos os testes
+make test
+
+# Teste com cobertura
+make test-cov
+```
+
+**Ou manualmente:**
 ```bash
 # Todos os testes
 python3 -m pytest tests/ -v
@@ -730,9 +763,22 @@ python3 -m pytest tests/test_serialization.py -v
 
 ### Modo Debug Backend
 
+**Com Makefile:**
+```bash
+export POKER_DEBUG=true
+make run-server
+```
+
+**Ou manualmente:**
 ```bash
 export POKER_DEBUG=true
 python3 web/server.py
+```
+
+**Para o jogo console:**
+```bash
+export POKER_DEBUG=true
+make run-console
 ```
 
 **O que ativa:**

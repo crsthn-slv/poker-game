@@ -1045,8 +1045,11 @@ def start_game():
                     'message': f'small_blind inválido: {small_blind_raw}'
                 }), 400
         else:
-            small_blind = DEFAULT_SMALL_BLIND
-            print(f"🔵 [SERVER] [{timestamp}] start_game - small_blind não fornecido, usando default: {small_blind}")
+            # Calcula blinds automaticamente baseado na stack inicial
+            from game.blind_manager import BlindManager
+            blind_manager = BlindManager(initial_reference_stack=initial_stack)
+            small_blind, big_blind = blind_manager.get_blinds()
+            print(f"🔵 [SERVER] [{timestamp}] start_game - small_blind não fornecido, calculado automaticamente: SB={small_blind}, BB={big_blind}")
         
         statistics_visible = data.get('statistics_visible', True)
         

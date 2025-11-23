@@ -3,9 +3,95 @@ Hand Evaluator usando PokerKit para avaliação rápida de mãos de poker.
 Substitui a função lenta _calc_hand_info_flg do PyPokerEngine.
 """
 
+import sys
+import os
 from typing import List, Optional, Dict
 from functools import lru_cache
-from pokerkit import StandardHighHand
+
+# Garante que o site-packages está no path para encontrar pokerkit
+try:
+    import site
+    site_packages = site.getsitepackages()
+    for sp in site_packages:
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
+except:
+    pass
+
+# Tenta importar pokerkit de várias formas
+StandardHighHand = None
+_pokerkit_imported = False
+
+try:
+    from pokerkit import StandardHighHand
+    _pokerkit_imported = True
+    import os
+    if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+        print(f"[DEBUG] hand_evaluator: Primeira tentativa de importação bem-sucedida")
+except ImportError as e:
+    # Log para debug
+    import os
+    if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+        print(f"[DEBUG] hand_evaluator: Primeira tentativa de importação falhou: {e}")
+    
+    # Tenta adicionar caminhos comuns do site-packages
+    try:
+        import site
+        site_packages = site.getsitepackages()
+        
+        # Adiciona todos os site-packages encontrados
+        for path in site_packages:
+            pokerkit_path = os.path.join(path, 'pokerkit')
+            if os.path.exists(pokerkit_path) and path not in sys.path:
+                sys.path.insert(0, path)
+                if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                    print(f"[DEBUG] hand_evaluator: Adicionado {path} ao sys.path")
+        
+        # Tenta importar novamente
+        from pokerkit import StandardHighHand
+        _pokerkit_imported = True
+        if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+            print(f"[DEBUG] hand_evaluator: Segunda tentativa de importação bem-sucedida")
+    except ImportError:
+        # Tenta caminhos específicos do macOS/Homebrew
+        try:
+            import platform
+            if platform.system() == 'Darwin':  # macOS
+                # Caminhos comuns do Homebrew Python
+                homebrew_paths = [
+                    '/opt/homebrew/lib/python3.11/site-packages',
+                    '/opt/homebrew/lib/python3.10/site-packages',
+                    '/opt/homebrew/lib/python3.9/site-packages',
+                    '/usr/local/lib/python3.11/site-packages',
+                    '/usr/local/lib/python3.10/site-packages',
+                    '/usr/local/lib/python3.9/site-packages',
+                ]
+                
+                for path in homebrew_paths:
+                    pokerkit_path = os.path.join(path, 'pokerkit')
+                    if os.path.exists(pokerkit_path) and path not in sys.path:
+                        sys.path.insert(0, path)
+                        if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                            print(f"[DEBUG] hand_evaluator: Adicionado caminho Homebrew {path} ao sys.path")
+                        break
+                
+                # Tenta importar novamente
+                from pokerkit import StandardHighHand
+                _pokerkit_imported = True
+                if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                    print(f"[DEBUG] hand_evaluator: Importação bem-sucedida via caminho Homebrew")
+            else:
+                raise
+        except ImportError as e2:
+            # Se ainda falhar, não quebra o módulo - apenas marca como não disponível
+            StandardHighHand = None
+            _pokerkit_imported = False
+            if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                print(f"[DEBUG] hand_evaluator: Todas as tentativas de importação falharam: {e2}")
+                print(f"[DEBUG] hand_evaluator: Módulo será carregado, mas pokerkit não estará disponível")
+                import traceback
+                traceback.print_exc()
+
 from .constants import POKERKIT_MAX_SCORE
 
 # Mapeamentos constantes para conversão
@@ -88,6 +174,11 @@ class HandEvaluator:
         Returns:
             Int representando o rank da mão (menor = melhor mão, compatível com formato anterior)
         """
+        # Verifica se pokerkit está disponível
+        if StandardHighHand is None:
+            # Retorna valor padrão se pokerkit não estiver disponível
+            return POKERKIT_MAX_SCORE
+        
         if not hole_cards or len(hole_cards) < 2:
             # Mão inválida - retorna valor alto (pior mão possível)
             return POKERKIT_MAX_SCORE

@@ -38,6 +38,8 @@ class ConsoleFormatter:
     MAGENTA = '\033[35m'
     CYAN = '\033[36m'
     WHITE = '\033[37m'
+    DIM = '\033[2m'  # Texto opaco/desbotado (para jogadores que fizeram fold)
+    GRAY = '\033[90m'  # Cinza escuro (alternativa para texto opaco)
     
     # Cores de fundo
     BG_RED = '\033[41m'
@@ -264,6 +266,151 @@ class ConsoleFormatter:
         
         return ", ".join(action_parts)
     
+    def format_history_by_player(self, action_histories, current_street, round_state=None):
+        """Formata histórico de ações agrupado por jogador.
+        Cada jogador tem uma linha mostrando todas as suas ações.
+        
+        Args:
+            action_histories: Dict com histórico de ações por street
+            current_street: Street atual
+            round_state: Estado do round (opcional, para buscar nomes dos jogadores)
+        
+        Returns:
+            Lista de strings, uma para cada jogador com suas ações
+        """
+        if not action_histories:
+            return []
+        
+        # Cria mapa UUID -> nome dos jogadores e UUID -> stack
+        uuid_to_name = {}
+        uuid_to_stack = {}  # Mapa UUID -> stack atual
+        player_order = []  # Mantém ordem de aparição dos jogadores
+        if round_state:
+            seats = round_state.get('seats', [])
+            for seat in seats:
+                if isinstance(seat, dict):
+                    uuid = seat.get('uuid', '')
+                    name = seat.get('name', '')
+                    stack = seat.get('stack', 0)
+                    if uuid:
+                        if name:
+                            clean_name = self.clean_player_name(name)
+                            uuid_to_name[uuid] = clean_name
+                        if stack is not None:
+                            uuid_to_stack[uuid] = stack
+                        if uuid not in player_order:
+                            player_order.append(uuid)
+        
+        # Agrupa ações por jogador
+        player_actions = {}  # {player_uuid: [(street, action_type, amount, paid)]}
+        
+        # Ordem das streets
+        street_order = ['preflop', 'flop', 'turn', 'river']
+        
+        for street in street_order:
+            if street not in action_histories:
+                continue
+            
+            street_history = action_histories.get(street, [])
+            if not street_history:
+                continue
+            
+            for action in street_history:
+                if not isinstance(action, dict):
+                    continue
+                
+                action_type = action.get('action', '')
+                player_uuid = action.get('uuid', '')
+                
+                # Obtém nome do jogador
+                player_name = action.get('player', '')
+                if not player_name and player_uuid and uuid_to_name:
+                    player_name = uuid_to_name.get(player_uuid, '')
+                if not player_name and player_uuid:
+                    # Usa UUID como fallback
+                    player_name = f"Player {player_uuid[-4:]}" if len(player_uuid) >= 4 else "Unknown"
+                    uuid_to_name[player_uuid] = player_name
+                    if player_uuid not in player_order:
+                        player_order.append(player_uuid)
+                
+                if not player_uuid:
+                    # Se não tem UUID, tenta usar o nome como chave
+                    player_uuid = player_name if player_name else "unknown"
+                
+                # Inicializa lista de ações do jogador se necessário
+                if player_uuid not in player_actions:
+                    player_actions[player_uuid] = []
+                
+                amount = action.get('amount', 0)
+                paid = action.get('paid', 0)
+                
+                # Formata ação
+                if action_type == 'SMALLBLIND':
+                    action_display = f'SB({amount})'
+                elif action_type == 'BIGBLIND':
+                    action_display = f'BB({amount})'
+                elif action_type == 'CALL':
+                    if paid > 0:
+                        action_display = f'call({paid})'
+                    else:
+                        action_display = 'check'
+                elif action_type == 'RAISE':
+                    action_display = f'raise({amount})'
+                elif action_type == 'CHECK':
+                    action_display = 'check'
+                elif action_type == 'FOLD':
+                    action_display = 'fold'
+                else:
+                    action_display = action_type.lower()
+                
+                player_actions[player_uuid].append(action_display)
+        
+        # Formata saída: uma linha por jogador
+        result = []
+        # Usa ordem dos seats primeiro, depois ordem de aparição nas ações
+        all_player_uuids = []
+        for uuid in player_order:
+            if uuid in player_actions:
+                all_player_uuids.append(uuid)
+        for uuid in player_actions:
+            if uuid not in all_player_uuids:
+                all_player_uuids.append(uuid)
+        
+        # Calcula comprimento máximo do nome para alinhar os stacks
+        max_name_length = 0
+        for player_uuid in all_player_uuids:
+            if player_uuid in player_actions:
+                player_name = uuid_to_name.get(player_uuid, player_uuid)
+                max_name_length = max(max_name_length, len(player_name))
+        
+        # Formata cada linha com alinhamento
+        for player_uuid in all_player_uuids:
+            if player_uuid in player_actions:
+                player_name = uuid_to_name.get(player_uuid, player_uuid)
+                actions_str = ' → '.join(player_actions[player_uuid])
+                
+                # Obtém stack do jogador (se disponível)
+                player_stack = uuid_to_stack.get(player_uuid)
+                
+                # Alinha o nome e adiciona stack entre parênteses
+                padded_name = player_name.ljust(max_name_length)
+                if player_stack is not None:
+                    name_with_stack = f"{padded_name} ({player_stack})"
+                else:
+                    name_with_stack = padded_name
+                
+                # Verifica se o jogador fez fold para tornar a linha inteira opaca
+                has_folded = 'fold' in player_actions[player_uuid]
+                if has_folded:
+                    # Aplica formatação opaca à linha inteira
+                    full_line = f"  {name_with_stack}: {actions_str}"
+                    formatted_line = f"{self.DIM}{full_line}{self.RESET}"
+                    result.append(formatted_line)
+                else:
+                    result.append(f"  {name_with_stack}: {actions_str}")
+        
+        return result
+    
     def format_action_costs(self, valid_actions):
         """Formata custos das ações disponíveis.
         
@@ -287,7 +434,7 @@ class ConsoleFormatter:
                 if amount > 0:
                     action_texts.append(f"CALL ({amount})")
                 else:
-                    action_texts.append("CHECK")
+                    action_texts.append("CHECK (0)")
             elif action_type == 'raise':
                 min_raise = action.get('amount', {}).get('min', 0)
                 max_raise = action.get('amount', {}).get('max', 0)

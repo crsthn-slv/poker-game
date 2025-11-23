@@ -19,12 +19,33 @@ from .cards_registry import get_all_cards
 from .hand_utils import get_community_cards
 
 # Tenta importar HandEvaluator, mas não é obrigatório
+# Log sempre ativo para debug (temporário)
+import os
+_debug_import = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+if _debug_import:
+    print(f"[DEBUG] win_probability_calculator: Tentando importar HandEvaluator...")
+
 try:
     from .hand_evaluator import HandEvaluator
     HAS_POKERKIT = True
-except ImportError:
+    if _debug_import:
+        print(f"[DEBUG] win_probability_calculator: HandEvaluator importado com sucesso: {HandEvaluator}")
+except ImportError as e:
     HAS_POKERKIT = False
     HandEvaluator = None
+    # Log do erro de importação (sempre mostra para debug)
+    if _debug_import:
+        print(f"[DEBUG] win_probability_calculator: Erro ImportError ao importar HandEvaluator: {e}")
+        import traceback
+        traceback.print_exc()
+except Exception as e:
+    HAS_POKERKIT = False
+    HandEvaluator = None
+    # Log de outros erros de importação
+    if _debug_import:
+        print(f"[DEBUG] win_probability_calculator: Erro inesperado ao importar HandEvaluator: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
 
 # Lazy loading do HandEvaluator (singleton)
 _hand_evaluator_instance: Optional[HandEvaluator] = None
@@ -45,12 +66,28 @@ def _get_hand_evaluator() -> Optional[HandEvaluator]:
     Cria apenas quando necessário.
     """
     global _hand_evaluator_instance
-    if _hand_evaluator_instance is None and HAS_POKERKIT and HandEvaluator:
+    # Se já temos uma instância, retorna ela (pode ter sido criada no fallback)
+    if _hand_evaluator_instance is not None:
+        return _hand_evaluator_instance
+    
+    # Tenta criar se HandEvaluator estiver disponível
+    if HandEvaluator is not None:
         try:
             _hand_evaluator_instance = HandEvaluator()
+            return _hand_evaluator_instance
         except Exception:
             return None
-    return _hand_evaluator_instance
+    
+    # Se HAS_POKERKIT é True mas HandEvaluator é None, tenta importar novamente
+    if HAS_POKERKIT:
+        try:
+            from .hand_evaluator import HandEvaluator as HandEvalClass
+            _hand_evaluator_instance = HandEvalClass()
+            return _hand_evaluator_instance
+        except Exception:
+            return None
+    
+    return None
 
 
 def _get_num_simulations_for_street(street):
@@ -232,12 +269,27 @@ def calculate_win_probability_for_player(player_uuid, round_state, num_simulatio
         Se return_confidence=False: Float entre 0.0 e 1.0 representando probabilidade de vitória, ou None se erro
         Se return_confidence=True: Dict com {'prob': float, 'min': float, 'max': float, 'margin': float} ou None
     """
+    import os
+    console_debug = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+    
+    if console_debug:
+        street = round_state.get('street', 'preflop')
+        print(f"[DEBUG] calculate_win_probability_for_player INÍCIO: uuid={player_uuid}, street={street}, return_confidence={return_confidence}")
+    
     try:
+        
         # Obtém cartas do jogador
         all_cards = get_all_cards()
         player_cards = all_cards.get(player_uuid)
         
+        if console_debug:
+            print(f"[DEBUG] calculate_win_probability_for_player: uuid={player_uuid}, all_cards_keys={list(all_cards.keys())}, player_cards={player_cards}")
+        
         if not player_cards or len(player_cards) < 2:
+            if DEBUG_MODE:
+                _debug_log(f"Retornando None: player_cards inválido ou vazio para uuid={player_uuid}, all_cards_keys={list(all_cards.keys())}")
+            if console_debug:
+                print(f"[DEBUG] Retornando None: player_cards inválido ou vazio (player_cards={player_cards})")
             return None
         
         # Obtém cartas comunitárias já reveladas (padronizado)
@@ -294,15 +346,87 @@ def calculate_win_probability_for_player(player_uuid, round_state, num_simulatio
         # Se não há cartas suficientes no deck, retorna None
         needed_community_cards = 5 - len(community_cards)
         total_cards_needed = needed_community_cards + cards_needed_for_opponents
+        if console_debug:
+            print(f"[DEBUG] Verificando cartas: remaining_deck={len(remaining_deck)}, total_cards_needed={total_cards_needed}, needed_community_cards={needed_community_cards}, cards_needed_for_opponents={cards_needed_for_opponents}, num_opponents={num_opponents}, active_players={len(active_players)}")
         if len(remaining_deck) < total_cards_needed:
+            if DEBUG_MODE:
+                _debug_log(f"Retornando None: cartas insuficientes no deck (remaining={len(remaining_deck)}, needed={total_cards_needed})")
+            if console_debug:
+                print(f"[DEBUG] Retornando None: cartas insuficientes no deck (remaining={len(remaining_deck)}, needed={total_cards_needed})")
             return None
         
+        # Verificação adicional: tenta importar pokerkit diretamente como fallback
+        # Isso resolve casos onde o pokerkit está instalado mas a importação inicial falhou
+        pokerkit_available = HAS_POKERKIT and HandEvaluator is not None
+        if not pokerkit_available:
+            if console_debug:
+                print(f"[DEBUG] Verificando PokerKit: HAS_POKERKIT={HAS_POKERKIT}, HandEvaluator={HandEvaluator}")
+                print(f"[DEBUG] Tentando importação direta do pokerkit como fallback...")
+            try:
+                # Tenta importar pokerkit diretamente
+                import sys
+                import os
+                import platform
+                
+                # Tenta caminhos específicos do macOS/Homebrew primeiro
+                if platform.system() == 'Darwin':  # macOS
+                    homebrew_paths = [
+                        '/opt/homebrew/lib/python3.11/site-packages',
+                        '/opt/homebrew/lib/python3.10/site-packages',
+                        '/opt/homebrew/lib/python3.9/site-packages',
+                        '/usr/local/lib/python3.11/site-packages',
+                        '/usr/local/lib/python3.10/site-packages',
+                        '/usr/local/lib/python3.9/site-packages',
+                    ]
+                    
+                    for path in homebrew_paths:
+                        pokerkit_path = os.path.join(path, 'pokerkit')
+                        if os.path.exists(pokerkit_path) and path not in sys.path:
+                            sys.path.insert(0, path)
+                            if console_debug:
+                                print(f"[DEBUG] Fallback: Adicionado {path} ao sys.path")
+                            break
+                
+                # Tenta importar pokerkit
+                from pokerkit import StandardHighHand
+                if console_debug:
+                    print(f"[DEBUG] Fallback: pokerkit importado com sucesso")
+                
+                # Se conseguiu importar, tenta criar HandEvaluator dinamicamente
+                try:
+                    from .hand_evaluator import HandEvaluator as HandEvalClass
+                    # Cria uma instância temporária para testar
+                    test_evaluator = HandEvalClass()
+                    # Se chegou aqui, funciona! Atualiza as variáveis globais
+                    global _hand_evaluator_instance
+                    _hand_evaluator_instance = test_evaluator
+                    pokerkit_available = True
+                    if console_debug:
+                        print(f"[DEBUG] Fallback bem-sucedido! PokerKit agora disponível")
+                except Exception as e2:
+                    if console_debug:
+                        print(f"[DEBUG] Fallback falhou ao criar HandEvaluator: {e2}")
+                        import traceback
+                        traceback.print_exc()
+            except ImportError as e:
+                if console_debug:
+                    print(f"[DEBUG] Fallback falhou ao importar pokerkit: {e}")
+                    import traceback
+                    traceback.print_exc()
+        
         # Se PokerKit não estiver disponível, retorna None (probabilidade não calculável)
-        if not HAS_POKERKIT or not HandEvaluator:
+        if not pokerkit_available:
+            if DEBUG_MODE:
+                _debug_log(f"Retornando None: PokerKit não disponível (HAS_POKERKIT={HAS_POKERKIT}, HandEvaluator={HandEvaluator})")
+            if console_debug:
+                print(f"[DEBUG] Retornando None: PokerKit não disponível após verificação (HAS_POKERKIT={HAS_POKERKIT}, HandEvaluator={HandEvaluator})")
             return None
         
         # Pré-filtra oponentes (exclui o próprio jogador uma vez)
         opponents = [uuid for uuid in active_players if uuid != player_uuid]
+        
+        if console_debug:
+            print(f"[DEBUG] Iniciando simulação: opponents={len(opponents)}, num_simulations={num_simulations}")
         
         # IMPORTANTE: NÃO usamos cartas conhecidas dos oponentes na simulação Monte Carlo
         # A simulação deve sempre distribuir cartas aleatoriamente dos oponentes,
@@ -397,9 +521,18 @@ def calculate_win_probability_for_player(player_uuid, round_state, num_simulatio
         
         if not use_parallel:
             # Método sequencial com early exit
+            if console_debug:
+                print(f"[DEBUG] Obtendo HandEvaluator...")
             hand_evaluator = _get_hand_evaluator()
+            if console_debug:
+                print(f"[DEBUG] HandEvaluator obtido: {hand_evaluator}")
             if hand_evaluator is None:
+                if console_debug:
+                    print(f"[DEBUG] Retornando None: hand_evaluator é None")
                 return None
+            
+            if console_debug:
+                print(f"[DEBUG] Iniciando {num_simulations} simulações...")
             
             for simulation_num in range(num_simulations):
                 if needed_community_cards + cards_needed_for_opponents > len(remaining_deck):
@@ -485,6 +618,9 @@ def calculate_win_probability_for_player(player_uuid, round_state, num_simulatio
                             })
                         num_simulations = simulation_num + 1
                         break
+            
+            if console_debug:
+                print(f"[DEBUG] Simulações completadas: {num_simulations}, vitórias: {wins}")
         
         # Calcula probabilidade e intervalo de confiança
         if num_simulations == 0:
@@ -550,17 +686,30 @@ def calculate_win_probability_for_player(player_uuid, round_state, num_simulatio
         # Retorna resultado baseado no parâmetro return_confidence
         if return_confidence:
             prob, margin, min_prob, max_prob = confidence_data
-            return {
+            result_dict = {
                 'prob': prob,
                 'min': min_prob,
                 'max': max_prob,
                 'margin': margin
             }
+            if console_debug:
+                print(f"[DEBUG] Retornando resultado (com confiança): {result_dict}")
+            return result_dict
         else:
+            if console_debug:
+                print(f"[DEBUG] Retornando resultado: {result}")
             return result
         
     except Exception as e:
         # Em caso de erro, retorna None silenciosamente
         # (não deve quebrar o jogo)
+        import os
+        console_debug = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+        if console_debug:
+            print(f"[DEBUG] Exceção em calculate_win_probability_for_player: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+        if DEBUG_MODE:
+            _debug_log(f"Exceção em calculate_win_probability_for_player: {type(e).__name__}: {e}")
         return None
 

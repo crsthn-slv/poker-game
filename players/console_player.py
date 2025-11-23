@@ -74,12 +74,37 @@ class ConsolePlayer(BasePokerPlayer):
         # Normaliza hole_card para hole_cards (padronização)
         hole_cards = normalize_hole_cards(hole_card)
         
-        # Atualiza cache das cartas do jogador e armazena no registro global
+        # Atualiza cache das cartas do jogador
         if hole_cards:
             self.my_hole_cards = hole_cards
+            # Tenta obter uuid para armazenar cartas no registry
+            player_uuid_for_storage = None
             if hasattr(self, 'uuid') and self.uuid:
-                self.players_hole_cards[self.uuid] = hole_cards
-                store_player_cards(self.uuid, hole_cards)
+                player_uuid_for_storage = self.uuid
+            else:
+                # Fallback: tenta obter uuid do round_state
+                seats = round_state.get('seats', [])
+                for seat in seats:
+                    if isinstance(seat, dict):
+                        seat_hole_card = seat.get('hole_card', None)
+                        if seat_hole_card:
+                            seat_hole_cards = normalize_hole_cards(seat_hole_card)
+                            if seat_hole_cards == hole_cards:
+                                player_uuid_for_storage = seat.get('uuid')
+                                # Armazena uuid para uso futuro
+                                if not hasattr(self, 'uuid'):
+                                    self.uuid = player_uuid_for_storage
+                                break
+            
+            # Armazena cartas no registry se tiver uuid
+            if player_uuid_for_storage:
+                self.players_hole_cards[player_uuid_for_storage] = hole_cards
+                store_player_cards(player_uuid_for_storage, hole_cards)
+                import os
+                if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                    from .cards_registry import get_all_cards
+                    all_cards_after = get_all_cards()
+                    print(f"[DEBUG] Cartas armazenadas: uuid={player_uuid_for_storage}, hole_cards={hole_cards}, registry_has={player_uuid_for_storage in all_cards_after}")
         
         if hole_cards:
             cards_display = self.formatter.format_cards_display_with_color(hole_cards)
@@ -102,7 +127,43 @@ class ConsolePlayer(BasePokerPlayer):
             win_probability = None
             win_probability_display = None
             try:
+                import os
+                debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+                
+                if debug_mode:
+                    print(f"[DEBUG] Iniciando cálculo de probabilidade - hole_cards={hole_cards}, street={current_street}")
+                
+                # Tenta obter uuid do self primeiro, senão tenta obter do round_state
+                player_uuid = None
                 if hasattr(self, 'uuid') and self.uuid:
+                    player_uuid = self.uuid
+                    if debug_mode:
+                        print(f"[DEBUG] UUID obtido de self.uuid: {player_uuid}")
+                else:
+                    if debug_mode:
+                        print(f"[DEBUG] self.uuid não disponível, tentando obter do round_state...")
+                    # Fallback: tenta obter uuid do round_state procurando pelo jogador que tem as cartas
+                    seats = round_state.get('seats', [])
+                    for seat in seats:
+                        if isinstance(seat, dict):
+                            seat_hole_card = seat.get('hole_card', None)
+                            # Se o seat tem as mesmas cartas que recebemos, é o nosso uuid
+                            if seat_hole_card and hole_cards:
+                                seat_hole_cards = normalize_hole_cards(seat_hole_card)
+                                if seat_hole_cards == hole_cards:
+                                    player_uuid = seat.get('uuid')
+                                    if debug_mode:
+                                        print(f"[DEBUG] UUID encontrado no round_state: {player_uuid}")
+                                    # Armazena para uso futuro
+                                    if not hasattr(self, 'uuid'):
+                                        self.uuid = player_uuid
+                                    break
+                    if not player_uuid and debug_mode:
+                        print(f"[DEBUG] UUID não encontrado no round_state!")
+                
+                if player_uuid:
+                    if debug_mode:
+                        print(f"[DEBUG] Calculando probabilidade para uuid={player_uuid}")
                     # Gera chave de cache
                     cache_key = self._get_win_probability_cache_key(round_state)
                     
@@ -132,21 +193,31 @@ class ConsolePlayer(BasePokerPlayer):
                         cached_data = self.win_probability_cache[cache_key]
                         win_probability = cached_data.get('prob_pct')
                         win_probability_display = cached_data.get('display')
+                        if debug_mode:
+                            print(f"[DEBUG] Usando cache: {win_probability_display}")
                     else:
+                        if debug_mode:
+                            print(f"[DEBUG] Cache miss, calculando nova probabilidade...")
                         # Calcula nova probabilidade
                         # No preflop, retorna intervalo de confiança
                         if current_street == 'preflop':
+                            if debug_mode:
+                                print(f"[DEBUG] Chamando calculate_win_probability_for_player (preflop)...")
                             win_prob_data = calculate_win_probability_for_player(
-                                player_uuid=self.uuid,
+                                player_uuid=player_uuid,
                                 round_state=round_state,
                                 return_confidence=True
                             )
+                            if debug_mode:
+                                print(f"[DEBUG] Resultado: {win_prob_data}")
                             if win_prob_data is not None:
                                 # Formata intervalo de confiança (ex: 25-30%)
                                 min_pct = int(round(win_prob_data['min'] * 100))
                                 max_pct = int(round(win_prob_data['max'] * 100))
                                 win_probability = int(round(win_prob_data['prob'] * 100))
                                 win_probability_display = f"{min_pct}–{max_pct}%"
+                                if debug_mode:
+                                    print(f"[DEBUG] Probabilidade formatada: {win_probability_display}")
                                 
                                 # Armazena no cache
                                 self.win_probability_cache[cache_key] = {
@@ -154,16 +225,24 @@ class ConsolePlayer(BasePokerPlayer):
                                     'display': win_probability_display,
                                     'data': win_prob_data
                                 }
+                            elif debug_mode:
+                                print(f"[DEBUG] calculate_win_probability_for_player retornou None!")
                         else:
                             # Em outras streets, mostra apenas o valor único
+                            if debug_mode:
+                                print(f"[DEBUG] Chamando calculate_win_probability_for_player (street={current_street})...")
                             win_prob = calculate_win_probability_for_player(
-                                player_uuid=self.uuid,
+                                player_uuid=player_uuid,
                                 round_state=round_state,
                                 return_confidence=False
                             )
+                            if debug_mode:
+                                print(f"[DEBUG] Resultado: {win_prob}")
                             if win_prob is not None:
                                 win_probability = int(round(win_prob * 100))
                                 win_probability_display = f"{win_probability}%"
+                                if debug_mode:
+                                    print(f"[DEBUG] Probabilidade formatada: {win_probability_display}")
                                 
                                 # Armazena no cache
                                 self.win_probability_cache[cache_key] = {
@@ -171,17 +250,33 @@ class ConsolePlayer(BasePokerPlayer):
                                     'display': win_probability_display,
                                     'data': {'prob': win_prob}
                                 }
-                        
-                        # Atualiza última chave usada
-                        self.last_cache_key = cache_key
+                            elif debug_mode:
+                                print(f"[DEBUG] calculate_win_probability_for_player retornou None!")
+                    
+                    # Atualiza última chave usada
+                    self.last_cache_key = cache_key
+                elif debug_mode:
+                    print(f"[DEBUG] player_uuid é None, não calculando probabilidade")
             except Exception as e:
+                # Log de debug opcional (ativar com POKER_DEBUG=true se necessário)
+                import os
+                debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+                if debug_mode:
+                    print(f"[DEBUG] Erro ao calcular probabilidade: {type(e).__name__}: {e}")
+                    import traceback
+                    traceback.print_exc()
                 # Silenciosamente ignora erros no cálculo (não deve quebrar o jogo)
+                # Mas permite que win_probability_display seja None (não será exibido)
                 pass
             
             # Formata saída com probabilidade se disponível
             if win_probability_display is not None:
                 print(f"Your cards: {cards_display} | Hand: {hand_strength_with_level} | Win probability: {win_probability_display}")
             else:
+                # Log temporário para debug - sempre mostra se probabilidade não foi calculada
+                import os
+                if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
+                    print(f"[DEBUG] win_probability_display é None - probabilidade não calculada")
                 print(f"Your cards: {cards_display} | Hand: {hand_strength_with_level}")
         
         # 2. Cartas comunitárias (quando existirem)
@@ -189,7 +284,7 @@ class ConsolePlayer(BasePokerPlayer):
             community_display = self.formatter.format_cards_display_with_color(community_cards)
             print(f"Community cards: {community_display}")
         
-        # 3. Pot com composição e stack do jogador
+        # 3. Pot e stack do jogador apenas
         action_histories = round_state.get('action_histories', {})
         pot_amount, pot_composition = self.formatter.calculate_pot_composition(round_state, action_histories)
         
@@ -200,35 +295,21 @@ class ConsolePlayer(BasePokerPlayer):
                 my_stack = seat.get('stack', 0)
                 break
         
-        # Se pot inicial, mostra composição; senão mostra valor
-        if pot_amount <= 15 and current_street == 'preflop' and len(action_histories.get('preflop', [])) <= 2:
-            pot_display = f"{pot_composition} = {pot_amount}"
-        else:
-            pot_display = self.formatter.format_pot_with_color(pot_amount)
+        # Mostra pot atualizado
+        pot_display = self.formatter.format_pot_with_color(pot_amount)
+        stack_display = self.formatter.format_stack_with_color(my_stack, self.initial_stack, is_current=True)
+        print(f"Pot {pot_display} | Your chips {stack_display}")
         
         # Atualiza último pot impresso
         self.last_pot_printed = pot_amount
         
-        stack_display = self.formatter.format_stack_with_color(my_stack, self.initial_stack, is_current=True)
-        print(f"Pot: {pot_display} | Your chips: {stack_display}")
-        
-        # 4. Stacks dos outros jogadores numa única linha
-        stacks_line = self.formatter.format_player_stacks(seats, self.uuid, self.initial_stack)
-        if stacks_line:
-            # Remove ":" do formato para simplificar
-            stacks_line_clean = stacks_line.replace(': ', ' ')
-            print(stacks_line_clean)
-        
-        # 5. Histórico sintético da street atual em linha única
+        # 5. Histórico de ações por jogador (uma linha por jogador)
         if action_histories:
-            compact_history = self.formatter.format_compact_history(action_histories, current_street, round_state)
-            if compact_history:
-                # Extrai apenas a parte das ações (sem prefixo de street)
-                if ':' in compact_history:
-                    _, actions_part = compact_history.split(':', 1)
-                    print(f"Previous actions: {actions_part.strip()}")
-                else:
-                    print(f"Previous actions: {compact_history}")
+            history_by_player = self.formatter.format_history_by_player(action_histories, current_street, round_state)
+            if history_by_player:
+                print("Action history:")
+                for line in history_by_player:
+                    print(line)
         
         # 6. Ações disponíveis com prefixos [f], [c], [r] numa única linha
         actions_display = self.formatter.format_action_costs(valid_actions)
@@ -307,7 +388,7 @@ class ConsolePlayer(BasePokerPlayer):
             community_display = self.formatter.format_cards_display_with_color(community_cards)
             print(f"Community cards: {community_display}")
         
-        # Mostra pot atualizado e atualiza último pot impresso
+        # Mostra pot apenas quando a street muda
         action_histories = round_state.get('action_histories', {})
         pot_amount, _ = self.formatter.calculate_pot_composition(round_state, action_histories)
         pot_display = self.formatter.format_pot_with_color(pot_amount)
@@ -315,7 +396,7 @@ class ConsolePlayer(BasePokerPlayer):
         self.last_pot_printed = pot_amount
 
     def receive_game_update_message(self, new_action, round_state):
-        """Exibe apenas delta: quem agiu, ação, montante, novo pot, novo stack."""
+        """Exibe apenas quem agiu e a ação, de forma simplificada."""
         if not isinstance(new_action, dict):
             return
         
@@ -338,69 +419,35 @@ class ConsolePlayer(BasePokerPlayer):
         amount = new_action.get('amount', 0)
         paid = new_action.get('paid', 0)
         
-        # Novo pot
-        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+        # Formata ação de forma compacta
+        action_parts = []
         
-        # Novo stack do jogador afetado e todos os jogadores
-        player_uuid = new_action.get('uuid', '')
-        seats = round_state.get('seats', [])
-        player_stack = None
-        
-        # Se não tem UUID no new_action, busca pelo nome
-        if not player_uuid:
-            for seat in seats:
-                if isinstance(seat, dict):
-                    seat_name = self.formatter.clean_player_name(seat.get('name', ''))
-                    if seat_name == player_name:
-                        player_uuid = seat.get('uuid', '')
-                        break
-        
-        # Busca stack do jogador afetado
-        for seat in seats:
-            if isinstance(seat, dict) and seat.get('uuid') == player_uuid:
-                player_stack = seat.get('stack', 0)
-                break
-        
-        # Formata delta em formato compacto
-        delta_parts = []
-        
+        # Se o jogador fez fold, torna o nome opaco
+        if action_type == 'FOLD':
+            dim_name = f"{self.formatter.DIM}{player_name}{self.formatter.RESET}"
+            action_parts.append(f"{dim_name} {action_name}")
         # Ação básica
-        if action_type in ['SMALLBLIND', 'BIGBLIND']:
-            delta_parts.append(f"{player_name} {action_name} {amount}")
-        elif action_type == 'FOLD':
-            delta_parts.append(f"{player_name} {action_name}")
-            # NOTA: Não removemos cartas do registry quando dá fold
-            # As cartas são mantidas para histórico futuro, apenas não são exibidas no resultado
+        elif action_type in ['SMALLBLIND', 'BIGBLIND']:
+            action_parts.append(f"{player_name} {action_name} {amount}")
         elif action_type == 'CALL':
             if paid > 0:
-                delta_parts.append(f"{player_name} {action_name} {paid}")
+                action_parts.append(f"{player_name} {action_name} {paid}")
             else:
-                delta_parts.append(f"{player_name} {action_name}")
+                action_parts.append(f"{player_name} {action_name}")
         elif action_type == 'RAISE':
-            delta_parts.append(f"{player_name} {action_name} {amount}")
+            action_parts.append(f"{player_name} {action_name} {amount}")
         elif action_type == 'CHECK':
-            delta_parts.append(f"{player_name} {action_name}")
+            action_parts.append(f"{player_name} {action_name}")
         
-        # Novo pot - só mostra se mudou
-        if pot > 0 and pot != self.last_pot_printed:
+        # Mostra pot apenas se mudou significativamente
+        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+        if pot > 0 and abs(pot - self.last_pot_printed) > 5:  # Só mostra se mudou mais que 5 chips
             pot_display = self.formatter.format_pot_with_color(pot)
-            delta_parts.append(f"Pot {pot_display}")
+            action_parts.append(f"Pot {pot_display}")
             self.last_pot_printed = pot
         
-        # Stacks de todos os jogadores numa linha
-        all_stacks = []
-        for seat in seats:
-            if isinstance(seat, dict):
-                name = self.formatter.clean_player_name(seat.get('name', ''))
-                stack = seat.get('stack', 0)
-                stack_display = self.formatter.format_stack_with_color(stack, self.initial_stack, is_current=(seat.get('uuid') == self.uuid))
-                all_stacks.append(f"{name} {stack_display}")
-        
-        if all_stacks:
-            delta_parts.append(" | ".join(all_stacks))
-        
-        if delta_parts:
-            print(" | ".join(delta_parts))
+        if action_parts:
+            print(" | ".join(action_parts))
 
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Mostra resultado final humanizado sem JSON bruto."""
@@ -471,8 +518,11 @@ class ConsolePlayer(BasePokerPlayer):
                     is_folded = state == 'folded'
                     
                     # Se o jogador deu fold, mostra apenas o nome com "folded" (sem cartas)
+                    # Linha inteira em tom opaco para indicar que está desabilitado
                     if is_folded:
-                        print(f"  {name}: folded")
+                        full_line = f"  {name}: folded"
+                        dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                        print(dim_line)
                         continue
                     
                     # Tenta obter cartas de várias fontes (ordem de prioridade):
