@@ -1,8 +1,8 @@
 # Documentação do Projeto
 
-Este diretório contém toda a documentação do projeto de Poker.
+Este diretório contém toda a documentação do projeto de Poker Texas Hold'em.
 
-## Documentos Disponíveis
+## 📚 Documentação Principal
 
 ### 📘 [Documentação Completa](DOCUMENTACAO_COMPLETA.md)
 Documentação técnica completa do sistema, incluindo:
@@ -34,6 +34,23 @@ Guia passo a passo para criar um novo bot:
 - Testando o bot
 - Exemplos completos
 
+## 🔧 Documentação Técnica
+
+### 🎯 [Algoritmos e Estratégias](ALGORITHMS_DOCUMENTATION.md)
+Documentação detalhada sobre os algoritmos utilizados:
+- Estratégias de cada bot
+- Cálculo de probabilidades
+- Avaliação de mãos
+- Sistema de aprendizado
+
+### 🎲 [Gerenciador de Blinds](BLIND_MANAGER.md)
+Documentação sobre o sistema de blinds:
+- Como funciona o blind manager
+- Configuração de blinds
+- Estrutura e implementação
+
+## 🐛 Debugging e Troubleshooting
+
 ### 🐛 [Guia de Debugging](DEBUGGING.md)
 Guia completo para identificar e resolver problemas:
 - Como identificar erros de serialização
@@ -41,6 +58,22 @@ Guia completo para identificar e resolver problemas:
 - Checklist de problemas comuns
 - Como testar manualmente
 - Logs e mensagens de erro
+
+### 📊 [Debug de Probabilidade](DEBUG_PROBABILITY.md)
+Guia específico para debug do cálculo de probabilidade:
+- Como ativar modo debug de probabilidade
+- Onde os logs são salvos
+- O que é registrado
+- Como interpretar os logs
+
+## 📋 Planejamento e Melhorias
+
+### 💡 [Sugestões de Melhorias](SUGESTOES_MELHORIAS.md)
+Documento com sugestões e melhorias futuras:
+- Padronização de nomenclaturas
+- Melhorias nos algoritmos
+- Refatoração de código
+- Otimizações de performance
 
 ## Estrutura de Dados
 
