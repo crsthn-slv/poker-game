@@ -2,6 +2,17 @@
 
 Esta documentação explica em detalhes como os bots funcionam, suas estruturas, estratégias e como o sistema de memória persistente opera.
 
+## ⚠️ Arquitetura Refatorada
+
+**IMPORTANTE:** Os bots foram refatorados para usar uma arquitetura baseada em configuração que elimina ~85% de código duplicado.
+
+- **Nova arquitetura:** Todos os bots herdam de `PokerBotBase` e usam `BotConfig` para configuração
+- **Lógica compartilhada:** Toda a lógica está em `PokerBotBase`, bots concretos são apenas configuração (~15 linhas)
+- **Documentação da arquitetura:** Veja `docs/ARQUITETURA_BOTS.md` para detalhes completos
+- **Como criar novo bot:** Veja `docs/COMO_CRIAR_NOVO_BOT.md` (agora muito mais simples!)
+
+**Esta documentação explica o funcionamento interno e as funcionalidades disponíveis. Para criar novos bots, veja a documentação de arquitetura.**
+
 ## Índice
 
 1. [Estrutura Base dos Bots](#estrutura-base-dos-bots)
@@ -17,104 +28,109 @@ Esta documentação explica em detalhes como os bots funcionam, suas estruturas,
 
 ## Estrutura Base dos Bots
 
-### Herança de BasePokerPlayer
+### Arquitetura Refatorada
 
-Todos os bots herdam da classe `BasePokerPlayer` do PyPokerEngine. Esta classe base fornece a interface necessária para interagir com o motor do jogo.
+Todos os bots agora usam uma **arquitetura baseada em configuração** que elimina duplicação de código. A estrutura é:
 
-```python
-from pypokerengine.players import BasePokerPlayer
-
-class MeuBot(BasePokerPlayer):
-    # Implementação do bot
+```
+BasePokerPlayer (PyPokerEngine)
+    └── PokerBotBase (players/base/poker_bot_base.py)
+            ├── AggressivePlayer
+            ├── BalancedPlayer
+            ├── CautiousPlayer
+            └── ... (18 bots mais)
 ```
 
-### Métodos Obrigatórios
+### Componentes Principais
 
-O `BasePokerPlayer` requer que você implemente os seguintes métodos:
+#### 1. PokerBotBase
+
+Classe base que contém **TODA a lógica compartilhada**. Todos os bots herdam desta classe.
+
+```python
+from players.base.poker_bot_base import PokerBotBase
+from players.base.bot_config import BotConfig
+
+def _create_config(memory_file: str = "meu_bot_memory.json") -> BotConfig:
+    """Cria configuração para meu bot"""
+    return BotConfig(
+        name="MeuBot",
+        memory_file=memory_file,
+        default_bluff=0.16,
+        # ... todos os parâmetros
+    )
+
+class MeuBot(PokerBotBase):
+    def __init__(self, memory_file="meu_bot_memory.json"):
+        config = _create_config(memory_file)
+        super().__init__(config)
+```
+
+#### 2. BotConfig
+
+Dataclass que contém toda a configuração de um bot (sem lógica).
+
+#### 3. Função `_create_config()`
+
+Cada bot tem sua própria função `_create_config()` que retorna um `BotConfig` pré-configurado.
+
+**Nota:** Para mais detalhes sobre a arquitetura, veja `docs/ARQUITETURA_BOTS.md`.
+
+### Métodos Implementados Automaticamente
+
+O `PokerBotBase` já implementa **TODOS** os métodos obrigatórios do `BasePokerPlayer`. Você não precisa implementá-los!
 
 #### 1. `declare_action(valid_actions, hole_card, round_state)`
 
-**Quando é chamado:** A cada vez que é a vez do bot jogar.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Decidir qual ação tomar (FOLD, CALL ou RAISE) e retornar essa decisão.
+**O que faz automaticamente:**
+- Analisa ações do round atual
+- Avalia força da mão
+- Analisa possível blefe dos oponentes
+- Decide se deve blefar (baseado em `config.bluff_probability`)
+- Escolhe ação (fold/call/raise) baseado em configuração
+- Registra ação na memória
 
-**Parâmetros:**
-- `valid_actions`: Lista de ações válidas `[fold_info, call_info, raise_info]`
-- `hole_card`: Lista de 2 cartas do bot (ex: `['SA', 'HK']`)
-- `round_state`: Estado completo do round atual
-
-**Retorno:** Tupla `(action, amount)` onde:
-- `action`: String `'fold'`, `'call'` ou `'raise'`
-- `amount`: Valor inteiro (para raise) ou valor do call
-
-**Exemplo:**
-```python
-def declare_action(self, valid_actions, hole_card, round_state):
-    # Avalia força da mão
-    hand_strength = self._evaluate_hand_strength(hole_card, round_state)
-    
-    # Decide ação baseada na estratégia
-    if hand_strength >= 50:
-        raise_action = valid_actions[2]
-        return raise_action['action'], raise_action['amount']['min']
-    elif hand_strength >= 25:
-        call_action = valid_actions[1]
-        return call_action['action'], call_action['amount']
-    else:
-        fold_action = valid_actions[0]
-        return fold_action['action'], fold_action['amount']
-```
+**Você não precisa implementar isso!** Apenas configure os parâmetros no preset.
 
 #### 2. `receive_game_start_message(game_info)`
 
-**Quando é chamado:** Uma vez, no início do jogo.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Inicializar variáveis globais do jogo (como stack inicial).
-
-**Parâmetros:**
-- `game_info`: Informações sobre o jogo (players, configurações, etc.)
+**O que faz:** Inicializa stack inicial automaticamente.
 
 #### 3. `receive_round_start_message(round_count, hole_card, seats)`
 
-**Quando é chamado:** No início de cada round.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Preparar para um novo round, salvar memória periodicamente.
-
-**Parâmetros:**
-- `round_count`: Número do round atual
-- `hole_card`: Cartas do bot para este round
-- `seats`: Informações sobre todos os jogadores
+**O que faz:**
+- Salva memória periodicamente (a cada 5 rounds)
+- Armazena cartas no registry para exibição
 
 #### 4. `receive_street_start_message(street, round_state)`
 
-**Quando é chamado:** Quando uma nova street começa (flop, turn, river).
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Atualizar estado interno baseado na nova street.
-
-**Parâmetros:**
-- `street`: String `'preflop'`, `'flop'`, `'turn'` ou `'river'`
-- `round_state`: Estado atual do round
+**O que faz:** Hook vazio (pode ser sobrescrito se necessário).
 
 #### 5. `receive_game_update_message(action, round_state)`
 
-**Quando é chamado:** Após cada ação de qualquer jogador.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Analisar ações dos oponentes, aprender padrões.
-
-**Parâmetros:**
-- `action`: Informações sobre a ação tomada (quem, o quê, quanto)
-- `round_state`: Estado atualizado do round
+**O que faz:** Registra ações dos oponentes na memória automaticamente.
 
 #### 6. `receive_round_result_message(winners, hand_info, round_state)`
 
-**Quando é chamado:** No final de cada round, após determinar o vencedor.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Aprender com o resultado, ajustar estratégia, salvar memória.
+**O que faz:**
+- Processa resultado do round
+- Atualiza estatísticas
+- Executa aprendizado baseado em configuração
+- Salva memória
 
-**Parâmetros:**
-- `winners`: Lista de jogadores que ganharam o round
-- `hand_info`: Informações sobre as mãos dos jogadores
-- `round_state`: Estado final do round
+**Nota:** Se precisar de aprendizado customizado, você pode sobrescrever este método, mas geralmente o aprendizado padrão é suficiente.
 
 ---
 
@@ -214,44 +230,53 @@ Todos os bots usam a mesma estrutura JSON:
 
 ### Diferenças entre Bots
 
-Todos os bots usam a mesma estrutura, mas com valores iniciais diferentes:
+Todos os bots usam a mesma estrutura e lógica (via `PokerBotBase`), mas com **valores de configuração diferentes** definidos em `BotPresets`:
 
 | Bot | bluff_probability | aggression_level | tightness_threshold |
 |-----|-------------------|------------------|---------------------|
-| TightPlayer | 0.15 | 0.50 | 30 |
-| AggressivePlayer | 0.20 | 0.60 | 25 |
-| SmartPlayer | 0.17 | 0.55 | 27 |
-| LearningPlayer | 0.18 | 0.55 | 28 |
-| RandomPlayer | 0.17 | 0.55 | 27 |
+| TightPlayer | 0.15 | 0.54 | 29 |
+| AggressivePlayer | 0.18 | 0.58 | 26 |
+| SmartPlayer | 0.16 | 0.56 | 27 |
+| LearningPlayer | 0.17 | 0.55 | 28 |
+| BalancedPlayer | 0.16 | 0.57 | 28 |
+| CautiousPlayer | 0.12 | 0.48 | 29 |
 
-A diferença está na **evolução/aprendizado**: cada bot ajusta esses parâmetros de forma diferente baseado em seus resultados.
+**A diferença está em:**
+1. **Valores iniciais** (definidos em `BotPresets`)
+2. **Parâmetros de comportamento** (thresholds, multiplicadores, etc.)
+3. **Evolução/aprendizado**: cada bot ajusta esses parâmetros de forma diferente baseado em seus resultados
+
+**Importante:** A lógica de decisão é **idêntica** para todos os bots (está em `PokerBotBase`). A personalidade vem apenas da configuração.
 
 ### Carregamento de Memória
 
-A memória é carregada no `__init__()` do bot usando `UnifiedMemoryManager`:
+A memória é carregada automaticamente pelo `PokerBotBase` no `__init__()` usando `UnifiedMemoryManager`:
 
 ```python
-from .memory_manager import UnifiedMemoryManager
+# Em PokerBotBase.__init__()
+self.memory_manager = UnifiedMemoryManager(
+    config.memory_file,
+    config.default_bluff,
+    config.default_aggression,
+    config.default_tightness
+)
+self.memory = self.memory_manager.get_memory()
+```
 
-def __init__(self, memory_file="meu_bot_memory.json"):
-    # Inicializa gerenciador de memória unificada
-    self.memory_manager = UnifiedMemoryManager(
-        memory_file,
-        default_bluff=0.17,
-        default_aggression=0.55,
-        default_tightness=27
-    )
-    self.memory = self.memory_manager.get_memory()
-    
-    # Atualiza valores locais
-    self.bluff_probability = self.memory['bluff_probability']
-    self.aggression_level = self.memory['aggression_level']
-    self.tightness_threshold = self.memory['tightness_threshold']
+**Para bots concretos:** A configuração é feita através de `BotPresets`, que define os valores padrão:
+
+```python
+# Exemplo: AggressivePlayer
+class AggressivePlayer(PokerBotBase):
+    def __init__(self, memory_file="aggressive_player_memory.json"):
+        config = BotPresets.aggressive()  # Define default_bluff=0.18, etc.
+        config.memory_file = memory_file
+        super().__init__(config)  # PokerBotBase carrega memória automaticamente
 ```
 
 O `UnifiedMemoryManager`:
 1. Carrega memória anterior se existir
-2. Se não existir, cria estrutura padrão
+2. Se não existir, cria estrutura padrão usando valores do `BotConfig`
 3. Falha silenciosamente (não quebra o jogo)
 
 ### Salvamento de Memória
@@ -638,24 +663,24 @@ O histórico de oponentes contém ações observadas e cartas (quando disponíve
 
 ### 1. Inicialização (`__init__`)
 
+**Com a nova arquitetura:**
+
 ```python
-def __init__(self, memory_file="bot_memory.json"):
-    # 1. Define arquivo de memória
-    self.memory_file = get_memory_path(memory_file)
-    
-    # 2. Inicializa valores padrão
-    self.bluff_probability = 0.15
-    self.total_rounds = 0
-    self.wins = 0
-    
-    # 3. Carrega memória anterior
-    self.load_memory()
+# Em seu bot (ex: AggressivePlayer)
+def __init__(self, memory_file="aggressive_player_memory.json"):
+    config = BotPresets.aggressive()  # Obtém configuração
+    config.memory_file = memory_file
+    super().__init__(config)  # PokerBotBase faz todo o resto
 ```
 
-**Ordem de execução:**
-1. Define caminho do arquivo de memória
-2. Inicializa todos os atributos com valores padrão
-3. Carrega memória anterior (se existir) e sobrescreve valores padrão
+**O que o `PokerBotBase.__init__()` faz automaticamente:**
+1. Armazena configuração em `self.config`
+2. Inicializa `UnifiedMemoryManager` com valores do config
+3. Carrega memória anterior (se existir) ou cria nova
+4. Carrega parâmetros da memória (`bluff_probability`, `aggression_level`, etc.)
+5. Inicializa estado interno (`initial_stack`, `current_stack`)
+
+**Você não precisa fazer nada disso!** Apenas chame `super().__init__(config)`.
 
 ### 2. Início do Jogo (`receive_game_start_message`)
 
@@ -700,89 +725,52 @@ def receive_round_start_message(self, round_count, hole_card, seats):
 
 #### 4.1. Declaração de Ação (`declare_action`)
 
-```python
-def declare_action(self, valid_actions, hole_card, round_state):
-    # 1. Avalia situação atual
-    hand_strength = self._evaluate_hand_strength(hole_card, round_state)
-    
-    # 2. Decide se deve blefar
-    should_bluff = self._should_bluff()
-    
-    # 3. Executa ação
-    if should_bluff:
-        return self._bluff_action(valid_actions, round_state)
-    else:
-        return self._normal_action(valid_actions, hand_strength, round_state)
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** Toda vez que é a vez do bot jogar.
+**Fluxo automático:**
+1. Identifica oponentes
+2. Analisa ações do round atual (`analyze_current_round_actions`)
+3. Avalia força da mão (`evaluate_hand_strength`)
+4. Analisa possível blefe dos oponentes (`analyze_possible_bluff`)
+5. Carrega parâmetros atualizados da memória
+6. Decide se deve blefar (baseado em `config.bluff_probability`)
+7. Escolhe ação (blefe ou normal) baseado em configuração
+8. Registra ação na memória
+9. Retorna ação e valor
 
-**Fluxo típico:**
-1. Atualiza informações internas (stack, contexto)
-2. Avalia força da mão
-3. Decide estratégia (blefe ou jogo normal)
-4. Retorna ação e valor
+**Você não precisa implementar isso!** Tudo é automático baseado na configuração.
 
 #### 4.2. Atualização de Estado (`receive_game_update_message`)
 
-```python
-def receive_game_update_message(self, action, round_state):
-    # Analisa ações dos oponentes
-    player_uuid = action.get('uuid')
-    if player_uuid != self.uuid:
-        # Registra ação do oponente
-        # Atualiza padrões do oponente
-        pass
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** Após cada ação de qualquer jogador.
+**O que faz automaticamente:**
+- Registra ações dos oponentes na memória
+- Atualiza histórico de oponentes
 
-**Responsabilidade:** Aprender padrões dos oponentes em tempo real.
+**Você não precisa implementar isso!**
 
 #### 4.3. Mudança de Street (`receive_street_start_message`)
 
-```python
-def receive_street_start_message(self, street, round_state):
-    # Atualiza street atual
-    self.current_street = street
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** Quando uma nova street começa (flop, turn, river).
-
-**Responsabilidade:** Atualizar estado interno para nova fase do round.
+**O que faz:** Hook vazio (pode ser sobrescrito se necessário).
 
 ### 5. Fim de Round (`receive_round_result_message`)
 
-```python
-def receive_round_result_message(self, winners, hand_info, round_state):
-    # 1. Atualiza estatísticas
-    self.total_rounds += 1
-    won = any(w['uuid'] == self.uuid for w in winners)
-    if won:
-        self.wins += 1
-    
-    # 2. Registra resultado no histórico
-    self.round_results.append({
-        'won': won,
-        'round': self.total_rounds,
-        'stack': self.current_stack
-    })
-    
-    # 3. Aprende e ajusta estratégia
-    if len(self.round_results) >= 5:
-        self._adapt_strategy()
-    
-    # 4. Salva memória
-    self.save_memory()
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** No final de cada round, após determinar o vencedor.
+**O que faz automaticamente:**
+1. Processa resultado usando `memory_manager.process_round_result()`
+2. Atualiza stack atual
+3. Atualiza estatísticas (`total_rounds`, `wins`)
+4. Executa aprendizado baseado em configuração:
+   - Ajusta agressão/blefe quando win rate > `win_rate_threshold_high`
+   - Reduz agressão/aumenta threshold quando win rate < `win_rate_threshold_low`
+   - Velocidade controlada por `learning_speed`
+5. Salva memória atualizada
 
-**Responsabilidade:**
-1. Atualizar estatísticas (rodadas, vitórias, stack)
-2. Registrar resultado no histórico
-3. Executar lógica de aprendizado
-4. Salvar memória atualizada
+**Você não precisa implementar isso!** O aprendizado padrão é suficiente para a maioria dos casos.
 
 ---
 

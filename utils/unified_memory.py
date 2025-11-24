@@ -13,18 +13,20 @@ from .hand_utils import normalize_hole_cards, evaluate_hand_strength
 
 def create_default_memory(bluff_probability: float = 0.17, 
                          aggression_level: float = 0.55,
-                         tightness_threshold: int = 27) -> Dict[str, Any]:
+                         tightness_threshold: int = 27,
+                         my_bot_name: str = None) -> Dict[str, Any]:
     """Cria estrutura de memória padrão unificada.
     
     Args:
         bluff_probability: Probabilidade inicial de blefe (0.15-0.20)
         aggression_level: Nível inicial de agressão (0.50-0.60)
         tightness_threshold: Threshold inicial de seletividade (25-30)
+        my_bot_name: Nome do bot (para pré-registrar todos os outros bots)
     
     Returns:
         Dicionário com estrutura de memória padrão
     """
-    return {
+    memory = {
         'bluff_probability': bluff_probability,
         'aggression_level': aggression_level,
         'tightness_threshold': tightness_threshold,
@@ -33,6 +35,27 @@ def create_default_memory(bluff_probability: float = 0.17,
         'opponents': {},
         'round_history': []
     }
+    
+    # Pré-registra todos os bots conhecidos (exceto o próprio bot)
+    if my_bot_name:
+        from .uuid_utils import get_all_known_bot_names, get_bot_class_uuid_from_name
+        all_bot_names = get_all_known_bot_names()
+        my_uuid = get_bot_class_uuid_from_name(my_bot_name)
+        
+        for bot_name in all_bot_names:
+            bot_uuid = get_bot_class_uuid_from_name(bot_name)
+            if bot_uuid and bot_uuid != my_uuid:
+                # Pré-registra o bot (será atualizado quando realmente jogar juntos)
+                if bot_uuid not in memory['opponents']:
+                    memory['opponents'][bot_uuid] = {
+                        'name': bot_name,
+                        'first_seen_round': 0,  # 0 indica que ainda não jogou juntos
+                        'last_seen_round': 0,
+                        'total_rounds_against': 0,
+                        'rounds_against': []
+                    }
+    
+    return memory
 
 
 def register_new_opponent(memory: Dict[str, Any], opp_uuid: str, 
@@ -258,7 +281,8 @@ def save_unified_memory(memory_file: str, memory: Dict[str, Any]) -> bool:
 
 def load_unified_memory(memory_file: str, default_bluff: float = 0.17,
                        default_aggression: float = 0.55,
-                       default_tightness: int = 27) -> Dict[str, Any]:
+                       default_tightness: int = 27,
+                       my_bot_name: str = None) -> Dict[str, Any]:
     """Carrega memória unificada de forma segura.
     
     Args:
@@ -266,12 +290,13 @@ def load_unified_memory(memory_file: str, default_bluff: float = 0.17,
         default_bluff: Probabilidade padrão de blefe
         default_aggression: Nível padrão de agressão
         default_tightness: Threshold padrão de seletividade
+        my_bot_name: Nome do bot (para pré-registrar todos os outros bots)
     
     Returns:
         Estrutura de memória carregada ou padrão
     """
     default_memory = create_default_memory(
-        default_bluff, default_aggression, default_tightness
+        default_bluff, default_aggression, default_tightness, my_bot_name
     )
     loaded = safe_memory_load(memory_file, default_memory)
     
@@ -280,6 +305,25 @@ def load_unified_memory(memory_file: str, default_bluff: float = 0.17,
         loaded['opponents'] = {}
     if 'round_history' not in loaded:
         loaded['round_history'] = []
+    
+    # Pré-registra todos os bots conhecidos que ainda não estão na memória
+    if my_bot_name:
+        from .uuid_utils import get_all_known_bot_names, get_bot_class_uuid_from_name
+        all_bot_names = get_all_known_bot_names()
+        my_uuid = get_bot_class_uuid_from_name(my_bot_name)
+        
+        for bot_name in all_bot_names:
+            bot_uuid = get_bot_class_uuid_from_name(bot_name)
+            if bot_uuid and bot_uuid != my_uuid:
+                # Pré-registra o bot se ainda não estiver na memória
+                if bot_uuid not in loaded['opponents']:
+                    loaded['opponents'][bot_uuid] = {
+                        'name': bot_name,
+                        'first_seen_round': 0,  # 0 indica que ainda não jogou juntos
+                        'last_seen_round': 0,
+                        'total_rounds_against': 0,
+                        'rounds_against': []
+                    }
     
     return loaded
 

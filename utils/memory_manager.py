@@ -17,7 +17,8 @@ class UnifiedMemoryManager:
     """Gerenciador de memória unificada para bots."""
     
     def __init__(self, memory_file: str, default_bluff: float = 0.17,
-                 default_aggression: float = 0.55, default_tightness: int = 27):
+                 default_aggression: float = 0.55, default_tightness: int = 27,
+                 my_bot_name: str = None):
         """Inicializa gerenciador de memória.
         
         Args:
@@ -25,11 +26,12 @@ class UnifiedMemoryManager:
             default_bluff: Probabilidade padrão de blefe
             default_aggression: Nível padrão de agressão
             default_tightness: Threshold padrão de seletividade
+            my_bot_name: Nome do bot (para pré-registrar todos os outros bots)
         """
         from .memory_utils import get_memory_path
         self.memory_file = get_memory_path(memory_file)
         self.memory = load_unified_memory(
-            self.memory_file, default_bluff, default_aggression, default_tightness
+            self.memory_file, default_bluff, default_aggression, default_tightness, my_bot_name
         )
         self._current_round_actions = []
         self._current_round_opponent_actions = {}
@@ -45,15 +47,29 @@ class UnifiedMemoryManager:
             round_state: Estado do round
             my_uuid: UUID do bot
         """
+        from utils.uuid_utils import get_bot_class_uuid_from_name
+        
         seats = round_state.get('seats', [])
         current_round = self.memory['total_rounds'] + 1
         
+        # Obtém UUID fixo do próprio bot (para comparação correta)
+        my_seat = next((s for s in seats if isinstance(s, dict) and s.get('uuid') == my_uuid), None)
+        my_name = my_seat.get('name', 'Unknown') if my_seat else None
+        my_uuid_fixed = get_bot_class_uuid_from_name(my_name) if my_name else my_uuid
+        
         for seat in seats:
             if isinstance(seat, dict):
-                opp_uuid = seat.get('uuid')
-                if opp_uuid and opp_uuid != my_uuid:
+                opp_uuid_from_seat = seat.get('uuid')
+                if opp_uuid_from_seat and opp_uuid_from_seat != my_uuid:
                     opp_name = seat.get('name', 'Unknown')
-                    register_new_opponent(self.memory, opp_uuid, opp_name, current_round)
+                    
+                    # Obtém UUID fixo do oponente
+                    opp_uuid_fixed = get_bot_class_uuid_from_name(opp_name)
+                    opp_uuid = opp_uuid_fixed if opp_uuid_fixed else opp_uuid_from_seat
+                    
+                    # Compara UUIDs fixos para evitar rastrear a si mesmo
+                    if opp_uuid != my_uuid_fixed:
+                        register_new_opponent(self.memory, opp_uuid, opp_name, current_round)
     
     def record_opponent_action(self, opp_uuid: str, action: Dict[str, Any],
                               round_state: Dict[str, Any]) -> None:

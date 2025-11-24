@@ -200,6 +200,7 @@ class BotWrapper(BasePokerPlayer):
         self.delay_min = delay_min
         self.delay_max = delay_max
         self.uuid = None
+        # Nota: O bot agora define seu próprio UUID fixo via set_uuid() em PokerBotBase
 
     def declare_action(self, valid_actions, hole_card, round_state):
         # Simula tempo de pensamento
@@ -266,18 +267,29 @@ class BotWrapper(BasePokerPlayer):
             _log_error(f"Erro em receive_round_result_message do bot {bot_name}", e)
 
     def set_uuid(self, uuid):
+        # Passa o UUID para o bot (que vai usar UUID fixo via set_uuid() em PokerBotBase)
         self.uuid = uuid
-        if hasattr(self.bot, 'set_uuid'): # Alguns bots podem não ter
-             self.bot.uuid = uuid # Tenta setar direto se for BasePokerPlayer
+        if hasattr(self.bot, 'set_uuid'):
+            # O bot vai ignorar o UUID do PyPokerEngine e usar UUID fixo baseado na classe
+            self.bot.set_uuid(uuid)
+            # Atualiza nosso UUID com o UUID fixo do bot
+            if hasattr(self.bot, 'uuid'):
+                self.uuid = self.bot.uuid
+        elif hasattr(self.bot, 'uuid'):
+            self.bot.uuid = uuid
 
 # Player web que recebe ações via API
 class WebPlayer(BasePokerPlayer):
-    def __init__(self, initial_stack=100):
+    def __init__(self, initial_stack=100, player_name=None):
         super().__init__()
         self.pending_action = None
         self.action_received = threading.Event()
         self.uuid = None
         self.initial_stack = initial_stack
+        self.player_name = player_name
+        # Gera UUID fixo baseado no nome do jogador (se fornecido)
+        from utils.uuid_utils import get_player_uuid
+        self._fixed_uuid = get_player_uuid(player_name)
         # Sistema de histórico
         self.game_history = None  # Será inicializado quando UUID for definido
     
@@ -285,8 +297,14 @@ class WebPlayer(BasePokerPlayer):
         """Método chamado pelo PyPokerEngine para definir o UUID do jogador."""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         old_uuid = self.uuid
-        self.uuid = uuid
-        print(f"🟢 [SERVER] [{timestamp}] WebPlayer.set_uuid chamado: {old_uuid} -> {uuid}")
+        
+        # Se tiver UUID fixo (baseado no nome), usa ele; senão usa UUID do PyPokerEngine
+        if self._fixed_uuid:
+            self.uuid = self._fixed_uuid
+        else:
+            self.uuid = uuid
+        
+        print(f"🟢 [SERVER] [{timestamp}] WebPlayer.set_uuid chamado: {old_uuid} -> {self.uuid}")
         # Atualiza game_state imediatamente quando UUID é definido
         with game_lock:
             game_state['player_uuid'] = self.uuid
@@ -1211,8 +1229,8 @@ def start_game():
                 'statistics_visible': statistics_visible
             }
         
-        # Cria novo web_player
-        web_player = WebPlayer(initial_stack=initial_stack)
+        # Cria novo web_player com nome
+        web_player = WebPlayer(initial_stack=initial_stack, player_name=player_name)
         
         # Aplica monkey patch do PokerKit para acelerar avaliação de mãos
         apply_pokerkit_patch()
