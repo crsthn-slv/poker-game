@@ -342,10 +342,99 @@ class ConsolePlayer(BasePokerPlayer):
         
         seats = round_state.get('seats', [])
         my_stack = 0
-        for seat in seats:
-            if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
-                my_stack = seat.get('stack', 0)
-                break
+        debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+        
+        # Estratégia múltipla para encontrar o seat do jogador
+        player_seat = None
+        
+        if debug_mode:
+            print(f"\n[DEBUG] === Buscando seat do jogador ===")
+            print(f"[DEBUG] self.uuid: {getattr(self, 'uuid', 'NÃO DEFINIDO')}")
+            print(f"[DEBUG] self.initial_stack: {self.initial_stack}")
+            print(f"[DEBUG] hole_cards: {hole_cards}")
+            print(f"[DEBUG] Seats disponíveis ({len(seats)}):")
+            for i, seat in enumerate(seats):
+                if isinstance(seat, dict):
+                    print(f"[DEBUG]   Seat {i}: name='{seat.get('name')}', uuid={seat.get('uuid')}, stack={seat.get('stack')}, state={seat.get('state')}")
+                    if seat.get('hole_card'):
+                        seat_cards = normalize_hole_cards(seat.get('hole_card'))
+                        print(f"[DEBUG]     hole_card: {seat_cards}")
+        
+        # 1. Tenta encontrar pelo UUID
+        if hasattr(self, 'uuid') and self.uuid:
+            for seat in seats:
+                if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                    player_seat = seat
+                    if debug_mode:
+                        print(f"[DEBUG] ✓ Seat encontrado pelo UUID: {self.uuid}")
+                    break
+        
+        # 2. Se não encontrou, tenta pelo nome "You"
+        if not player_seat:
+            for seat in seats:
+                if isinstance(seat, dict) and seat.get('name', '').lower() == 'you':
+                    player_seat = seat
+                    # Atualiza self.uuid se não estava definido
+                    if not hasattr(self, 'uuid') or not self.uuid:
+                        self.uuid = seat.get('uuid')
+                        if debug_mode:
+                            print(f"[DEBUG] ✓ UUID atualizado: {self.uuid}")
+                    if debug_mode:
+                        print(f"[DEBUG] ✓ Seat encontrado pelo nome 'You', UUID: {seat.get('uuid')}")
+                    break
+        
+        # 3. Se ainda não encontrou, tenta pelas cartas (fallback)
+        if not player_seat and hole_cards:
+            for seat in seats:
+                if isinstance(seat, dict):
+                    seat_hole_card = seat.get('hole_card', None)
+                    if seat_hole_card:
+                        seat_hole_cards = normalize_hole_cards(seat_hole_card)
+                        if seat_hole_cards == hole_cards:
+                            player_seat = seat
+                            # Atualiza self.uuid se não estava definido
+                            if not hasattr(self, 'uuid') or not self.uuid:
+                                self.uuid = seat.get('uuid')
+                                if debug_mode:
+                                    print(f"[DEBUG] ✓ UUID atualizado pelas cartas: {self.uuid}")
+                            if debug_mode:
+                                print(f"[DEBUG] ✓ Seat encontrado pelas cartas, UUID: {seat.get('uuid')}")
+                            break
+        
+        # Obtém stack do seat encontrado
+        if player_seat:
+            my_stack = player_seat.get('stack', 0)
+            if debug_mode:
+                print(f"[DEBUG] ✓ Stack encontrado: {my_stack} (initial_stack: {self.initial_stack})")
+                if my_stack == 0:
+                    print(f"[DEBUG] ⚠️  ATENÇÃO: Stack é 0! Isso pode indicar um problema.")
+        else:
+            if debug_mode:
+                print(f"[DEBUG] ❌ ERRO: Seat do jogador não encontrado!")
+                print(f"[DEBUG] self.uuid: {getattr(self, 'uuid', 'NÃO DEFINIDO')}")
+                print(f"[DEBUG] Tentou buscar por: UUID, nome 'You', e cartas")
+            # Fallback: tenta usar o primeiro seat se houver apenas um (caso edge)
+            if len(seats) == 1 and isinstance(seats[0], dict):
+                player_seat = seats[0]
+                my_stack = player_seat.get('stack', 0)
+                if debug_mode:
+                    print(f"[DEBUG] ⚠️  Fallback: usando único seat disponível, stack: {my_stack}")
+        
+        if debug_mode:
+            print(f"[DEBUG] === Fim da busca ===\n")
+        
+        # IMPORTANTE: Jogador com 0 fichas não pode fazer ações (apenas fold)
+        # Mas jogador com stack baixo (> 0) pode continuar jogando normalmente
+        # O PyPokerEngine tratará all-in parcial automaticamente quando necessário
+        if my_stack == 0:
+            print(f"\n⚠️  Você foi eliminado (0 fichas). Apenas FOLD disponível.")
+            # Força fold automaticamente
+            return 'fold', 0
+        
+        # NOTA: Jogador com stack baixo (> 0) continua jogando normalmente
+        # - Se tentar fazer CALL/RAISE com stack insuficiente, será all-in parcial
+        # - Side pots serão criados automaticamente pelo PyPokerEngine
+        # - Não há eliminação durante a mão atual, mesmo com stack muito baixo
         
         # Mostra pot atualizado
         pot_display = self.formatter.format_pot_with_color(pot_amount)
@@ -364,12 +453,58 @@ class ConsolePlayer(BasePokerPlayer):
                     print(line)
         
         # 6. Ações disponíveis com prefixos [f], [c], [r] numa única linha
-        actions_display = self.formatter.format_action_costs(valid_actions)
-        action_prefixes = ['f', 'c', 'r']
+        # Passa round_state e player_uuid para calcular valor adicional de call corretamente
+        player_uuid_for_call = None
+        if hasattr(self, 'uuid') and self.uuid:
+            player_uuid_for_call = self.uuid
+        actions_display = self.formatter.format_action_costs(valid_actions, round_state, player_uuid_for_call)
+        # Mapeia ações por tipo para garantir correspondência correta
+        # IMPORTANTE: Raise sempre aparece, mas pode estar esmaecido quando não disponível
+        action_map = {}
+        display_index = 0
+        for action_data in valid_actions:
+            action_type = action_data.get('action', '')
+            if action_type == 'fold':
+                action_map['f'] = {'index': display_index, 'available': True}
+                display_index += 1
+            elif action_type == 'call':
+                action_map['c'] = {'index': display_index, 'available': True}
+                display_index += 1
+            elif action_type == 'raise':
+                # Verifica se raise é possível
+                raise_amount = action_data.get('amount', {})
+                is_available = False
+                if isinstance(raise_amount, dict):
+                    min_raise = raise_amount.get('min', -1)
+                    is_available = (min_raise >= 0)
+                elif isinstance(raise_amount, (int, float)) and raise_amount > 0:
+                    is_available = True
+                # Sempre adiciona raise ao mapa, mesmo se não disponível
+                action_map['r'] = {'index': display_index, 'available': is_available}
+                display_index += 1
+        
         action_line_parts = []
-        for i, action_text in enumerate(actions_display):
-            if i < len(action_prefixes):
-                action_line_parts.append(f"[{action_prefixes[i]}] {action_text}")
+        action_prefix_order = ['f', 'c', 'r']
+        
+        for prefix in action_prefix_order:
+            if prefix in action_map:
+                action_info = action_map[prefix]
+                idx = action_info['index']
+                is_available = action_info['available']
+                
+                if idx < len(actions_display):
+                    action_text, action_available = actions_display[idx]
+                    # Se a ação não está disponível, aplica formatação esmaecida
+                    if not action_available or not is_available:
+                        dimmed_text = f"{self.formatter.DIM}[{prefix}] {action_text}{self.formatter.RESET}"
+                        action_line_parts.append(dimmed_text)
+                    else:
+                        action_line_parts.append(f"[{prefix}] {action_text}")
+        
+        # Adiciona All In sempre disponível (é sempre a última ação na lista)
+        if actions_display:
+            all_in_text = actions_display[-1][0]  # All In é sempre o último
+            action_line_parts.append(f"[a] {all_in_text}")
         
         # Adiciona opção de sair
         action_line_parts.append("[q] Quit")
@@ -377,9 +512,9 @@ class ConsolePlayer(BasePokerPlayer):
         if action_line_parts:
             print(f"Available actions: {' | '.join(action_line_parts)}")
         
-        # Solicitar ação
+        # Solicitar ação - passa round_state para permitir all-in
         print()
-        action, amount = self.__receive_action_from_console(valid_actions)  # type: ignore[assignment]
+        action, amount = self.__receive_action_from_console(valid_actions, round_state)  # type: ignore[assignment]
         
         # Marca se o jogador deu fold
         if action == 'fold':
@@ -1079,12 +1214,46 @@ class ConsolePlayer(BasePokerPlayer):
                         seat_uuid = seat.get('uuid', '')
                         name = self.formatter.clean_player_name(seat.get('name', ''))
                         state = seat.get('state', '')
+                        seat_stack = seat.get('stack', 0)
                         
                         # Mapeia UUID e determina flags
                         fixed_uuid = self._get_fixed_uuid_from_seat(seat, debug_mode)
                         is_winner = fixed_uuid in winner_uuids if fixed_uuid else (seat_uuid in winner_uuids)
                         is_folded = state == 'folded'
                         is_player = hasattr(self, 'uuid') and self.uuid and (seat_uuid == self.uuid or fixed_uuid == self.uuid)
+                        is_eliminated = seat_stack == 0
+                        
+                        # IMPORTANTE: Verifica se o jogador participou do round
+                        # Um jogador participou se:
+                        # 1. Tem cartas no hand_info ou no registry, OU
+                        # 2. Tem ações no action_histories do round
+                        action_histories = round_state.get('action_histories', {})
+                        participated_in_round = False
+                        
+                        # Verifica se tem ações no histórico
+                        for street_history in action_histories.values():
+                            if isinstance(street_history, list):
+                                for action in street_history:
+                                    if isinstance(action, dict):
+                                        action_uuid = action.get('uuid', '')
+                                        if action_uuid == seat_uuid or action_uuid == fixed_uuid:
+                                            participated_in_round = True
+                                            break
+                                if participated_in_round:
+                                    break
+                        
+                        # Se não participou do round e não é vencedor, mostra mensagem apropriada
+                        if not participated_in_round and not is_winner:
+                            # Verifica se é porque não tem fichas suficientes para os blinds
+                            if seat_stack > 0:
+                                # Tem fichas mas não participou (pode ser porque não consegue pagar blinds)
+                                full_line = f"  {name}: (Out of chips - cannot pay blinds)"
+                            else:
+                                # Sem fichas
+                                full_line = f"  {name}: (Out of chips)"
+                            dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                            print(dim_line)
+                            continue
                         
                         # Se jogador deu fold e não é o jogador humano, mostra apenas "folded"
                         if is_folded and not is_player:
@@ -1092,6 +1261,9 @@ class ConsolePlayer(BasePokerPlayer):
                             dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                             print(dim_line)
                             continue
+                        
+                        # IMPORTANTE: Jogadores eliminados (stack == 0) ainda mostram cartas se participaram do showdown
+                        # Só não mostra cartas se deu fold
                         
                         # Obtém cartas usando método centralizado
                         hole_cards = self._get_player_cards(
@@ -1104,10 +1276,17 @@ class ConsolePlayer(BasePokerPlayer):
                             cards_display = self.formatter.format_cards_display_with_color(hole_cards)
                             hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
                             folded_indicator = " (folded)" if is_folded and is_player else ""
+                            all_in_indicator = " (all-in)" if is_eliminated and not is_folded else ""
                             
                             if is_folded:
                                 cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
                                 full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
+                                dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                                print(dim_line)
+                            elif is_eliminated:
+                                # Jogador eliminado (all-in) mas participou do showdown - mostra cartas esmaecidas
+                                cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
+                                full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{all_in_indicator}"
                                 dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                                 print(dim_line)
                             else:
@@ -1193,14 +1372,19 @@ class ConsolePlayer(BasePokerPlayer):
                             traceback.print_exc()
                         print(f"\n[Erro ao processar winners]")
                 
-                # Mostra stacks finais
+                # Mostra stacks finais (jogadores eliminados aparecem esmaecidos)
                 try:
                     final_stacks = []
                     for seat in seats:
                         if isinstance(seat, dict):
                             name = self.formatter.clean_player_name(seat.get('name', ''))
                             stack = seat.get('stack', 0)
-                            final_stacks.append(f"{name} {stack}")
+                            # Jogadores eliminados aparecem esmaecidos
+                            if stack == 0:
+                                dim_line = f"{self.formatter.DIM}{name} {stack}{self.formatter.RESET}"
+                                final_stacks.append(dim_line)
+                            else:
+                                final_stacks.append(f"{name} {stack}")
                     
                     if final_stacks:
                         print(f"\nFinal stacks:")
@@ -1242,6 +1426,11 @@ class ConsolePlayer(BasePokerPlayer):
                 self._clear_all_caches()
                 self.last_pot_printed = 0
         
+        except QuitGameException:
+            # Re-lança QuitGameException para ser capturada no nível superior
+            # Limpa caches antes de sair
+            self._clear_all_caches()
+            raise
         except Exception as e:
             # Tratamento de erro geral para não quebrar o jogo
             debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
@@ -1270,43 +1459,188 @@ class ConsolePlayer(BasePokerPlayer):
     def __gen_raw_input_wrapper(self):
         return lambda msg: input(msg)
 
-    def __receive_action_from_console(self, valid_actions) -> Tuple[str, int]:
+    def __receive_action_from_console(self, valid_actions, round_state=None) -> Tuple[str, int]:
         """Solicita ação do jogador de forma limpa.
+        
+        Args:
+            valid_actions: Lista de ações válidas
+            round_state: Estado do round (opcional, necessário para all-in)
         
         Returns:
             tuple[str, int]: Tupla com (action, amount)
         """
+        def _get_player_stack(round_state):
+            """Obtém stack do jogador usando múltiplas estratégias (mesma lógica de declare_action)."""
+            if not round_state:
+                return 0
+            
+            seats = round_state.get('seats', [])
+            player_seat = None
+            
+            # 1. Tenta encontrar pelo UUID
+            if hasattr(self, 'uuid') and self.uuid:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                        player_seat = seat
+                        break
+            
+            # 2. Se não encontrou, tenta pelo nome "You"
+            if not player_seat:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('name', '').lower() == 'you':
+                        player_seat = seat
+                        # Atualiza self.uuid se não estava definido
+                        if not hasattr(self, 'uuid') or not self.uuid:
+                            self.uuid = seat.get('uuid')
+                        break
+            
+            # 3. Fallback: usa o primeiro seat se houver apenas um
+            if not player_seat and len(seats) == 1 and isinstance(seats[0], dict):
+                player_seat = seats[0]
+            
+            if player_seat:
+                return player_seat.get('stack', 0)
+            return 0
+        
         try:
             flg = self.input_receiver('>> ').strip().lower()
-            # Verifica se o jogador quer sair
+            # IMPORTANTE: Verifica se o jogador quer sair PRIMEIRO, antes de qualquer outra validação
             if flg == 'q':
                 raise QuitGameException()
             
+            # Se escolheu All In ('a')
+            if flg == 'a':
+                # Obtém stack do jogador usando lógica robusta
+                player_stack = _get_player_stack(round_state)
+                
+                if player_stack > 0:
+                    # Retorna raise com o valor do stack total (all-in)
+                    return 'raise', player_stack
+                else:
+                    print("Erro: Não foi possível determinar stack para all-in")
+                    return self.__receive_action_from_console(valid_actions, round_state)
+            
+            # Busca ação por tipo ao invés de índice fixo (mais robusto após filtragem)
+            # IMPORTANTE: Filtra raise se não for possível (min == -1)
+            action_map = {}
+            for action_data in valid_actions:
+                action_type = action_data.get('action', '')
+                if action_type == 'fold':
+                    action_map['f'] = action_data
+                elif action_type == 'call':
+                    action_map['c'] = action_data
+                elif action_type == 'raise':
+                    # Verifica se raise é possível antes de adicionar ao mapa
+                    raise_amount = action_data.get('amount', {})
+                    if isinstance(raise_amount, dict):
+                        min_raise = raise_amount.get('min', -1)
+                        # Só adiciona raise se min_raise for válido (>= 0)
+                        if min_raise >= 0:
+                            action_map['r'] = action_data
+                    elif isinstance(raise_amount, (int, float)) and raise_amount > 0:
+                        action_map['r'] = action_data
+            
             if flg in self.__gen_valid_flg(valid_actions):
-                if flg == 'f':
-                    return valid_actions[0]['action'], valid_actions[0]['amount']
-                elif flg == 'c':
-                    return valid_actions[1]['action'], valid_actions[1]['amount']
-                elif flg == 'r':
-                    valid_amounts = valid_actions[2]['amount']
-                    raise_amount = self.__receive_raise_amount_from_console(valid_amounts['min'], valid_amounts['max'])
-                    return valid_actions[2]['action'], raise_amount
+                if flg == 'f' and 'f' in action_map:
+                    action_data = action_map['f']
+                    return action_data['action'], action_data['amount']
+                elif flg == 'c' and 'c' in action_map:
+                    action_data = action_map['c']
+                    call_amount = action_data['amount']
+                    
+                    # IMPORTANTE: Verifica se o jogador tem stack suficiente para o call
+                    # Se não tiver, converte para all-in automaticamente
+                    player_stack = _get_player_stack(round_state)
+                    
+                    # Se o stack é menor que o call_amount, faz all-in
+                    if player_stack > 0 and call_amount > 0 and player_stack < call_amount:
+                        # Stack insuficiente - retorna all-in com o stack total
+                        return 'raise', player_stack
+                    else:
+                        # Stack suficiente ou call_amount é 0 (check)
+                        return action_data['action'], call_amount
+                elif flg == 'r' and 'r' in action_map:
+                    action_data = action_map['r']
+                    valid_amounts = action_data['amount']
+                    if isinstance(valid_amounts, dict):
+                        # Passa round_state para validação de stack
+                        raise_amount = self.__receive_raise_amount_from_console(
+                            valid_amounts['min'], 
+                            valid_amounts['max'],
+                            round_state
+                        )
+                        
+                        # IMPORTANTE: Garante que o raise_amount não exceda o stack
+                        # (validação adicional caso a função não tenha feito)
+                        player_stack = _get_player_stack(round_state)
+                        
+                        # Se o raise_amount exceder o stack, limita ao stack (all-in)
+                        if player_stack > 0 and raise_amount > player_stack:
+                            return 'raise', player_stack
+                        
+                        return action_data['action'], raise_amount
             
             # Se chegou aqui, a ação é inválida - solicita novamente
-            print("Invalid action. Use [f], [c], [r] or [q] to quit")
-            return self.__receive_action_from_console(valid_actions)
+            print("Invalid action. Use [f] FOLD, [c] CALL, [r] RAISE, [a] ALL IN or [q] to quit")
+            return self.__receive_action_from_console(valid_actions, round_state)
         except QuitGameException:
             # Re-raise para ser capturado no nível superior
             raise
 
     def __gen_valid_flg(self, valid_actions):
-        flgs = ['f', 'c']
-        is_raise_possible = valid_actions[2]['amount']['min'] != -1
-        if is_raise_possible:
-            flgs.append('r')
+        """Gera lista de flags válidas baseado nas ações disponíveis."""
+        flgs = []
+        for action_data in valid_actions:
+            action_type = action_data.get('action', '')
+            if action_type == 'fold':
+                flgs.append('f')
+            elif action_type == 'call':
+                flgs.append('c')
+            elif action_type == 'raise':
+                # Verifica se raise é possível (min deve ser >= 0)
+                amount = action_data.get('amount', {})
+                if isinstance(amount, dict):
+                    min_raise = amount.get('min', -1)
+                    # Só adiciona 'r' se min_raise for válido (>= 0)
+                    if min_raise >= 0:
+                        flgs.append('r')
+                elif isinstance(amount, (int, float)) and amount > 0:
+                    flgs.append('r')
         return flgs
 
-    def __receive_raise_amount_from_console(self, min_amount, max_amount):
+    def __receive_raise_amount_from_console(self, min_amount, max_amount, round_state=None):
+        def _get_player_stack(round_state):
+            """Obtém stack do jogador usando múltiplas estratégias."""
+            if not round_state:
+                return 0
+            
+            seats = round_state.get('seats', [])
+            player_seat = None
+            
+            # 1. Tenta encontrar pelo UUID
+            if hasattr(self, 'uuid') and self.uuid:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                        player_seat = seat
+                        break
+            
+            # 2. Se não encontrou, tenta pelo nome "You"
+            if not player_seat:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('name', '').lower() == 'you':
+                        player_seat = seat
+                        if not hasattr(self, 'uuid') or not self.uuid:
+                            self.uuid = seat.get('uuid')
+                        break
+            
+            # 3. Fallback: usa o primeiro seat se houver apenas um
+            if not player_seat and len(seats) == 1 and isinstance(seats[0], dict):
+                player_seat = seats[0]
+            
+            if player_seat:
+                return player_seat.get('stack', 0)
+            return 0
+        
         try:
             raw_amount = self.input_receiver(f"Amount ({min_amount}-{max_amount}) or 'q' to quit: ").strip().lower()
             # Verifica se o jogador quer sair
@@ -1316,13 +1650,23 @@ class ConsolePlayer(BasePokerPlayer):
             try:
                 amount = int(raw_amount)
                 if min_amount <= amount and amount <= max_amount:
+                    # IMPORTANTE: Verifica se o amount não excede o stack do jogador
+                    # Se exceder, limita ao stack (all-in)
+                    if round_state:
+                        player_stack = _get_player_stack(round_state)
+                        
+                        # Se o amount exceder o stack, limita ao stack
+                        if player_stack > 0 and amount > player_stack:
+                            print(f"⚠️  Valor excede seu stack ({player_stack}). Será all-in por {player_stack}.")
+                            return player_stack
+                    
                     return amount
                 else:
                     print(f"Invalid amount. Use {min_amount}-{max_amount}")
-                    return self.__receive_raise_amount_from_console(min_amount, max_amount)
+                    return self.__receive_raise_amount_from_console(min_amount, max_amount, round_state)
             except ValueError:
                 print("Invalid input. Enter a number or 'q' to quit.")
-                return self.__receive_raise_amount_from_console(min_amount, max_amount)
+                return self.__receive_raise_amount_from_console(min_amount, max_amount, round_state)
         except QuitGameException:
             # Re-raise para ser capturado no nível superior
             raise

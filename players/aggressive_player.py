@@ -19,17 +19,20 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         
         # Probabilidade inicial de blefe (0.0 = nunca blefa, 1.0 = sempre blefa)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.10-0.25
-        default_bluff=0.18,
+        # Aggressive: blefa mais frequentemente
+        default_bluff=0.22,
         
         # Nível inicial de agressão (0.0 = passivo, 1.0 = muito agressivo)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.40-0.65
         # Controla frequência de raises vs calls
-        default_aggression=0.58,
+        # Aggressive: agressão alta
+        default_aggression=0.65,
         
         # Threshold inicial de seletividade (quanto maior, mais seletivo)
         # Mínimo: 15 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para não foldar
-        default_tightness=26,
+        # Aggressive: menos seletivo (joga mais mãos)
+        default_tightness=22,
         
         # ============================================================
         # THRESHOLDS DE DECISÃO
@@ -38,17 +41,20 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=15,
+        # Aggressive: threshold baixo (joga mais mãos)
+        fold_threshold_base=12,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise
-        raise_threshold=25,
+        # Aggressive: threshold baixo (raise mais frequentemente)
+        raise_threshold=22,
         
         # Threshold para mão muito forte (sempre faz raise)
         # Mínimo: 30 | Máximo: 60 | Típico: 30-55
         # Mão com força >= este valor = raise garantido
-        strong_hand_threshold=30,
+        # Aggressive: threshold médio (raise com mãos boas)
+        strong_hand_threshold=35,
         
         # ============================================================
         # AJUSTES DE VALOR DE RAISE
@@ -119,7 +125,8 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         # Quanto aumenta agressão quando campo está passivo (só calls)
         # Mínimo: 0.0 | Máximo: 0.50 | Típico: 0.10-0.35
         # Multiplicado pelo passive_opportunity_score
-        passive_aggression_boost=0.30,
+        # Aggressive: aproveita mais oportunidades passivas
+        passive_aggression_boost=0.40,
         
         # Fator de redução do threshold em campo passivo
         # Mínimo: 2.0 | Máximo: 5.0 | Típico: 3.0-4.0
@@ -134,7 +141,8 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         # Threshold para fazer raise em campo passivo
         # Mínimo: 20 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para raise em campo passivo
-        passive_raise_threshold=20,
+        # Aggressive: threshold baixo (raise mais em campo passivo)
+        passive_raise_threshold=18,
         
         # Score mínimo de oportunidade para raise em campo passivo
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.4-0.7
@@ -173,3 +181,17 @@ class AggressivePlayer(PokerBotBase):
     def __init__(self, memory_file="aggressive_player_memory.json"):
         config = _create_config(memory_file)
         super().__init__(config)
+    
+    def _get_risk_sensitivity(self):
+        """
+        Sobrescreve: Aggressive tem baixa sensibilidade ao risco.
+        Retorna 0.7 para ser mais agressivo mesmo em situações de risco.
+        """
+        return 0.7
+    
+    def _should_force_raise(self, hand_strength: int, fold_threshold: int, round_state) -> bool:
+        """
+        Sobrescreve: Aggressive sempre tenta raise se possível quando tem mão razoável.
+        Força raise mesmo com mão média se estiver acima do threshold base.
+        """
+        return hand_strength >= self.config.fold_threshold_base

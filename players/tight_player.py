@@ -19,17 +19,20 @@ def _create_config(memory_file: str = "tight_player_memory.json") -> BotConfig:
         
         # Probabilidade inicial de blefe (0.0 = nunca blefa, 1.0 = sempre blefa)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.10-0.25
-        default_bluff=0.15,
+        # Tight: blefa muito raramente
+        default_bluff=0.08,
         
         # Nível inicial de agressão (0.0 = passivo, 1.0 = muito agressivo)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.40-0.65
         # Controla frequência de raises vs calls
-        default_aggression=0.54,
+        # Tight: agressão moderada (só com mãos fortes)
+        default_aggression=0.45,
         
         # Threshold inicial de seletividade (quanto maior, mais seletivo)
         # Mínimo: 15 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para não foldar
-        default_tightness=29,
+        # Tight: muito seletivo (joga poucas mãos)
+        default_tightness=32,
         
         # ============================================================
         # THRESHOLDS DE DECISÃO
@@ -38,17 +41,20 @@ def _create_config(memory_file: str = "tight_player_memory.json") -> BotConfig:
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=24,
+        # Tight: threshold alto (folda muitas mãos)
+        fold_threshold_base=26,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise
-        raise_threshold=29,
+        # Tight: threshold alto (raise raramente)
+        raise_threshold=34,
         
         # Threshold para mão muito forte (sempre faz raise)
         # Mínimo: 30 | Máximo: 60 | Típico: 30-55
         # Mão com força >= este valor = raise garantido
-        strong_hand_threshold=50,
+        # Tight: threshold alto (só raise com mãos muito fortes)
+        strong_hand_threshold=58,
         
         # ============================================================
         # AJUSTES DE VALOR DE RAISE
@@ -95,7 +101,7 @@ def _create_config(memory_file: str = "tight_player_memory.json") -> BotConfig:
         # Ajuste base do threshold quando detecta raise
         # Mínimo: 3 | Máximo: 10 | Típico: 3-8
         # Quantos pontos adiciona ao threshold quando há 1 raise
-        raise_threshold_adjustment_base=8,
+        raise_threshold_adjustment_base=5,
         
         # Ajuste adicional por cada raise extra
         # Mínimo: 1 | Máximo: 5 | Típico: 2-3
