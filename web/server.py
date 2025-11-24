@@ -26,7 +26,22 @@ from players.adaptive_player import AdaptivePlayer
 from players.conservative_aggressive_player import ConservativeAggressivePlayer
 from players.opportunistic_player import OpportunisticPlayer
 from players.hybrid_player import HybridPlayer
+from players.learning_player import LearningPlayer
+from players.fish_player import FishPlayer
+from players.cautious_player import CautiousPlayer
+from players.moderate_player import ModeratePlayer
+from players.patient_player import PatientPlayer
+from players.calculated_player import CalculatedPlayer
+from players.steady_player import SteadyPlayer
+from players.observant_player import ObservantPlayer
+from players.flexible_player import FlexiblePlayer
+from players.calm_player import CalmPlayer
+from players.thoughtful_player import ThoughtfulPlayer
+from players.steady_aggressive_player import SteadyAggressivePlayer
 from utils.hand_evaluator import HandEvaluator
+from utils.game_history import GameHistory
+from utils.hand_utils import get_community_cards, normalize_hole_cards
+from utils.win_probability_calculator import calculate_win_probability_for_player
 
 # Importa módulo de card_utils do PyPokerEngine para monkey patch
 try:
@@ -185,6 +200,7 @@ class BotWrapper(BasePokerPlayer):
         self.delay_min = delay_min
         self.delay_max = delay_max
         self.uuid = None
+        # Nota: O bot agora define seu próprio UUID fixo via set_uuid() em PokerBotBase
 
     def declare_action(self, valid_actions, hole_card, round_state):
         # Simula tempo de pensamento
@@ -251,24 +267,44 @@ class BotWrapper(BasePokerPlayer):
             _log_error(f"Erro em receive_round_result_message do bot {bot_name}", e)
 
     def set_uuid(self, uuid):
+        # Passa o UUID para o bot (que vai usar UUID fixo via set_uuid() em PokerBotBase)
         self.uuid = uuid
-        if hasattr(self.bot, 'set_uuid'): # Alguns bots podem não ter
-             self.bot.uuid = uuid # Tenta setar direto se for BasePokerPlayer
+        if hasattr(self.bot, 'set_uuid'):
+            # O bot vai ignorar o UUID do PyPokerEngine e usar UUID fixo baseado na classe
+            self.bot.set_uuid(uuid)
+            # Atualiza nosso UUID com o UUID fixo do bot
+            if hasattr(self.bot, 'uuid'):
+                self.uuid = self.bot.uuid
+        elif hasattr(self.bot, 'uuid'):
+            self.bot.uuid = uuid
 
 # Player web que recebe ações via API
 class WebPlayer(BasePokerPlayer):
-    def __init__(self):
+    def __init__(self, initial_stack=100, player_name=None):
         super().__init__()
         self.pending_action = None
         self.action_received = threading.Event()
         self.uuid = None
+        self.initial_stack = initial_stack
+        self.player_name = player_name
+        # Gera UUID fixo baseado no nome do jogador (se fornecido)
+        from utils.uuid_utils import get_player_uuid
+        self._fixed_uuid = get_player_uuid(player_name)
+        # Sistema de histórico
+        self.game_history = None  # Será inicializado quando UUID for definido
     
     def set_uuid(self, uuid):
         """Método chamado pelo PyPokerEngine para definir o UUID do jogador."""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         old_uuid = self.uuid
-        self.uuid = uuid
-        print(f"🟢 [SERVER] [{timestamp}] WebPlayer.set_uuid chamado: {old_uuid} -> {uuid}")
+        
+        # Se tiver UUID fixo (baseado no nome), usa ele; senão usa UUID do PyPokerEngine
+        if self._fixed_uuid:
+            self.uuid = self._fixed_uuid
+        else:
+            self.uuid = uuid
+        
+        print(f"🟢 [SERVER] [{timestamp}] WebPlayer.set_uuid chamado: {old_uuid} -> {self.uuid}")
         # Atualiza game_state imediatamente quando UUID é definido
         with game_lock:
             game_state['player_uuid'] = self.uuid
@@ -344,6 +380,36 @@ class WebPlayer(BasePokerPlayer):
         action, amount = self.pending_action
         self.pending_action = None
         print(f"🟢 [SERVER] [{timestamp}] declare_action - Retornando ação: {action}, amount: {amount}")
+        
+        # Registra ação no histórico
+        if self.game_history and self.uuid:
+            # Obtém cartas do jogador
+            hole_cards = None
+            if hole_card:
+                hole_cards = normalize_hole_cards(hole_card)
+            
+            # Tenta calcular probabilidade de vitória
+            win_prob = None
+            try:
+                win_prob_data = calculate_win_probability_for_player(
+                    player_uuid=self.uuid,
+                    round_state=round_state,
+                    return_confidence=False
+                )
+                if win_prob_data is not None:
+                    win_prob = win_prob_data
+            except Exception:
+                pass  # Ignora erros no cálculo de probabilidade
+            
+            self.game_history.record_action(
+                player_uuid=self.uuid,
+                action=action,
+                amount=amount,
+                round_state=round_state,
+                my_hole_cards=hole_cards,
+                my_win_probability=win_prob
+            )
+        
         return action, amount
     
     def _serialize_hand_info(self, hand_info):
@@ -591,6 +657,25 @@ class WebPlayer(BasePokerPlayer):
             'previous_round_ended': previous_round_ended,
             'new_round_ended': False
         })
+        
+        # Inicializa histórico se ainda não foi inicializado
+        if not self.game_history and self.uuid:
+            self.game_history = GameHistory(self.uuid, self.initial_stack)
+            # Registra jogadores
+            if seats:
+                self.game_history.register_players(seats)
+                num_players = len([s for s in seats if isinstance(s, dict)])
+                self.game_history.set_game_config(
+                    small_blind=0,  # Será atualizado quando disponível
+                    big_blind=0,   # Será atualizado quando disponível
+                    max_rounds=10,  # Default
+                    num_players=num_players
+                )
+        
+        # Inicia novo round no histórico
+        if self.game_history and seats:
+            button_position = 0  # Default
+            self.game_history.start_round(round_count, seats, button_position)
     
     def receive_street_start_message(self, street, round_state):
         with game_lock:
@@ -623,6 +708,10 @@ class WebPlayer(BasePokerPlayer):
                 'round_ended': round_ended  # Preserva se já estiver True
             })
             game_state['current_round'] = current_round
+        
+        # Registra início de nova street no histórico
+        if self.game_history:
+            self.game_history.start_street(street, round_state)
     
     def receive_game_update_message(self, action, round_state):
         try:
@@ -699,6 +788,39 @@ class WebPlayer(BasePokerPlayer):
                     'round_ended': round_ended  # Preserva se já estiver True
                 })
                 game_state['current_round'] = current_round
+            
+            # Registra ação no histórico (de outros jogadores)
+            if self.game_history and isinstance(action, dict):
+                action_type = action.get('action', '')
+                action_amount = action.get('amount', 0)
+                paid = action.get('paid', 0)
+                
+                # Tenta obter UUID do jogador que fez a ação
+                player_uuid = None
+                player_name = action.get('player', '')
+                seats = round_state.get('seats', [])
+                for seat in seats:
+                    if isinstance(seat, dict):
+                        seat_name = seat.get('name', '')
+                        if seat_name == player_name:
+                            player_uuid = seat.get('uuid')
+                            break
+                
+                if player_uuid:
+                    # Usa 'paid' para CALL, 'amount' para outras ações
+                    final_amount = paid if action_type == 'CALL' and paid > 0 else action_amount
+                    self.game_history.record_action(
+                        player_uuid=player_uuid,
+                        action=action_type,
+                        amount=final_amount,
+                        round_state=round_state
+                    )
+                    
+                    # Atualiza configurações de blinds se detectar SMALLBLIND ou BIGBLIND
+                    if action_type == 'SMALLBLIND' and final_amount > 0:
+                        self.game_history.history["game_config"]["small_blind"] = final_amount
+                    elif action_type == 'BIGBLIND' and final_amount > 0:
+                        self.game_history.history["game_config"]["big_blind"] = final_amount
         except Exception as e:
             _log_error("Erro em receive_game_update_message", e, {
                 "action_type": type(action).__name__,
@@ -925,6 +1047,21 @@ class WebPlayer(BasePokerPlayer):
                 game_state['current_round'] = current_round
                 elapsed_time = time.time() - start_time
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                # Registra resultado do round no histórico
+                if self.game_history:
+                    self.game_history.record_round_result(winners, hand_info, round_state)
+                    
+                    # Verifica se é o último round (10 rounds é o padrão)
+                    round_number = self.game_history.current_round.get("round_number", 0) if self.game_history.current_round else 0
+                    if round_number >= 10:
+                        # Salva histórico ao final do jogo
+                        try:
+                            history_file = self.game_history.save()
+                            print(f"🔴 [SERVER] [{timestamp}] Histórico salvo em: {history_file}")
+                        except Exception as e:
+                            print(f"🔴 [SERVER] [{timestamp}] Erro ao salvar histórico: {e}")
+                            _log_error("Erro ao salvar histórico", e)
+                
                 print(f"🔴 [SERVER] [{timestamp}] === WebPlayer.receive_round_result_message FINALIZADO ===")
                 print(f"🔴 [SERVER] [{timestamp}] Tempo de execução: {elapsed_time:.3f}s")
                 print(f"🔴 [SERVER] [{timestamp}] Round count: {round_count}")
@@ -964,7 +1101,7 @@ class WebPlayer(BasePokerPlayer):
                         'error': str(e)
                     }
 
-web_player = WebPlayer()
+web_player = WebPlayer(initial_stack=DEFAULT_INITIAL_STACK)
 
 @app.route('/')
 def index():
@@ -1092,8 +1229,8 @@ def start_game():
                 'statistics_visible': statistics_visible
             }
         
-        # Cria novo web_player
-        web_player = WebPlayer()
+        # Cria novo web_player com nome
+        web_player = WebPlayer(initial_stack=initial_stack, player_name=player_name)
         
         # Aplica monkey patch do PokerKit para acelerar avaliação de mãos
         apply_pokerkit_patch()
@@ -1119,7 +1256,11 @@ def start_game():
         available_bots = [
             TightPlayer(), AggressivePlayer(), SmartPlayer(), 
             RandomPlayer(), BalancedPlayer(), AdaptivePlayer(),
-            ConservativeAggressivePlayer(), OpportunisticPlayer(), HybridPlayer()
+            ConservativeAggressivePlayer(), OpportunisticPlayer(), HybridPlayer(),
+            LearningPlayer(), FishPlayer(), CautiousPlayer(),
+            ModeratePlayer(), PatientPlayer(), CalculatedPlayer(),
+            SteadyPlayer(), ObservantPlayer(), FlexiblePlayer(),
+            CalmPlayer(), ThoughtfulPlayer(), SteadyAggressivePlayer()
         ]
         # Registra número de bots baseado em player_count
         selected_bots = random.sample(available_bots, min(player_count, len(available_bots)))
@@ -1349,7 +1490,7 @@ def initialize_game_state():
         }
     
     # Cria novo web_player limpo
-    web_player = WebPlayer()
+    web_player = WebPlayer(initial_stack=DEFAULT_INITIAL_STACK)
     
     print(f"🔄 [SERVER] [{timestamp}] ✅ Estado do jogo resetado - pronto para nova partida")
     print(f"🔄 [SERVER] [{timestamp}]   active: {game_state['active']}")

@@ -1,16 +1,16 @@
 """
-Jogador conservador que se torna agressivo quando necessário.
+Jogador paciente que espera oportunidades.
 Toda lógica está em PokerBotBase.
 """
 from players.base.poker_bot_base import PokerBotBase
 from players.base.bot_config import BotConfig
 
 
-def _create_config(memory_file: str = "conservative_aggressive_player_memory.json") -> BotConfig:
-    """Cria configuração para jogador conservador que se torna agressivo quando necessário."""
+def _create_config(memory_file: str = "patient_player_memory.json") -> BotConfig:
+    """Cria configuração para jogador paciente que espera oportunidades."""
     return BotConfig(
         # Identificação do bot
-        name="ConservativeAggressive",  # Nome do bot (string)
+        name="Patient",  # Nome do bot (string)
         memory_file=memory_file,  # Arquivo de memória (string, ex: "bot_memory.json")
         
         
@@ -18,26 +18,26 @@ def _create_config(memory_file: str = "conservative_aggressive_player_memory.jso
         # ============================================================
         # Probabilidade inicial de blefe (0.0 = nunca blefa, 1.0 = sempre blefa)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.10-0.25
-        default_bluff=0.05,
+        default_bluff=0.13,
         # Nível inicial de agressão (0.0 = passivo, 1.0 = muito agressivo)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.40-0.65
         # Controla frequência de raises vs calls
-        default_aggression=0.4,
+        default_aggression=0.5,
         # Threshold inicial de seletividade (quanto maior, mais seletivo)
         # Mínimo: 15 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para não foldar
-        default_tightness=35,
+        default_tightness=28,
         # ============================================================
         # THRESHOLDS DE DECISÃO
         # ============================================================
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=30,
+        fold_threshold_base=22,
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise
-        raise_threshold=35,
+        raise_threshold=28,
         # Threshold para mão muito forte (sempre faz raise)
         # Mínimo: 30 | Máximo: 60 | Típico: 30-55
         # Mão com força >= este valor = raise garantido
@@ -48,40 +48,40 @@ def _create_config(memory_file: str = "conservative_aggressive_player_memory.jso
         # Multiplicador mínimo para calcular valor do raise
         # Mínimo: 10 | Máximo: 30 | Típico: 15-25
         # Usado para calcular: min_amount + (random entre min e max)
-        raise_multiplier_min=10,
+        raise_multiplier_min=15,
         # Multiplicador máximo para calcular valor do raise
         # Mínimo: 15 | Máximo: 35 | Típico: 20-30
         # Usado para calcular: min_amount + (random entre min e max)
-        raise_multiplier_max=15,
+        raise_multiplier_max=18,
         # ============================================================
         # COMPORTAMENTO DE BLEFE
         # ============================================================
         # Probabilidade de fazer call vs raise quando blefa
         # Mínimo: 0.0 (sempre raise) | Máximo: 1.0 (sempre call) | Típico: 0.30-0.70
-        bluff_call_ratio=0.3,
+        bluff_call_ratio=0.45,
         # Probabilidade de raise no blefe com poucos jogadores (≤2)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.50-0.80
         # Com poucos jogadores, blefe com raise é mais efetivo
-        bluff_raise_prob_few_players=0.3,
+        bluff_raise_prob_few_players=0.45,
         # Probabilidade de raise no blefe com muitos jogadores (>2)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.30-0.50
         # Com muitos jogadores, blefe com call é mais seguro
-        bluff_raise_prob_many_players=0.2,
+        bluff_raise_prob_many_players=0.45,
         # ============================================================
         # REAÇÃO A AÇÕES DOS OPONENTES
         # ============================================================
         # Sensibilidade a raises dos oponentes (multiplicador)
         # Mínimo: 1.0 | Máximo: 5.0 | Típico: 2.0-3.0
         # Quanto maior, mais conservador fica quando há raises
-        raise_count_sensitivity=3.0,
+        raise_count_sensitivity=2.0,
         # Ajuste base do threshold quando detecta raise
         # Mínimo: 3 | Máximo: 10 | Típico: 3-8
         # Quantos pontos adiciona ao threshold quando há 1 raise
-        raise_threshold_adjustment_base=8,
+        raise_threshold_adjustment_base=6,
         # Ajuste adicional por cada raise extra
         # Mínimo: 1 | Máximo: 5 | Típico: 2-3
         # Quantos pontos adiciona ao threshold por cada raise adicional
-        raise_threshold_adjustment_per_raise=3,
+        raise_threshold_adjustment_per_raise=2,
         # ============================================================
         # DETECÇÃO E PAGAMENTO DE BLEFE
         # ============================================================
@@ -89,37 +89,37 @@ def _create_config(memory_file: str = "conservative_aggressive_player_memory.jso
         # Mínimo: 20 | Máximo: 35 | Típico: 22-32
         # Mão precisa ter força >= este valor para pagar possível blefe
         # Conservadores: 28-32 | Agressivos: 22-24 | Balanceados: 25-28
-        bluff_detection_threshold=35,
+        bluff_detection_threshold=28,
         # ============================================================
         # COMPORTAMENTO EM CAMPO PASSIVO
         # ============================================================
         # Quanto aumenta agressão quando campo está passivo (só calls)
         # Mínimo: 0.0 | Máximo: 0.50 | Típico: 0.10-0.35
         # Multiplicado pelo passive_opportunity_score
-        passive_aggression_boost=0.08,
+        passive_aggression_boost=0.12,
         # Fator de redução do threshold em campo passivo
         # Mínimo: 2.0 | Máximo: 5.0 | Típico: 3.0-4.0
         # Quanto maior, mais reduz threshold quando campo está passivo
-        passive_threshold_reduction_factor=2.0,
+        passive_threshold_reduction_factor=3.5,
         # Threshold mínimo permitido em campo passivo
         # Mínimo: 15 | Máximo: 35 | Típico: 20-30
         # Threshold nunca fica abaixo deste valor, mesmo em campo passivo
-        passive_threshold_min=32,
+        passive_threshold_min=24,
         # Threshold para fazer raise em campo passivo
         # Mínimo: 20 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para raise em campo passivo
-        passive_raise_threshold=35,
+        passive_raise_threshold=28,
         # Score mínimo de oportunidade para raise em campo passivo
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.4-0.7
         # Oportunidade precisa ser >= este valor para considerar raise passivo
-        passive_raise_score_threshold=0.6,
+        passive_raise_score_threshold=0.4,
         # ============================================================
         # SISTEMA DE APRENDIZADO
         # ============================================================
         # Velocidade de aprendizado (quão rápido ajusta estratégia)
         # Mínimo: 0.0001 (muito lento) | Máximo: 0.01 (muito rápido) | Típico: 0.001-0.005
         # Usado como multiplicador: 1 + learning_speed
-        learning_speed=0.001,
+        learning_speed=0.002,
         # Win rate alto para aumentar agressão/blefe
         # Mínimo: 0.50 | Máximo: 0.70 | Típico: 0.55-0.65
         # Se win rate > este valor, aumenta agressão e blefe
@@ -131,13 +131,13 @@ def _create_config(memory_file: str = "conservative_aggressive_player_memory.jso
         # Rodadas mínimas antes de começar a aprender
         # Mínimo: 5 | Máximo: 20 | Típico: 10-15
         # Bot só ajusta estratégia após este número de rodadas
-        rounds_before_learning=15,
+        rounds_before_learning=12,
     )
 
 
-class ConservativeAggressivePlayer(PokerBotBase):
-    """Jogador conservador que se torna agressivo quando necessário."""
+class PatientPlayer(PokerBotBase):
+    """Jogador paciente que espera oportunidades."""
     
-    def __init__(self, memory_file="conservative_aggressive_player_memory.json"):
+    def __init__(self, memory_file="patient_player_memory.json"):
         config = _create_config(memory_file)
         super().__init__(config)

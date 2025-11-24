@@ -1,193 +1,175 @@
-from pypokerengine.players import BasePokerPlayer
-import random
-from utils.memory_manager import UnifiedMemoryManager
-from utils.hand_utils import evaluate_hand_strength
-from utils.constants import (
-    BLUFF_PROBABILITY_TIGHT, TIGHTNESS_THRESHOLD_DEFAULT,
-    HAND_STRENGTH_VERY_STRONG, HAND_STRENGTH_STRONG
-)
+"""
+Jogador tight/conservador - configuração e instanciação.
+Toda lógica está em PokerBotBase.
+"""
+from players.base.poker_bot_base import PokerBotBase
+from players.base.bot_config import BotConfig
 
-class TightPlayer(BasePokerPlayer):
-    """Jogador conservador que joga apenas com mãos fortes. Blefa raramente (8%). Aprendizado conservador básico com memória persistente."""
+
+def _create_config(memory_file: str = "tight_player_memory.json") -> BotConfig:
+    """Cria configuração para jogador tight/conservador"""
+    return BotConfig(
+        # Identificação do bot
+        name="Tight",  # Nome do bot (string)
+        memory_file=memory_file,  # Arquivo de memória (string, ex: "bot_memory.json")
+        
+        # ============================================================
+        # PARÂMETROS DE PERSONALIDADE BASE
+        # ============================================================
+        
+        # Probabilidade inicial de blefe (0.0 = nunca blefa, 1.0 = sempre blefa)
+        # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.10-0.25
+        default_bluff=0.15,
+        
+        # Nível inicial de agressão (0.0 = passivo, 1.0 = muito agressivo)
+        # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.40-0.65
+        # Controla frequência de raises vs calls
+        default_aggression=0.54,
+        
+        # Threshold inicial de seletividade (quanto maior, mais seletivo)
+        # Mínimo: 15 | Máximo: 50 | Típico: 20-35
+        # Mão precisa ter força >= este valor para não foldar
+        default_tightness=29,
+        
+        # ============================================================
+        # THRESHOLDS DE DECISÃO
+        # ============================================================
+        
+        # Threshold base para foldar (força mínima para não foldar)
+        # Mínimo: 10 | Máximo: 35 | Típico: 15-30
+        # Mão com força < este valor = fold
+        fold_threshold_base=24,
+        
+        # Threshold mínimo para considerar fazer raise
+        # Mínimo: 20 | Máximo: 40 | Típico: 25-35
+        # Mão precisa ter força >= este valor para considerar raise
+        raise_threshold=29,
+        
+        # Threshold para mão muito forte (sempre faz raise)
+        # Mínimo: 30 | Máximo: 60 | Típico: 30-55
+        # Mão com força >= este valor = raise garantido
+        strong_hand_threshold=50,
+        
+        # ============================================================
+        # AJUSTES DE VALOR DE RAISE
+        # ============================================================
+        
+        # Multiplicador mínimo para calcular valor do raise
+        # Mínimo: 10 | Máximo: 30 | Típico: 15-25
+        # Usado para calcular: min_amount + (random entre min e max)
+        raise_multiplier_min=20,
+        
+        # Multiplicador máximo para calcular valor do raise
+        # Mínimo: 15 | Máximo: 35 | Típico: 20-30
+        # Usado para calcular: min_amount + (random entre min e max)
+        raise_multiplier_max=20,
+        
+        # ============================================================
+        # COMPORTAMENTO DE BLEFE
+        # ============================================================
+        
+        # Probabilidade de fazer call vs raise quando blefa
+        # Mínimo: 0.0 (sempre raise) | Máximo: 1.0 (sempre call) | Típico: 0.30-0.70
+        # 0.70 = 70% chance de call, 30% chance de raise no blefe
+        bluff_call_ratio=0.70,
+        
+        # Probabilidade de raise no blefe com poucos jogadores (≤2)
+        # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.50-0.80
+        # Com poucos jogadores, blefe com raise é mais efetivo
+        bluff_raise_prob_few_players=0.40,
+        
+        # Probabilidade de raise no blefe com muitos jogadores (>2)
+        # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.30-0.50
+        # Com muitos jogadores, blefe com call é mais seguro
+        bluff_raise_prob_many_players=0.20,
+        
+        # ============================================================
+        # REAÇÃO A AÇÕES DOS OPONENTES
+        # ============================================================
+        
+        # Sensibilidade a raises dos oponentes (multiplicador)
+        # Mínimo: 1.0 | Máximo: 5.0 | Típico: 2.0-3.0
+        # Quanto maior, mais conservador fica quando há raises
+        raise_count_sensitivity=3.0,
+        
+        # Ajuste base do threshold quando detecta raise
+        # Mínimo: 3 | Máximo: 10 | Típico: 3-8
+        # Quantos pontos adiciona ao threshold quando há 1 raise
+        raise_threshold_adjustment_base=8,
+        
+        # Ajuste adicional por cada raise extra
+        # Mínimo: 1 | Máximo: 5 | Típico: 2-3
+        # Quantos pontos adiciona ao threshold por cada raise adicional
+        raise_threshold_adjustment_per_raise=3,
+        
+        # ============================================================
+        # DETECÇÃO E PAGAMENTO DE BLEFE
+        # ============================================================
+        
+        # Threshold para pagar blefe detectado dos oponentes
+        # Mínimo: 20 | Máximo: 35 | Típico: 22-32
+        # Mão precisa ter força >= este valor para pagar possível blefe
+        # Conservadores: 28-32 | Agressivos: 22-24 | Balanceados: 25-28
+        bluff_detection_threshold=32,
+        
+        # ============================================================
+        # COMPORTAMENTO EM CAMPO PASSIVO
+        # ============================================================
+        
+        # Quanto aumenta agressão quando campo está passivo (só calls)
+        # Mínimo: 0.0 | Máximo: 0.50 | Típico: 0.10-0.35
+        # Multiplicado pelo passive_opportunity_score
+        passive_aggression_boost=0.10,
+        
+        # Fator de redução do threshold em campo passivo
+        # Mínimo: 2.0 | Máximo: 5.0 | Típico: 3.0-4.0
+        # Quanto maior, mais reduz threshold quando campo está passivo
+        passive_threshold_reduction_factor=3.0,
+        
+        # Threshold mínimo permitido em campo passivo
+        # Mínimo: 15 | Máximo: 35 | Típico: 20-30
+        # Threshold nunca fica abaixo deste valor, mesmo em campo passivo
+        passive_threshold_min=28,
+        
+        # Threshold para fazer raise em campo passivo
+        # Mínimo: 20 | Máximo: 50 | Típico: 20-35
+        # Mão precisa ter força >= este valor para raise em campo passivo
+        passive_raise_threshold=45,
+        
+        # Score mínimo de oportunidade para raise em campo passivo
+        # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.4-0.7
+        # Oportunidade precisa ser >= este valor para considerar raise passivo
+        passive_raise_score_threshold=0.6,
+        
+        # ============================================================
+        # SISTEMA DE APRENDIZADO
+        # ============================================================
+        
+        # Velocidade de aprendizado (quão rápido ajusta estratégia)
+        # Mínimo: 0.0001 (muito lento) | Máximo: 0.01 (muito rápido) | Típico: 0.001-0.005
+        # Usado como multiplicador: 1 + learning_speed
+        learning_speed=0.001,
+        
+        # Win rate alto para aumentar agressão/blefe
+        # Mínimo: 0.50 | Máximo: 0.70 | Típico: 0.55-0.65
+        # Se win rate > este valor, aumenta agressão e blefe
+        win_rate_threshold_high=0.60,
+        
+        # Win rate baixo para reduzir agressão/aumentar seletividade
+        # Mínimo: 0.20 | Máximo: 0.40 | Típico: 0.25-0.35
+        # Se win rate < este valor, reduz agressão e aumenta threshold
+        win_rate_threshold_low=0.30,
+        
+        # Rodadas mínimas antes de começar a aprender
+        # Mínimo: 5 | Máximo: 20 | Típico: 10-15
+        # Bot só ajusta estratégia após este número de rodadas
+        rounds_before_learning=10,
+    )
+
+
+class TightPlayer(PokerBotBase):
+    """Jogador conservador que joga apenas com mãos fortes. Blefa raramente."""
     
     def __init__(self, memory_file="tight_player_memory.json"):
-        # Inicializa gerenciador de memória unificada
-        self.memory_manager = UnifiedMemoryManager(
-            memory_file,
-            default_bluff=0.15,  # Nivelado: ligeiramente abaixo da média
-            default_aggression=0.54,  # Nivelado: ligeiramente abaixo da média
-            default_tightness=29  # Nivelado: ligeiramente acima da média
-        )
-        self.memory = self.memory_manager.get_memory()
-        self.bluff_probability = self.memory['bluff_probability']
-        self.tightness_threshold = self.memory['tightness_threshold']
-        self.bluff_call_ratio = 0.70  # 70% CALL / 30% RAISE quando blefar
-        self.consecutive_losses = 0
-        self.initial_stack = None
-    
-    def declare_action(self, valid_actions, hole_card, round_state):
-        # Identifica oponentes
-        if hasattr(self, 'uuid') and self.uuid:
-            self.memory_manager.identify_opponents(round_state, self.uuid)
-        
-        hand_strength = self._evaluate_hand_strength(hole_card, round_state)
-        should_bluff = self._should_bluff()
-        
-        # Atualiza valores da memória
-        self.bluff_probability = self.memory['bluff_probability']
-        self.tightness_threshold = self.memory['tightness_threshold']
-        
-        if should_bluff:
-            action, amount = self._bluff_action(valid_actions, round_state)
-        else:
-            action, amount = self._normal_action(valid_actions, hand_strength, round_state)
-        
-        # Registra ação
-        if hasattr(self, 'uuid') and self.uuid:
-            street = round_state.get('street', 'preflop')
-            self.memory_manager.record_my_action(
-                street, action, amount, hand_strength, round_state, should_bluff
-            )
-        
-        return action, amount
-    
-    def _should_bluff(self):
-        """Decide se deve blefar baseado na probabilidade configurada."""
-        return random.random() < self.bluff_probability
-    
-    def _bluff_action(self, valid_actions, round_state):
-        """Executa blefe: escolhe CALL ou RAISE baseado no contexto da mesa."""
-        context = self._analyze_table_context(round_state)
-        
-        # Blefe mais sutil em pot pequeno
-        if context['pot_size'] < 50:
-            # Pot pequeno: mais chance de RAISE
-            bluff_choice = random.random() < 0.40  # 40% RAISE, 60% CALL
-        else:
-            # Pot grande: mais chance de CALL (blefe mais conservador)
-            bluff_choice = random.random() < 0.20  # 20% RAISE, 80% CALL
-        
-        if bluff_choice and valid_actions[2]['amount']['min'] != -1:
-            # Faz RAISE
-            raise_action = valid_actions[2]
-            min_amount = raise_action['amount']['min']
-            max_amount = raise_action['amount']['max']
-            amount = random.randint(min_amount, min(max_amount, min_amount + 20))
-            return raise_action['action'], amount
-        else:
-            # Faz CALL
-            call_action = valid_actions[1]
-            return call_action['action'], call_action['amount']
-    
-    def _analyze_table_context(self, round_state):
-        """Analisa o contexto da mesa."""
-        pot_size = round_state['pot']['main']['amount']
-        active_players = len([s for s in round_state['seats'] if s['state'] == 'participating'])
-        street = round_state['street']
-        
-        return {
-            'pot_size': pot_size,
-            'active_players': active_players,
-            'street': street
-        }
-    
-    def _evaluate_hand_strength(self, hole_card, round_state=None):
-        """Avalia a força das cartas usando utilitário compartilhado."""
-        community_cards = round_state.get('community_card', []) if round_state else None
-        return evaluate_hand_strength(hole_card, community_cards)
-    
-    def _normal_action(self, valid_actions, hand_strength, round_state):
-        """Ação normal baseada na força das cartas (ajustada pelo aprendizado)."""
-        # Ajusta threshold baseado no aprendizado conservador
-        adjusted_threshold = self.tightness_threshold
-        
-        # Mão muito forte: tenta fazer raise
-        if hand_strength >= HAND_STRENGTH_STRONG:
-            raise_action = valid_actions[2]
-            if raise_action['amount']['min'] != -1:
-                return raise_action['action'], raise_action['amount']['min']
-        
-        # Mão forte: faz call (threshold ajustado pelo aprendizado)
-        if hand_strength >= adjusted_threshold:
-            call_action = valid_actions[1]
-            return call_action['action'], call_action['amount']
-        
-        # Mão fraca: faz fold
-        fold_action = valid_actions[0]
-        return fold_action['action'], fold_action['amount']
-    
-    def receive_game_start_message(self, game_info):
-        """Inicializa stack inicial."""
-        seats = game_info.get('seats', [])
-        if isinstance(seats, list):
-            for player in seats:
-                if player.get('uuid') == self.uuid:
-                    self.initial_stack = player.get('stack', 100)
-                    if not hasattr(self.memory_manager, 'initial_stack'):
-                        self.memory_manager.initial_stack = self.initial_stack
-                    break
-    
-    def receive_round_start_message(self, round_count, hole_card, seats):
-        """Salva memória periodicamente e armazena cartas no registry."""
-        if round_count % 5 == 0:
-            self.memory_manager.save()
-        # Armazena cartas no registry global para exibição no final do round
-        if hole_card and hasattr(self, 'uuid') and self.uuid:
-            from utils.cards_registry import store_player_cards
-            from utils.hand_utils import normalize_hole_cards
-            hole_cards = normalize_hole_cards(hole_card)
-            if hole_cards:
-                store_player_cards(self.uuid, hole_cards)
-    
-    def receive_street_start_message(self, street, round_state):
-        pass
-    
-    def receive_game_update_message(self, action, round_state):
-        """Registra ações dos oponentes."""
-        player_uuid = action.get('uuid') or action.get('player_uuid')
-        if player_uuid and player_uuid != self.uuid:
-            self.memory_manager.record_opponent_action(player_uuid, action, round_state)
-    
-    def receive_round_result_message(self, winners, hand_info, round_state):
-        """Aprendizado conservador: ajusta apenas quando perde muito."""
-        # Processa resultado usando gerenciador de memória
-        if hasattr(self, 'uuid') and self.uuid:
-            self.memory_manager.process_round_result(winners, hand_info, round_state, self.uuid)
-        
-        # Atualiza valores locais
-        self.memory = self.memory_manager.get_memory()
-        self.total_rounds = self.memory['total_rounds']
-        self.wins = self.memory['wins']
-        
-        # Verifica se ganhou
-        won = any(
-            (w.get('uuid') if isinstance(w, dict) else getattr(w, 'uuid', None)) == self.uuid
-            for w in winners
-        )
-        
-        if won:
-            self.consecutive_losses = 0
-        else:
-            self.consecutive_losses += 1
-        
-        # Aprendizado conservador: só ajusta quando win rate < 30% OU 3+ perdas seguidas
-        round_history = self.memory.get('round_history', [])
-        if len(round_history) >= 5:
-            recent_rounds = round_history[-10:] if len(round_history) >= 10 else round_history
-            win_rate = sum(1 for r in recent_rounds if r['final_result']['won']) / len(recent_rounds)
-            
-            # Aumenta seletividade quando win rate < 30% (evolução lenta)
-            if win_rate < 0.30:
-                self.memory['tightness_threshold'] = min(35, self.memory['tightness_threshold'] + 1)
-            
-            # Reduz blefe quando perde 3+ rodadas seguidas (evolução muito lenta)
-            if self.consecutive_losses >= 3:
-                self.memory['bluff_probability'] = max(0.10, self.memory['bluff_probability'] * 0.999)
-        
-        # Atualiza valores locais
-        self.bluff_probability = self.memory['bluff_probability']
-        self.tightness_threshold = self.memory['tightness_threshold']
-        
-        # Salva memória após ajustes
-        self.memory_manager.save()
-
+        config = _create_config(memory_file)
+        super().__init__(config)

@@ -2,6 +2,17 @@
 
 Esta documentação explica em detalhes como os bots funcionam, suas estruturas, estratégias e como o sistema de memória persistente opera.
 
+## ⚠️ Arquitetura Refatorada
+
+**IMPORTANTE:** Os bots foram refatorados para usar uma arquitetura baseada em configuração que elimina ~85% de código duplicado.
+
+- **Nova arquitetura:** Todos os bots herdam de `PokerBotBase` e usam `BotConfig` para configuração
+- **Lógica compartilhada:** Toda a lógica está em `PokerBotBase`, bots concretos são apenas configuração (~15 linhas)
+- **Documentação da arquitetura:** Veja `docs/ARQUITETURA_BOTS.md` para detalhes completos
+- **Como criar novo bot:** Veja `docs/COMO_CRIAR_NOVO_BOT.md` (agora muito mais simples!)
+
+**Esta documentação explica o funcionamento interno e as funcionalidades disponíveis. Para criar novos bots, veja a documentação de arquitetura.**
+
 ## Índice
 
 1. [Estrutura Base dos Bots](#estrutura-base-dos-bots)
@@ -9,110 +20,117 @@ Esta documentação explica em detalhes como os bots funcionam, suas estruturas,
 3. [Tipos de Bots e Estratégias](#tipos-de-bots-e-estratégias)
 4. [Ciclo de Vida de um Bot](#ciclo-de-vida-de-um-bot)
 5. [Sistema de Aprendizado](#sistema-de-aprendizado)
-6. [Componentes Compartilhados](#componentes-compartilhados)
+6. [Reação em Tempo Real às Ações dos Oponentes](#reação-em-tempo-real-às-ações-dos-oponentes)
+7. [Análise de Blefe em Tempo Real](#análise-de-blefe-em-tempo-real)
+8. [Componentes Compartilhados](#componentes-compartilhados)
 
 ---
 
 ## Estrutura Base dos Bots
 
-### Herança de BasePokerPlayer
+### Arquitetura Refatorada
 
-Todos os bots herdam da classe `BasePokerPlayer` do PyPokerEngine. Esta classe base fornece a interface necessária para interagir com o motor do jogo.
+Todos os bots agora usam uma **arquitetura baseada em configuração** que elimina duplicação de código. A estrutura é:
 
-```python
-from pypokerengine.players import BasePokerPlayer
-
-class MeuBot(BasePokerPlayer):
-    # Implementação do bot
+```
+BasePokerPlayer (PyPokerEngine)
+    └── PokerBotBase (players/base/poker_bot_base.py)
+            ├── AggressivePlayer
+            ├── BalancedPlayer
+            ├── CautiousPlayer
+            └── ... (18 bots mais)
 ```
 
-### Métodos Obrigatórios
+### Componentes Principais
 
-O `BasePokerPlayer` requer que você implemente os seguintes métodos:
+#### 1. PokerBotBase
+
+Classe base que contém **TODA a lógica compartilhada**. Todos os bots herdam desta classe.
+
+```python
+from players.base.poker_bot_base import PokerBotBase
+from players.base.bot_config import BotConfig
+
+def _create_config(memory_file: str = "meu_bot_memory.json") -> BotConfig:
+    """Cria configuração para meu bot"""
+    return BotConfig(
+        name="MeuBot",
+        memory_file=memory_file,
+        default_bluff=0.16,
+        # ... todos os parâmetros
+    )
+
+class MeuBot(PokerBotBase):
+    def __init__(self, memory_file="meu_bot_memory.json"):
+        config = _create_config(memory_file)
+        super().__init__(config)
+```
+
+#### 2. BotConfig
+
+Dataclass que contém toda a configuração de um bot (sem lógica).
+
+#### 3. Função `_create_config()`
+
+Cada bot tem sua própria função `_create_config()` que retorna um `BotConfig` pré-configurado.
+
+**Nota:** Para mais detalhes sobre a arquitetura, veja `docs/ARQUITETURA_BOTS.md`.
+
+### Métodos Implementados Automaticamente
+
+O `PokerBotBase` já implementa **TODOS** os métodos obrigatórios do `BasePokerPlayer`. Você não precisa implementá-los!
 
 #### 1. `declare_action(valid_actions, hole_card, round_state)`
 
-**Quando é chamado:** A cada vez que é a vez do bot jogar.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Decidir qual ação tomar (FOLD, CALL ou RAISE) e retornar essa decisão.
+**O que faz automaticamente:**
+- Analisa ações do round atual
+- Avalia força da mão
+- Analisa possível blefe dos oponentes
+- Decide se deve blefar (baseado em `config.bluff_probability`)
+- Escolhe ação (fold/call/raise) baseado em configuração
+- Registra ação na memória
 
-**Parâmetros:**
-- `valid_actions`: Lista de ações válidas `[fold_info, call_info, raise_info]`
-- `hole_card`: Lista de 2 cartas do bot (ex: `['SA', 'HK']`)
-- `round_state`: Estado completo do round atual
-
-**Retorno:** Tupla `(action, amount)` onde:
-- `action`: String `'fold'`, `'call'` ou `'raise'`
-- `amount`: Valor inteiro (para raise) ou valor do call
-
-**Exemplo:**
-```python
-def declare_action(self, valid_actions, hole_card, round_state):
-    # Avalia força da mão
-    hand_strength = self._evaluate_hand_strength(hole_card, round_state)
-    
-    # Decide ação baseada na estratégia
-    if hand_strength >= 50:
-        raise_action = valid_actions[2]
-        return raise_action['action'], raise_action['amount']['min']
-    elif hand_strength >= 25:
-        call_action = valid_actions[1]
-        return call_action['action'], call_action['amount']
-    else:
-        fold_action = valid_actions[0]
-        return fold_action['action'], fold_action['amount']
-```
+**Você não precisa implementar isso!** Apenas configure os parâmetros no preset.
 
 #### 2. `receive_game_start_message(game_info)`
 
-**Quando é chamado:** Uma vez, no início do jogo.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Inicializar variáveis globais do jogo (como stack inicial).
-
-**Parâmetros:**
-- `game_info`: Informações sobre o jogo (players, configurações, etc.)
+**O que faz:** Inicializa stack inicial automaticamente.
 
 #### 3. `receive_round_start_message(round_count, hole_card, seats)`
 
-**Quando é chamado:** No início de cada round.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Preparar para um novo round, salvar memória periodicamente.
-
-**Parâmetros:**
-- `round_count`: Número do round atual
-- `hole_card`: Cartas do bot para este round
-- `seats`: Informações sobre todos os jogadores
+**O que faz:**
+- Salva memória periodicamente (a cada 5 rounds)
+- Armazena cartas no registry para exibição
 
 #### 4. `receive_street_start_message(street, round_state)`
 
-**Quando é chamado:** Quando uma nova street começa (flop, turn, river).
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Atualizar estado interno baseado na nova street.
-
-**Parâmetros:**
-- `street`: String `'preflop'`, `'flop'`, `'turn'` ou `'river'`
-- `round_state`: Estado atual do round
+**O que faz:** Hook vazio (pode ser sobrescrito se necessário).
 
 #### 5. `receive_game_update_message(action, round_state)`
 
-**Quando é chamado:** Após cada ação de qualquer jogador.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Analisar ações dos oponentes, aprender padrões.
-
-**Parâmetros:**
-- `action`: Informações sobre a ação tomada (quem, o quê, quanto)
-- `round_state`: Estado atualizado do round
+**O que faz:** Registra ações dos oponentes na memória automaticamente.
 
 #### 6. `receive_round_result_message(winners, hand_info, round_state)`
 
-**Quando é chamado:** No final de cada round, após determinar o vencedor.
+**Implementado por:** `PokerBotBase`
 
-**Responsabilidade:** Aprender com o resultado, ajustar estratégia, salvar memória.
+**O que faz:**
+- Processa resultado do round
+- Atualiza estatísticas
+- Executa aprendizado baseado em configuração
+- Salva memória
 
-**Parâmetros:**
-- `winners`: Lista de jogadores que ganharam o round
-- `hand_info`: Informações sobre as mãos dos jogadores
-- `round_state`: Estado final do round
+**Nota:** Se precisar de aprendizado customizado, você pode sobrescrever este método, mas geralmente o aprendizado padrão é suficiente.
 
 ---
 
@@ -165,6 +183,9 @@ Todos os bots usam a mesma estrutura JSON:
       "first_seen_round": 1,
       "last_seen_round": 10,
       "total_rounds_against": 10,
+      "bluff_probability": 0.15,
+      "aggression_level": 0.52,
+      "tightness_threshold": 28,
       "rounds_against": [
         {
           "round": 1,
@@ -212,44 +233,53 @@ Todos os bots usam a mesma estrutura JSON:
 
 ### Diferenças entre Bots
 
-Todos os bots usam a mesma estrutura, mas com valores iniciais diferentes:
+Todos os bots usam a mesma estrutura e lógica (via `PokerBotBase`), mas com **valores de configuração diferentes** definidos em `BotPresets`:
 
 | Bot | bluff_probability | aggression_level | tightness_threshold |
 |-----|-------------------|------------------|---------------------|
-| TightPlayer | 0.15 | 0.50 | 30 |
-| AggressivePlayer | 0.20 | 0.60 | 25 |
-| SmartPlayer | 0.17 | 0.55 | 27 |
-| LearningPlayer | 0.18 | 0.55 | 28 |
-| RandomPlayer | 0.17 | 0.55 | 27 |
+| TightPlayer | 0.15 | 0.54 | 29 |
+| AggressivePlayer | 0.18 | 0.58 | 26 |
+| SmartPlayer | 0.16 | 0.56 | 27 |
+| LearningPlayer | 0.17 | 0.55 | 28 |
+| BalancedPlayer | 0.16 | 0.57 | 28 |
+| CautiousPlayer | 0.12 | 0.48 | 29 |
 
-A diferença está na **evolução/aprendizado**: cada bot ajusta esses parâmetros de forma diferente baseado em seus resultados.
+**A diferença está em:**
+1. **Valores iniciais** (definidos em `BotPresets`)
+2. **Parâmetros de comportamento** (thresholds, multiplicadores, etc.)
+3. **Evolução/aprendizado**: cada bot ajusta esses parâmetros de forma diferente baseado em seus resultados
+
+**Importante:** A lógica de decisão é **idêntica** para todos os bots (está em `PokerBotBase`). A personalidade vem apenas da configuração.
 
 ### Carregamento de Memória
 
-A memória é carregada no `__init__()` do bot usando `UnifiedMemoryManager`:
+A memória é carregada automaticamente pelo `PokerBotBase` no `__init__()` usando `UnifiedMemoryManager`:
 
 ```python
-from .memory_manager import UnifiedMemoryManager
+# Em PokerBotBase.__init__()
+self.memory_manager = UnifiedMemoryManager(
+    config.memory_file,
+    config.default_bluff,
+    config.default_aggression,
+    config.default_tightness
+)
+self.memory = self.memory_manager.get_memory()
+```
 
-def __init__(self, memory_file="meu_bot_memory.json"):
-    # Inicializa gerenciador de memória unificada
-    self.memory_manager = UnifiedMemoryManager(
-        memory_file,
-        default_bluff=0.17,
-        default_aggression=0.55,
-        default_tightness=27
-    )
-    self.memory = self.memory_manager.get_memory()
-    
-    # Atualiza valores locais
-    self.bluff_probability = self.memory['bluff_probability']
-    self.aggression_level = self.memory['aggression_level']
-    self.tightness_threshold = self.memory['tightness_threshold']
+**Para bots concretos:** A configuração é feita através de `BotPresets`, que define os valores padrão:
+
+```python
+# Exemplo: AggressivePlayer
+class AggressivePlayer(PokerBotBase):
+    def __init__(self, memory_file="aggressive_player_memory.json"):
+        config = BotPresets.aggressive()  # Define default_bluff=0.18, etc.
+        config.memory_file = memory_file
+        super().__init__(config)  # PokerBotBase carrega memória automaticamente
 ```
 
 O `UnifiedMemoryManager`:
 1. Carrega memória anterior se existir
-2. Se não existir, cria estrutura padrão
+2. Se não existir, cria estrutura padrão usando valores do `BotConfig`
 3. Falha silenciosamente (não quebra o jogo)
 
 ### Salvamento de Memória
@@ -279,6 +309,49 @@ O método `save()` do `UnifiedMemoryManager`:
 1. Serializa a estrutura de memória completa
 2. Escreve no arquivo de memória
 3. Falha silenciosamente em caso de erro (não quebra o jogo)
+
+### Reação em Tempo Real
+
+**NOVO:** Durante `declare_action()`, os bots também:
+
+1. **Analisam ações do round atual** antes de decidir:
+```python
+def declare_action(self, valid_actions, hole_card, round_state):
+    # Analisa ações que já aconteceram nesta street
+    current_actions = analyze_current_round_actions(round_state, self.uuid)
+    
+    # Ajusta comportamento baseado nas ações observadas
+    if current_actions['has_raises']:
+        # Fica mais conservador
+        adjusted_threshold = self.tightness_threshold + 5 + (current_actions['raise_count'] * 2)
+        # Evita blefe se muita agressão
+        if current_actions['raise_count'] >= 2:
+            should_bluff = False
+```
+
+Isso permite que os bots **reajam imediatamente** às ações dos oponentes, não apenas aprendam após o round.
+
+### Sistema de Identificação de Oponentes (UUIDs Fixos)
+
+**IMPORTANTE:** O sistema usa UUIDs determinísticos baseados na classe do bot para garantir rastreamento consistente.
+
+**Como Funciona:**
+- Cada tipo de bot tem um UUID fixo baseado em sua classe (não no nome)
+- O mesmo tipo de bot sempre tem o mesmo UUID, independente do nome ou da partida
+- Isso garante que os bots reconheçam corretamente os mesmos oponentes entre partidas
+- Todos os 21 bots conhecidos são pré-registrados na memória desde o início
+
+**Vantagens:**
+- Rastreamento consistente: um bot sempre reconhece o mesmo oponente
+- Memória não cresce infinitamente: máximo de 20 oponentes por bot (21 bots totais - 1 próprio)
+- Aprendizado acumulado: parâmetros específicos por oponente são mantidos entre partidas
+
+**Exemplo:**
+```python
+# TightPlayer sempre tem o mesmo UUID (baseado em sua classe)
+# Mesmo que seja chamado de "Tight", "Blaze" ou qualquer outro nome
+# Todos os outros bots reconhecem TightPlayer pelo mesmo UUID fixo
+```
 
 ### Registro de Ações e Oponentes
 
@@ -319,6 +392,7 @@ def receive_round_result_message(self, winners, hand_info, round_state):
 
 Para cada oponente, o bot registra:
 - **Nome** do oponente
+- **Parâmetros específicos** (`bluff_probability`, `aggression_level`, `tightness_threshold`) - aprendidos especificamente para este oponente
 - **Ações observadas** durante cada round
 - **Cartas** (quando o oponente chega ao showdown)
 - **Força da mão** calculada a partir das cartas
@@ -326,6 +400,33 @@ Para cada oponente, o bot registra:
 - **Análise simples** (ex: "blefe_sucesso" se tinha mão ruim mas ganhou)
 
 Isso permite que o bot aprenda padrões observados sem inferir valores abstratos.
+
+**Nota:** O histórico de oponentes é usado para aprendizado de longo prazo. Para reação em tempo real, os bots usam `analyze_current_round_actions()` que analisa apenas as ações do round atual.
+
+### Parâmetros Específicos por Oponente
+
+**NOVO:** Cada bot mantém parâmetros de estratégia específicos para cada oponente que já enfrentou:
+
+- **`bluff_probability`**: Probabilidade de blefe contra este oponente específico
+- **`aggression_level`**: Nível de agressão contra este oponente específico
+- **`tightness_threshold`**: Threshold de seletividade contra este oponente específico
+
+**Inicialização:**
+- Quando um oponente é registrado pela primeira vez, seus parâmetros específicos são inicializados com os valores globais do bot
+- Conforme o bot joga mais rounds contra o oponente, os parâmetros evoluem independentemente
+
+**Uso na Decisão:**
+- Durante `declare_action()`, o bot identifica o oponente principal no round
+- Usa os parâmetros específicos desse oponente para tomar decisões (com fallback para parâmetros globais se não houver parâmetros específicos)
+- Isso permite que o bot adapte sua estratégia para cada oponente individualmente
+
+**Exemplo:**
+```python
+# Bot pode ter estratégia diferente contra cada oponente
+# Parâmetros globais: bluff=0.17, aggression=0.55, tightness=27
+# Contra TightPlayer: bluff=0.15, aggression=0.52, tightness=28 (mais conservador)
+# Contra AggressivePlayer: bluff=0.20, aggression=0.60, tightness=25 (mais agressivo)
+```
 
 ---
 
@@ -613,24 +714,24 @@ O histórico de oponentes contém ações observadas e cartas (quando disponíve
 
 ### 1. Inicialização (`__init__`)
 
+**Com a nova arquitetura:**
+
 ```python
-def __init__(self, memory_file="bot_memory.json"):
-    # 1. Define arquivo de memória
-    self.memory_file = get_memory_path(memory_file)
-    
-    # 2. Inicializa valores padrão
-    self.bluff_probability = 0.15
-    self.total_rounds = 0
-    self.wins = 0
-    
-    # 3. Carrega memória anterior
-    self.load_memory()
+# Em seu bot (ex: AggressivePlayer)
+def __init__(self, memory_file="aggressive_player_memory.json"):
+    config = BotPresets.aggressive()  # Obtém configuração
+    config.memory_file = memory_file
+    super().__init__(config)  # PokerBotBase faz todo o resto
 ```
 
-**Ordem de execução:**
-1. Define caminho do arquivo de memória
-2. Inicializa todos os atributos com valores padrão
-3. Carrega memória anterior (se existir) e sobrescreve valores padrão
+**O que o `PokerBotBase.__init__()` faz automaticamente:**
+1. Armazena configuração em `self.config`
+2. Inicializa `UnifiedMemoryManager` com valores do config
+3. Carrega memória anterior (se existir) ou cria nova
+4. Carrega parâmetros da memória (`bluff_probability`, `aggression_level`, etc.)
+5. Inicializa estado interno (`initial_stack`, `current_stack`)
+
+**Você não precisa fazer nada disso!** Apenas chame `super().__init__(config)`.
 
 ### 2. Início do Jogo (`receive_game_start_message`)
 
@@ -675,89 +776,55 @@ def receive_round_start_message(self, round_count, hole_card, seats):
 
 #### 4.1. Declaração de Ação (`declare_action`)
 
-```python
-def declare_action(self, valid_actions, hole_card, round_state):
-    # 1. Avalia situação atual
-    hand_strength = self._evaluate_hand_strength(hole_card, round_state)
-    
-    # 2. Decide se deve blefar
-    should_bluff = self._should_bluff()
-    
-    # 3. Executa ação
-    if should_bluff:
-        return self._bluff_action(valid_actions, round_state)
-    else:
-        return self._normal_action(valid_actions, hand_strength, round_state)
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** Toda vez que é a vez do bot jogar.
+**Fluxo automático:**
+1. Identifica oponentes
+2. Identifica oponente principal no round (para usar parâmetros específicos)
+3. Analisa ações do round atual (`analyze_current_round_actions`)
+4. Avalia força da mão (`evaluate_hand_strength`)
+5. Analisa possível blefe dos oponentes (`analyze_possible_bluff`)
+6. Carrega parâmetros atualizados da memória (específicos do oponente principal ou globais)
+7. Decide se deve blefar (baseado em parâmetros específicos ou globais)
+8. Escolhe ação (blefe ou normal) baseado em configuração e parâmetros específicos
+9. Registra ação na memória
+10. Retorna ação e valor
 
-**Fluxo típico:**
-1. Atualiza informações internas (stack, contexto)
-2. Avalia força da mão
-3. Decide estratégia (blefe ou jogo normal)
-4. Retorna ação e valor
+**Você não precisa implementar isso!** Tudo é automático baseado na configuração.
 
 #### 4.2. Atualização de Estado (`receive_game_update_message`)
 
-```python
-def receive_game_update_message(self, action, round_state):
-    # Analisa ações dos oponentes
-    player_uuid = action.get('uuid')
-    if player_uuid != self.uuid:
-        # Registra ação do oponente
-        # Atualiza padrões do oponente
-        pass
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** Após cada ação de qualquer jogador.
+**O que faz automaticamente:**
+- Registra ações dos oponentes na memória
+- Atualiza histórico de oponentes
 
-**Responsabilidade:** Aprender padrões dos oponentes em tempo real.
+**Você não precisa implementar isso!**
 
 #### 4.3. Mudança de Street (`receive_street_start_message`)
 
-```python
-def receive_street_start_message(self, street, round_state):
-    # Atualiza street atual
-    self.current_street = street
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** Quando uma nova street começa (flop, turn, river).
-
-**Responsabilidade:** Atualizar estado interno para nova fase do round.
+**O que faz:** Hook vazio (pode ser sobrescrito se necessário).
 
 ### 5. Fim de Round (`receive_round_result_message`)
 
-```python
-def receive_round_result_message(self, winners, hand_info, round_state):
-    # 1. Atualiza estatísticas
-    self.total_rounds += 1
-    won = any(w['uuid'] == self.uuid for w in winners)
-    if won:
-        self.wins += 1
-    
-    # 2. Registra resultado no histórico
-    self.round_results.append({
-        'won': won,
-        'round': self.total_rounds,
-        'stack': self.current_stack
-    })
-    
-    # 3. Aprende e ajusta estratégia
-    if len(self.round_results) >= 5:
-        self._adapt_strategy()
-    
-    # 4. Salva memória
-    self.save_memory()
-```
+**Implementado por:** `PokerBotBase`
 
-**Quando:** No final de cada round, após determinar o vencedor.
+**O que faz automaticamente:**
+1. Processa resultado usando `memory_manager.process_round_result()`
+   - Registra round contra cada oponente
+   - **Aprende parâmetros específicos para cada oponente** (após 5+ rounds)
+2. Atualiza stack atual
+3. Atualiza estatísticas (`total_rounds`, `wins`)
+4. Executa aprendizado global baseado em configuração:
+   - Ajusta agressão/blefe quando win rate > `win_rate_threshold_high`
+   - Reduz agressão/aumenta threshold quando win rate < `win_rate_threshold_low`
+   - Velocidade controlada por `learning_speed`
+5. Salva memória atualizada (incluindo parâmetros específicos por oponente)
 
-**Responsabilidade:**
-1. Atualizar estatísticas (rodadas, vitórias, stack)
-2. Registrar resultado no histórico
-3. Executar lógica de aprendizado
-4. Salvar memória atualizada
+**Você não precisa implementar isso!** O aprendizado padrão é suficiente para a maioria dos casos.
 
 ---
 
@@ -847,6 +914,74 @@ if avg_opponent_aggression > 0.7:
     base_probability *= 0.7  # Reduz blefe contra oponentes agressivos
 ```
 
+#### 5. Aprendizado por Oponente Específico (Todos os Bots)
+
+**NOVO:** Todos os bots agora aprendem parâmetros específicos para cada oponente individualmente.
+
+**Características:**
+- Cada bot mantém parâmetros de estratégia (`bluff_probability`, `aggression_level`, `tightness_threshold`) específicos para cada oponente
+- Parâmetros evoluem independentemente baseado na performance contra cada oponente
+- Aprendizado ativo após 5+ rounds contra um oponente
+- Decisões usam parâmetros específicos do oponente principal no round
+
+**Como Funciona:**
+
+1. **Inicialização:**
+   - Quando um oponente é registrado pela primeira vez, seus parâmetros específicos são inicializados com os valores globais do bot
+   - Todos os 21 bots conhecidos são pré-registrados na memória (mesmo que ainda não tenham jogado juntos)
+
+2. **Aprendizado:**
+   ```python
+   # Após cada round, o bot aprende com o resultado contra cada oponente
+   def learn_from_opponent_result(memory, opp_uuid, i_won, opp_won):
+       # Calcula taxa de vitória contra este oponente (últimos 10 rounds)
+       recent_rounds = opp['rounds_against'][-10:]
+       win_rate = wins_against / len(recent_rounds)
+       
+       # Se está ganhando bem (>60%): aumenta agressão e blefe
+       if win_rate > 0.6:
+           opp['aggression_level'] *= 1.01  # +1%
+           opp['bluff_probability'] *= 1.01
+       
+       # Se está perdendo (<40%): reduz agressão, aumenta seletividade
+       elif win_rate < 0.4:
+           opp['tightness_threshold'] += 1
+           opp['aggression_level'] /= 1.01  # -1%
+           opp['bluff_probability'] /= 1.01
+   ```
+
+3. **Uso na Decisão:**
+   ```python
+   def declare_action(self, valid_actions, hole_card, round_state):
+       # Identifica oponente principal no round
+       primary_opponent_uuid = self._get_primary_opponent_uuid(round_state)
+       
+       # Carrega parâmetros específicos deste oponente (ou globais se não houver)
+       self._load_parameters_from_memory(primary_opponent_uuid)
+       
+       # Usa parâmetros específicos para tomar decisão
+       # ...
+   ```
+
+**Vantagens:**
+- Bots adaptam estratégia para cada oponente individualmente
+- Aprendizado mais preciso e contextualizado
+- Estratégias diferentes para oponentes diferentes (ex: mais conservador contra Tight, mais agressivo contra Aggressive)
+
+**Exemplo Prático:**
+```python
+# Bot LearningPlayer tem:
+# Parâmetros globais: bluff=0.17, aggression=0.55, tightness=27
+
+# Após jogar 20 rounds contra TightPlayer:
+# Parâmetros vs Tight: bluff=0.15, aggression=0.52, tightness=28
+# (aprendeu que precisa ser mais conservador contra Tight)
+
+# Após jogar 15 rounds contra AggressivePlayer:
+# Parâmetros vs Aggressive: bluff=0.20, aggression=0.60, tightness=25
+# (aprendeu que pode ser mais agressivo contra Aggressive)
+```
+
 ### Algoritmos de Aprendizado
 
 #### Epsilon-Greedy (AdaptivePlayer)
@@ -885,6 +1020,477 @@ for action in self.action_probabilities:
 
 ---
 
+## Reação em Tempo Real às Ações dos Oponentes
+
+### Visão Geral
+
+Todos os bots agora **reagem em tempo real** às ações dos oponentes no mesmo round antes de tomar sua decisão. Isso torna o jogo mais dinâmico e realista, pois os bots ajustam seu comportamento baseado no que está acontecendo na mesa.
+
+### Como Funciona
+
+#### 1. Análise de Ações do Round Atual
+
+Antes de decidir sua ação, cada bot analisa as ações que já aconteceram na street atual usando a função `analyze_current_round_actions()`:
+
+```python
+from utils.action_analyzer import analyze_current_round_actions
+
+def declare_action(self, valid_actions, hole_card, round_state):
+    # Analisa ações do round atual
+    current_actions = analyze_current_round_actions(round_state, self.uuid)
+    
+    # current_actions contém:
+    # - has_raises: bool (se alguém fez raise)
+    # - raise_count: int (quantos raises)
+    # - call_count: int (quantos calls)
+    # - last_action: str ('raise', 'call', 'fold' ou None)
+    # - total_aggression: float (0.0 a 1.0)
+    # - is_passive: bool (se campo está passivo - muitos calls, nenhum raise)
+    # - passive_opportunity_score: float (0.0 a 1.0, oportunidade de agressão)
+```
+
+#### 2. Ajuste de Comportamento
+
+Baseado nas ações observadas, os bots ajustam:
+
+**Quando detectam raises:**
+- **Aumentam threshold de seletividade** (ficam mais conservadores)
+- **Reduzem ou evitam blefe** (especialmente com 2+ raises)
+- **Ajustam agressão** (reduzem quando há muita agressão na mesa)
+
+**Exemplo de ajuste:**
+```python
+# TightPlayer: muito conservador quando há raises
+if current_actions['has_raises']:
+    adjusted_threshold = self.tightness_threshold + 8 + (current_actions['raise_count'] * 3)
+    if current_actions['raise_count'] >= 2:
+        should_bluff = False  # Não blefa com 2+ raises
+
+# AggressivePlayer: ainda agressivo, mas um pouco mais seletivo
+if current_actions['has_raises']:
+    adjusted_threshold = 20 + 3 + (current_actions['raise_count'] * 2)
+    # Reduz agressão em 10% se muitos raises
+    if current_actions['raise_count'] >= 2:
+        adjusted_aggression = self.aggression_level * 0.9
+```
+
+#### 3. Análise por Street
+
+A análise funciona em todas as streets (preflop, flop, turn, river):
+- Cada street é analisada **independentemente**
+- Ações de streets anteriores não afetam a análise da street atual
+- O bot reage apenas às ações que aconteceram na street atual
+
+### Comportamento por Tipo de Bot
+
+#### Bots Conservadores (TightPlayer, ConservativeAggressivePlayer, CautiousPlayer)
+- **Reação forte a raises**: Aumentam threshold significativamente (+8 a +17 pontos)
+- **Evitam blefe completamente** quando há 2+ raises
+- **Ficam ainda mais seletivos** em situações agressivas
+
+#### Bots Agressivos (AggressivePlayer, SteadyAggressivePlayer)
+- **Reação moderada**: Aumentam threshold, mas mantêm agressão
+- **Reduzem agressão em 10%** quando há 2+ raises
+- **Ainda tentam raise**, mas com mais seletividade
+
+#### Bots Inteligentes (SmartPlayer, LearningPlayer, AdaptivePlayer)
+- **Análise balanceada**: Ajustam threshold baseado em contexto
+- **Evitam blefe** quando há muita agressão (2+ raises)
+- **Ajustam estratégia** considerando múltiplos fatores
+
+#### Bots Balanceados (BalancedPlayer, ModeratePlayer)
+- **Reação equilibrada**: Ajustam threshold moderadamente (+5 a +9 pontos)
+- **Evitam blefe** com 2+ raises
+- **Mantêm estilo balanceado** mesmo com agressão
+
+### Exemplos Práticos
+
+#### Cenário 1: Sem Raises (Situação Normal)
+```
+Ações observadas: [CALL, CALL]
+- has_raises: False
+- raise_count: 0
+- Comportamento: Normal, sem ajustes
+```
+
+#### Cenário 2: 1 Raise (Situação Moderada)
+```
+Ações observadas: [RAISE]
+- has_raises: True
+- raise_count: 1
+- Comportamento: 
+  - TightPlayer: threshold +11 (35 → 46)
+  - AggressivePlayer: threshold +5 (20 → 25)
+  - SmartPlayer: threshold +7 (27 → 34)
+```
+
+#### Cenário 3: 2+ Raises (Situação Agressiva)
+```
+Ações observadas: [RAISE, RAISE]
+- has_raises: True
+- raise_count: 2
+- Comportamento:
+  - Todos os bots: threshold aumenta significativamente
+  - Blefe DESABILITADO (should_bluff = False)
+  - Muito mais seletivos
+```
+
+### Implementação Técnica
+
+#### Módulo: `utils/action_analyzer.py`
+
+Função principal:
+```python
+def analyze_current_round_actions(round_state, my_uuid):
+    """
+    Analisa ações do round atual antes da decisão do bot.
+    
+    Args:
+        round_state: Estado atual do round (do PyPokerEngine)
+        my_uuid: UUID do bot que está analisando
+    
+    Returns:
+        dict com informações sobre ações dos oponentes
+    """
+```
+
+#### Integração nos Bots
+
+Todos os bots seguem este padrão:
+```python
+def declare_action(self, valid_actions, hole_card, round_state):
+    # 1. Analisa ações do round atual
+    current_actions = analyze_current_round_actions(round_state, self.uuid)
+    
+    # 2. Ajusta comportamento baseado nas ações
+    if current_actions['has_raises']:
+        adjusted_threshold = self.tightness_threshold + 5 + (current_actions['raise_count'] * 2)
+        if current_actions['raise_count'] >= 2:
+            should_bluff = False
+    
+    # 3. Usa threshold ajustado na decisão
+    # ...
+```
+
+### Diferença do Sistema Anterior
+
+**Antes:**
+- Bots decidiam apenas baseado em:
+  - Força da mão
+  - Parâmetros aprendidos (blefe, agressão, threshold)
+  - Contexto geral (pot size, número de jogadores)
+  - Histórico de rounds anteriores
+
+**Agora:**
+- Bots também consideram:
+  - **Ações que aconteceram no round atual**
+  - **Quantidade de raises observados**
+  - **Última ação dos oponentes**
+  - **Nível de agressão na mesa**
+
+### Vantagens
+
+1. **Jogo mais dinâmico**: Bots reagem ao que está acontecendo agora
+2. **Mais realista**: Comportamento similar a jogadores humanos
+3. **Adaptação imediata**: Não precisa esperar fim do round para ajustar
+4. **Reação a todos os oponentes**: Analisa ações de bots e jogador humano igualmente
+
+### Detecção de Campo Passivo
+
+**NOVO:** Os bots agora detectam quando o campo está passivo (muitos calls, nenhum raise) e aumentam sua agressão para aproveitar a oportunidade.
+
+#### O que é Campo Passivo?
+
+Campo passivo é detectado quando:
+- Há **muitos calls/checks** na street atual
+- **Nenhum raise** foi feito
+- Isso indica que os oponentes estão jogando de forma conservadora
+
+#### Como Funciona
+
+A função `analyze_current_round_actions()` agora retorna:
+- `is_passive`: `True` quando campo está passivo (raises == 0 e calls >= 2)
+- `passive_opportunity_score`: Score de 0.0 a 1.0 indicando a oportunidade de agressão
+  - Baseado no número de calls (mais calls = mais oportunidade)
+  - Aumentado se pot é pequeno (< 100)
+  - Aumentado em streets iniciais (preflop/flop)
+
+#### Reação dos Bots a Campo Passivo
+
+**Bots Agressivos** (AggressivePlayer, OpportunisticPlayer, SteadyAggressivePlayer):
+- **Reduzem threshold significativamente** (jogam mais mãos)
+- **Aumentam agressão temporariamente** (+20% a +30%)
+- **Fazem raise com mãos médias** (hand_strength >= 20-25) quando score > 0.4-0.5
+
+**Bots Moderados** (SmartPlayer, BalancedPlayer, ModeratePlayer):
+- **Reduzem threshold moderadamente** (jogam mais mãos)
+- **Aumentam agressão temporariamente** (+15% a +20%)
+- **Fazem raise com mãos médias-fortes** (hand_strength >= 30-35) quando score > 0.4-0.5
+
+**Bots Conservadores** (TightPlayer, CautiousPlayer, PatientPlayer):
+- **Reduzem threshold levemente** (jogam um pouco mais mãos)
+- **Fazem raise apenas com mãos fortes** (hand_strength >= 45-50) quando score > 0.6-0.7
+
+#### Exemplo de Implementação
+
+```python
+def _normal_action(self, valid_actions, hand_strength, round_state, 
+                   current_actions=None, bluff_analysis=None):
+    adjusted_threshold = self.tightness_threshold
+    
+    # Campo passivo reduz threshold e aumenta agressão
+    adjusted_aggression = self.aggression_level
+    if current_actions and current_actions.get('is_passive', False):
+        passive_score = current_actions.get('passive_opportunity_score', 0.0)
+        # Reduz threshold quando campo está passivo
+        adjusted_threshold = max(20, adjusted_threshold - int(passive_score * 5))
+        # Aumenta agressão temporariamente
+        adjusted_aggression = min(0.80, adjusted_aggression + (passive_score * 0.2))
+    
+    # Com campo passivo, até mãos médias podem fazer raise
+    if current_actions and current_actions.get('is_passive', False):
+        passive_score = current_actions.get('passive_opportunity_score', 0.0)
+        if hand_strength >= 25 and passive_score > 0.5:
+            raise_action = valid_actions[2]
+            if raise_action['amount']['min'] != -1:
+                return raise_action['action'], raise_action['amount']['min']
+    
+    # ... resto da lógica normal ...
+```
+
+#### Cenários Práticos
+
+**Cenário 1: Campo Passivo (apenas calls)**
+```
+Ações observadas: [CALL, CALL, CALL]
+- is_passive: True
+- passive_opportunity_score: ~0.8 (alto)
+- Comportamento:
+  - AggressivePlayer: threshold reduzido, faz raise com mão >= 20
+  - SmartPlayer: threshold reduzido, faz raise com mão >= 35
+  - TightPlayer: threshold reduzido levemente, faz raise com mão >= 45
+```
+
+**Cenário 2: Campo Agressivo (com raises)**
+```
+Ações observadas: [RAISE, CALL]
+- is_passive: False
+- passive_opportunity_score: 0.0
+- Comportamento: Normal, sem ajustes de campo passivo
+```
+
+### Limitações
+
+- Análise é **por street**: Não considera ações de streets anteriores no mesmo round
+- Análise é **simples**: Não considera valores dos raises, apenas a presença
+- Não diferencia **quem** fez raise: Trata todos os oponentes igualmente
+- Campo passivo é detectado apenas quando há **2+ calls e 0 raises**
+
+### Testes
+
+A funcionalidade é testada automaticamente:
+- `tests/test_action_reaction.py`: Testes básicos da função
+- `tests/test_action_reaction_integration.py`: Testes de integração com bots
+
+Para executar:
+```bash
+python3 tests/test_action_reaction.py
+python3 tests/test_action_reaction_integration.py
+```
+
+---
+
+## Análise de Blefe em Tempo Real
+
+### Visão Geral
+
+Todos os bots agora **analisam se os oponentes podem estar blefando** antes de tomar sua decisão. Isso permite que os bots paguem blefes quando têm mãos razoáveis, tornando o jogo mais estratégico e realista.
+
+### Como Funciona
+
+#### 1. Análise de Possível Blefe
+
+Antes de decidir sua ação, cada bot analisa se os oponentes podem estar blefando usando a função `analyze_possible_bluff()`:
+
+```python
+from utils.action_analyzer import analyze_possible_bluff
+
+def declare_action(self, valid_actions, hole_card, round_state):
+    hand_strength = self._evaluate_hand_strength(hole_card, round_state)
+    
+    # Analisa possível blefe dos oponentes
+    bluff_analysis = analyze_possible_bluff(
+        round_state, self.uuid, hand_strength, self.memory_manager
+    )
+    
+    # bluff_analysis contém:
+    # - possible_bluff_probability: float (0.0 a 1.0)
+    # - should_call_bluff: bool (se deve pagar possível blefe)
+    # - bluff_confidence: float (confiança na análise)
+    # - analysis_factors: dict (fatores que indicam blefe)
+```
+
+#### 2. Fatores que Indicam Possível Blefe
+
+A análise considera múltiplos fatores:
+
+**Múltiplos raises (2+):**
+- Alta probabilidade de blefe (+0.4)
+- Indica que oponente pode estar tentando intimidar
+
+**Alta agressão (>60% raises vs calls):**
+- Probabilidade moderada de blefe (+0.2)
+- Muitos raises em relação a calls
+
+**Street inicial (preflop/flop):**
+- Probabilidade baixa de blefe (+0.1)
+- Mais comum blefar em streets iniciais
+
+**Pot pequeno (<50):**
+- Probabilidade baixa de blefe (+0.1)
+- Mais fácil blefar em pots pequenos
+
+**Histórico de blefes do oponente:**
+- Se oponente tem histórico de blefes bem-sucedidos (+0.1)
+- Usa memória para identificar oponentes que blefam frequentemente
+
+#### 3. Decisão de Pagar Blefe
+
+A análise recomenda pagar blefe quando:
+
+```python
+# Com mão forte (≥40): sempre paga
+if hand_strength >= 40:
+    should_call = True
+
+# Com mão média (≥30) + alta probabilidade (>0.5): paga
+elif hand_strength >= 30 and bluff_prob > 0.5:
+    should_call = True
+
+# Com mão média-fraca (≥25) + muito alta probabilidade (>0.7): paga
+elif hand_strength >= 25 and bluff_prob > 0.7:
+    should_call = True
+```
+
+#### 4. Integração na Lógica do Bot
+
+A análise é usada na lógica de `_normal_action()`:
+
+```python
+def _normal_action(self, valid_actions, hand_strength, round_state, 
+                   current_actions=None, bluff_analysis=None):
+    # Se análise indica possível blefe e deve pagar, considera call
+    if bluff_analysis and bluff_analysis['should_call_bluff']:
+        if hand_strength >= threshold_personalizado:  # Threshold por personalidade
+            call_action = valid_actions[1]
+            return call_action['action'], call_action['amount']
+    
+    # ... resto da lógica normal ...
+```
+
+### Valores por Personalidade
+
+Cada bot tem um **threshold personalizado** para pagar blefe, refletindo sua personalidade:
+
+#### Conservadores (mais seletivos)
+- **TightPlayer**: 32
+- **CautiousPlayer**: 30
+- **PatientPlayer**: 28
+- **ConservativeAggressivePlayer**: 29
+
+#### Agressivos (pagam blefe mais facilmente)
+- **AggressivePlayer**: 22
+- **SteadyAggressivePlayer**: 24
+- **OpportunisticPlayer**: 23
+- **RandomPlayer**: 24
+- **FishPlayer**: 23
+
+#### Inteligentes (análise balanceada)
+- **SmartPlayer**: 28
+- **LearningPlayer**: 27
+- **CalculatedPlayer**: 28
+- **ThoughtfulPlayer**: 27
+- **CalmPlayer**: 27
+
+#### Balanceados (valores médios)
+- **BalancedPlayer**: 26
+- **ModeratePlayer**: 26
+- **FlexiblePlayer**: 25
+- **SteadyPlayer**: 26
+- **ObservantPlayer**: 26
+
+#### Outros
+- **AdaptivePlayer**: 25
+- **HybridPlayer**: 25
+
+### Exemplos Práticos
+
+#### Cenário 1: Múltiplos Raises (Alta Probabilidade de Blefe)
+```
+Ações: [RAISE, RAISE]
+- possible_bluff_probability: ~0.6-0.8
+- should_call_bluff: True (se mão ≥ threshold personalizado)
+- Comportamento: Bot paga blefe se tiver mão razoável
+```
+
+#### Cenário 2: Um Raise (Probabilidade Moderada)
+```
+Ações: [RAISE]
+- possible_bluff_probability: ~0.2-0.4
+- should_call_bluff: True (se mão forte ≥40)
+- Comportamento: Bot paga apenas com mão forte
+```
+
+#### Cenário 3: Sem Raises (Baixa Probabilidade)
+```
+Ações: [CALL, CALL]
+- possible_bluff_probability: ~0.0-0.2
+- should_call_bluff: False
+- Comportamento: Segue lógica normal
+```
+
+### Diferença da Análise de Ações
+
+**Análise de Ações (`analyze_current_round_actions`):**
+- Detecta **quantos raises** foram feitos
+- Ajusta **threshold de seletividade** do bot
+- Reduz **probabilidade de blefe** do próprio bot
+
+**Análise de Blefe (`analyze_possible_bluff`):**
+- Detecta se **oponentes podem estar blefando**
+- Calcula **probabilidade de blefe** dos oponentes
+- Recomenda se deve **pagar o blefe** baseado na mão própria
+
+### Vantagens
+
+1. **Jogo mais estratégico**: Bots pagam blefes quando têm mão razoável
+2. **Mais realista**: Comportamento similar a jogadores humanos experientes
+3. **Personalidade preservada**: Cada bot tem threshold diferente
+4. **Aprende com histórico**: Usa memória de blefes anteriores dos oponentes
+
+### Limitações
+
+- Análise é **probabilística**: Não garante que oponente está blefando
+- Não considera **valores dos raises**: Apenas quantidade
+- Não diferencia **quem** fez raise: Trata todos igualmente
+- Histórico é **limitado**: Apenas últimos 5 rounds por oponente
+
+### Testes
+
+A funcionalidade é testada automaticamente:
+- `tests/test_bluff_analysis.py`: Testes básicos da função
+- `tests/test_bluff_analysis_complete.py`: Testes completos de integração
+- `tests/test_bluff_personality_values.py`: Validação de valores por personalidade
+
+Para executar:
+```bash
+python3 tests/test_bluff_analysis.py
+python3 tests/test_bluff_analysis_complete.py
+python3 tests/test_bluff_personality_values.py
+```
+
+---
+
 ## Componentes Compartilhados
 
 ### 1. `hand_utils.py`
@@ -919,6 +1525,22 @@ Utilitários para gerenciamento de memória:
 
 - `get_memory_path(filename)`: Retorna caminho completo para arquivo de memória
 
+### 5. `action_analyzer.py`
+
+Utilitário para análise de ações do round atual e possível blefe:
+
+- `analyze_current_round_actions(round_state, my_uuid)`: Analisa ações dos oponentes na street atual
+  - Retorna informações sobre raises, calls, e nível de agressão
+  - **NOVO:** Detecta campo passivo (`is_passive`, `passive_opportunity_score`)
+  - Exclui ações próprias da análise
+  - Funciona em todas as streets (preflop, flop, turn, river)
+
+- `analyze_possible_bluff(round_state, my_uuid, my_hand_strength, memory_manager)`: Analisa se oponentes podem estar blefando
+  - Calcula probabilidade de blefe baseado em múltiplos fatores
+  - Considera histórico de blefes dos oponentes (se disponível)
+  - Recomenda se deve pagar blefe baseado na força da mão própria
+  - Retorna: probabilidade, recomendação, confiança e fatores analisados
+
 ---
 
 ## Resumo do Fluxo de Decisão
@@ -927,23 +1549,38 @@ Para entender como um bot decide sua ação, siga este fluxo:
 
 1. **Recebe `declare_action`** com estado atual
 2. **Atualiza informações internas** (stack, contexto)
-3. **Avalia força da mão** usando `evaluate_hand_strength()`
-4. **Analisa contexto** (pot size, jogadores ativos, street)
-5. **Decide se deve blefar** baseado em probabilidade
-6. **Se blefar:**
+3. **NOVO: Analisa ações do round atual** usando `analyze_current_round_actions()`
+   - Detecta se há raises na street atual
+   - Conta quantos raises foram feitos
+   - Identifica última ação dos oponentes
+4. **Avalia força da mão** usando `evaluate_hand_strength()`
+5. **NOVO: Analisa possível blefe dos oponentes** usando `analyze_possible_bluff()`
+   - Calcula probabilidade de blefe baseado em múltiplos fatores
+   - Determina se deve pagar blefe baseado na mão própria
+6. **Ajusta threshold baseado em ações atuais**
+   - Se há raises: aumenta threshold (fica mais seletivo)
+   - Se 2+ raises: aumenta threshold significativamente
+7. **Analisa contexto** (pot size, jogadores ativos, street)
+8. **Decide se deve blefar** baseado em probabilidade
+   - **NOVO: Se 2+ raises, evita blefe completamente**
+9. **Se blefar:**
    - Analisa contexto da mesa
    - Escolhe entre CALL ou RAISE
    - Retorna ação
-7. **Se não blefar:**
-   - Compara força da mão com threshold
-   - Escolhe FOLD, CALL ou RAISE
-   - Retorna ação
-8. **Após o round:**
-   - Recebe resultado em `receive_round_result_message`
-   - Atualiza estatísticas
-   - Aprende com resultado
-   - Ajusta estratégia
-   - Salva memória
+10. **Se não blefar:**
+    - **NOVO: Se análise indica possível blefe e deve pagar:**
+      - Compara mão com threshold personalizado
+      - Se mão ≥ threshold: faz CALL (paga blefe)
+    - Caso contrário:
+      - Compara força da mão com **threshold ajustado**
+      - Escolhe FOLD, CALL ou RAISE
+    - Retorna ação
+11. **Após o round:**
+    - Recebe resultado em `receive_round_result_message`
+    - Atualiza estatísticas
+    - Aprende com resultado
+    - Ajusta estratégia
+    - Salva memória
 
 ---
 
@@ -966,6 +1603,9 @@ Para entender como um bot decide sua ação, siga este fluxo:
 
 - Salvamento de memória é feito assincronamente (não bloqueia jogo)
 - Históricos são limitados (10-50 rodadas) para evitar crescimento infinito
+- **Oponentes rastreados**: Máximo de 20 oponentes por bot (21 bots totais - 1 próprio)
+- **Parâmetros específicos por oponente**: Mantidos indefinidamente e evoluem com aprendizado
+- **UUIDs fixos**: Garantem rastreamento consistente e evitam duplicação de oponentes
 - Operações de arquivo falham silenciosamente para não quebrar o jogo
 
 ### Debugging

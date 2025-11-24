@@ -1,0 +1,50 @@
+# Configuração do GitHub Labeler
+# Aplica labels automaticamente baseado nos arquivos modificados no PR
+
+# Label para mudanças relacionadas a bots/AI
+ai:
+  - players/**/*
+  - players/base/**/*
+
+# Label para mudanças na interface web
+web:
+  - web/**/*
+  - web/templates/**/*
+  - web/css/**/*
+  - web/js/**/*
+
+# Label para mudanças em Python
+python:
+  - '*.py'
+  - '**/*.py'
+
+# Label para documentação
+documentation:
+  - docs/**/*
+  - '*.md'
+  - README.md
+  - CHANGELOG.md
+  - CONTRIBUTING.md
+  - CODE_OF_CONDUCT.md
+  - SECURITY.md
+
+# Label para dependências
+dependencies:
+  - requirements.txt
+  - requirements-dev.txt
+  - pyproject.toml
+  - setup.py
+  - Pipfile
+  - poetry.lock
+  - Pipfile.lock
+
+# Label para bugs (geralmente detectado por título/descrição, mas pode ser baseado em arquivos de teste)
+bug:
+  - tests/**/*test*.py
+  - tests/**/*_test.py
+
+# Label para melhorias/enhancements (pode ser baseado em novos arquivos ou features)
+enhancement:
+  - game/**/*
+  - utils/**/*
+

@@ -1885,6 +1885,11 @@ function createPlayerResultDiv(player, isWinner, round) {
     const wonAmount = typeof player.won_amount === 'number' ? player.won_amount : 0;
     const isFolded = player.folded === true;
 
+    // Aplica opacidade reduzida se o jogador fez fold
+    if (isFolded) {
+        div.style.opacity = '0.5';
+    }
+
     // Nome e status (em linha)
     const nameDiv = document.createElement('div');
     nameDiv.style.display = 'flex';
