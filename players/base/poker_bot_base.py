@@ -307,20 +307,42 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 return raise_action['action'], amount
         
         # 8. Mão fraca: fold se muito fraca
-        # Para aggressive: fold_threshold_base já é usado diretamente
-        # Para cautious: usa adjusted_threshold - 4 (mais tolerante)
-        # Para outros: usa adjusted_threshold - 8 (padrão)
+        # Usa um threshold mínimo mais baixo para evitar muitos folds
         if self.config.name == "Aggressive":
             fold_threshold = self.config.fold_threshold_base
             if current_actions and current_actions.get('has_raises'):
-                fold_threshold += (
+                # Ajuste mais conservador para raises, com limite máximo
+                fold_threshold += min(
+                    10,  # Limite máximo de ajuste
                     self.config.raise_threshold_adjustment_base +
                     (current_actions['raise_count'] * self.config.raise_threshold_adjustment_per_raise)
                 )
         elif self.config.name == "Cautious":
-            fold_threshold = adjusted_threshold - 4  # Cautious é mais tolerante
+            # Cautious: mais tolerante, usa threshold mínimo
+            fold_threshold = max(
+                self.config.fold_threshold_base - 3,  # Nunca fica muito alto
+                adjusted_threshold - 6  # Mais tolerante que antes
+            )
         else:
-            fold_threshold = adjusted_threshold - 8  # Ajuste padrão para outros bots
+            # Outros bots: usa o maior entre fold_threshold_base e adjusted_threshold - 10
+            # Isso evita que fique muito alto quando há raises
+            fold_threshold = max(
+                self.config.fold_threshold_base - 5,  # Limite mínimo mais baixo
+                min(adjusted_threshold - 10, self.config.fold_threshold_base + 5)  # Limite máximo
+            )
+        
+        # Considera pot odds antes de fazer fold
+        pot_size = round_state.get('pot', {}).get('main', {}).get('amount', 0)
+        call_amount = valid_actions[1]['amount'] if len(valid_actions) > 1 else 0
+        
+        # Se o pot é grande em relação ao call, pode valer a pena pagar mesmo com mão fraca
+        if call_amount > 0:
+            pot_odds_ratio = pot_size / call_amount if call_amount > 0 else 0
+            # Se pot odds são favoráveis (pot > 3x o call), reduz threshold de fold
+            if pot_odds_ratio > 5.0:
+                fold_threshold = max(fold_threshold - 5, self.config.fold_threshold_base - 10)
+            elif pot_odds_ratio > 3.0:
+                fold_threshold = max(fold_threshold - 3, self.config.fold_threshold_base - 8)
         
         if hand_strength < fold_threshold:
             fold_action = valid_actions[0]

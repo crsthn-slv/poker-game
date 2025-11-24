@@ -29,7 +29,7 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Threshold inicial de seletividade (quanto maior, mais seletivo)
         # Mínimo: 15 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para não foldar
-        default_tightness=29,
+        default_tightness=25,
         
         # ============================================================
         # THRESHOLDS DE DECISÃO
@@ -38,7 +38,7 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=25,
+        fold_threshold_base=20,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
@@ -95,7 +95,7 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Ajuste base do threshold quando detecta raise
         # Mínimo: 3 | Máximo: 10 | Típico: 3-8
         # Quantos pontos adiciona ao threshold quando há 1 raise
-        raise_threshold_adjustment_base=8,
+        raise_threshold_adjustment_base=5,
         
         # Ajuste adicional por cada raise extra
         # Mínimo: 1 | Máximo: 5 | Típico: 2-3

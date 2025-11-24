@@ -1,0 +1,196 @@
+{
+  "total_games": 50,
+  "bots_participants": 21,
+  "bots_per_game": 9,
+  "bot_stats": [
+    {
+      "name": "Flexible",
+      "games_played": 21,
+      "wins": 6,
+      "win_rate": 28.57,
+      "avg_stack": 198.71,
+      "max_stack": 782,
+      "min_stack": 128
+    },
+    {
+      "name": "Smart",
+      "games_played": 22,
+      "wins": 5,
+      "win_rate": 22.73,
+      "avg_stack": 129.32,
+      "max_stack": 760,
+      "min_stack": 0
+    },
+    {
+      "name": "Tight",
+      "games_played": 22,
+      "wins": 4,
+      "win_rate": 18.18,
+      "avg_stack": 101.59,
+      "max_stack": 471,
+      "min_stack": 9
+    },
+    {
+      "name": "Random",
+      "games_played": 22,
+      "wins": 4,
+      "win_rate": 18.18,
+      "avg_stack": 171.73,
+      "max_stack": 853,
+      "min_stack": 378
+    },
+    {
+      "name": "Observant",
+      "games_played": 22,
+      "wins": 3,
+      "win_rate": 13.64,
+      "avg_stack": 97.45,
+      "max_stack": 659,
+      "min_stack": 60
+    },
+    {
+      "name": "Fish",
+      "games_played": 21,
+      "wins": 3,
+      "win_rate": 14.29,
+      "avg_stack": 119.71,
+      "max_stack": 896,
+      "min_stack": 0
+    },
+    {
+      "name": "ConservativeAggressive",
+      "games_played": 21,
+      "wins": 3,
+      "win_rate": 14.29,
+      "avg_stack": 127.48,
+      "max_stack": 470,
+      "min_stack": 260
+    },
+    {
+      "name": "Balanced",
+      "games_played": 21,
+      "wins": 3,
+      "win_rate": 14.29,
+      "avg_stack": 113.52,
+      "max_stack": 678,
+      "min_stack": 125
+    },
+    {
+      "name": "Patient",
+      "games_played": 22,
+      "wins": 2,
+      "win_rate": 9.09,
+      "avg_stack": 83.55,
+      "max_stack": 547,
+      "min_stack": 0
+    },
+    {
+      "name": "SteadyAggressive",
+      "games_played": 22,
+      "wins": 2,
+      "win_rate": 9.09,
+      "avg_stack": 74.73,
+      "max_stack": 548,
+      "min_stack": 0
+    },
+    {
+      "name": "Calculated",
+      "games_played": 21,
+      "wins": 2,
+      "win_rate": 9.52,
+      "avg_stack": 68.57,
+      "max_stack": 674,
+      "min_stack": 42
+    },
+    {
+      "name": "Hybrid",
+      "games_played": 21,
+      "wins": 2,
+      "win_rate": 9.52,
+      "avg_stack": 76.48,
+      "max_stack": 717,
+      "min_stack": 0
+    },
+    {
+      "name": "Learning",
+      "games_played": 21,
+      "wins": 2,
+      "win_rate": 9.52,
+      "avg_stack": 108.57,
+      "max_stack": 729,
+      "min_stack": 137
+    },
+    {
+      "name": "Adaptive",
+      "games_played": 21,
+      "wins": 2,
+      "win_rate": 9.52,
+      "avg_stack": 94.52,
+      "max_stack": 629,
+      "min_stack": 0
+    },
+    {
+      "name": "Thoughtful",
+      "games_played": 22,
+      "wins": 1,
+      "win_rate": 4.55,
+      "avg_stack": 106.55,
+      "max_stack": 677,
+      "min_stack": 71
+    },
+    {
+      "name": "Steady",
+      "games_played": 22,
+      "wins": 1,
+      "win_rate": 4.55,
+      "avg_stack": 74.77,
+      "max_stack": 793,
+      "min_stack": 104
+    },
+    {
+      "name": "Opportunistic",
+      "games_played": 22,
+      "wins": 1,
+      "win_rate": 4.55,
+      "avg_stack": 54.59,
+      "max_stack": 586,
+      "min_stack": 0
+    },
+    {
+      "name": "Cautious",
+      "games_played": 21,
+      "wins": 1,
+      "win_rate": 4.76,
+      "avg_stack": 93.1,
+      "max_stack": 393,
+      "min_stack": 73
+    },
+    {
+      "name": "Calm",
+      "games_played": 21,
+      "wins": 1,
+      "win_rate": 4.76,
+      "avg_stack": 54.33,
+      "max_stack": 712,
+      "min_stack": 37
+    },
+    {
+      "name": "Moderate",
+      "games_played": 21,
+      "wins": 1,
+      "win_rate": 4.76,
+      "avg_stack": 75.95,
+      "max_stack": 578,
+      "min_stack": 0
+    },
+    {
+      "name": "Aggressive",
+      "games_played": 21,
+      "wins": 1,
+      "win_rate": 4.76,
+      "avg_stack": 71.81,
+      "max_stack": 575,
+      "min_stack": 0
+    }
+  ]
+}
