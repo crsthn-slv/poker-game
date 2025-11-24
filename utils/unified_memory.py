@@ -52,7 +52,11 @@ def create_default_memory(bluff_probability: float = 0.17,
                         'first_seen_round': 0,  # 0 indica que ainda não jogou juntos
                         'last_seen_round': 0,
                         'total_rounds_against': 0,
-                        'rounds_against': []
+                        'rounds_against': [],
+                        # Parâmetros específicos inicializados com valores globais
+                        'bluff_probability': bluff_probability,
+                        'aggression_level': aggression_level,
+                        'tightness_threshold': tightness_threshold
                     }
     
     return memory
@@ -69,12 +73,17 @@ def register_new_opponent(memory: Dict[str, Any], opp_uuid: str,
         current_round: Número do round atual
     """
     if opp_uuid not in memory['opponents']:
+        # Inicializa parâmetros específicos com os valores globais atuais
         memory['opponents'][opp_uuid] = {
             'name': opp_name,
             'first_seen_round': current_round,
             'last_seen_round': current_round,
             'total_rounds_against': 0,
-            'rounds_against': []
+            'rounds_against': [],
+            # Parâmetros específicos para este oponente (inicializados com valores globais)
+            'bluff_probability': memory.get('bluff_probability', 0.17),
+            'aggression_level': memory.get('aggression_level', 0.55),
+            'tightness_threshold': memory.get('tightness_threshold', 27)
         }
 
 
@@ -266,6 +275,65 @@ def evaluate_action_result(action_record: Dict[str, Any], won: bool,
             return 'neutral'
 
 
+def learn_from_opponent_result(memory: Dict[str, Any], opp_uuid: str, 
+                                i_won: bool, opp_won: bool,
+                                learning_speed: float = 0.01,
+                                win_rate_threshold_high: float = 0.6,
+                                win_rate_threshold_low: float = 0.4) -> None:
+    """Aprende e atualiza parâmetros específicos para um oponente baseado em resultados.
+    
+    Args:
+        memory: Estrutura de memória do bot
+        opp_uuid: UUID do oponente
+        i_won: Se o bot ganhou o round
+        opp_won: Se o oponente ganhou o round
+        learning_speed: Velocidade de aprendizado (padrão 0.01 = 1%)
+        win_rate_threshold_high: Taxa de vitória considerada alta (padrão 60%)
+        win_rate_threshold_low: Taxa de vitória considerada baixa (padrão 40%)
+    """
+    if opp_uuid not in memory['opponents']:
+        return
+    
+    opp = memory['opponents'][opp_uuid]
+    
+    # Garante que os parâmetros específicos existem
+    if 'bluff_probability' not in opp:
+        opp['bluff_probability'] = memory.get('bluff_probability', 0.17)
+    if 'aggression_level' not in opp:
+        opp['aggression_level'] = memory.get('aggression_level', 0.55)
+    if 'tightness_threshold' not in opp:
+        opp['tightness_threshold'] = memory.get('tightness_threshold', 27)
+    
+    # Calcula taxa de vitória contra este oponente (últimos 10 rounds)
+    recent_rounds = opp.get('rounds_against', [])
+    if len(recent_rounds) >= 5:  # Precisa de pelo menos 5 rounds para aprender
+        wins_against = sum(
+            1 for r in recent_rounds[-10:]
+            if r.get('final_result', {}).get('i_won', False)
+        )
+        win_rate = wins_against / min(len(recent_rounds[-10:]), 10)
+        
+        learning_factor = 1 + learning_speed
+        
+        # Se está ganhando bem contra este oponente: aumenta agressão e blefe
+        if win_rate > win_rate_threshold_high:
+            opp['aggression_level'] = min(0.75, opp['aggression_level'] * learning_factor)
+            opp['bluff_probability'] = min(0.22, opp['bluff_probability'] * learning_factor)
+        # Se está perdendo contra este oponente: reduz agressão, aumenta seletividade
+        elif win_rate < win_rate_threshold_low:
+            opp['tightness_threshold'] = min(35, opp['tightness_threshold'] + 1)
+            opp['aggression_level'] = max(0.35, opp['aggression_level'] / learning_factor)
+            opp['bluff_probability'] = max(0.10, opp['bluff_probability'] / learning_factor)
+    
+    # Ajuste baseado no resultado do round atual
+    if i_won and not opp_won:
+        # Ganhou contra este oponente: pequeno boost em agressão
+        opp['aggression_level'] = min(0.75, opp['aggression_level'] * (1 + learning_speed * 0.5))
+    elif not i_won and opp_won:
+        # Perdeu para este oponente: pequena redução em agressão
+        opp['aggression_level'] = max(0.35, opp['aggression_level'] * (1 - learning_speed * 0.5))
+
+
 def save_unified_memory(memory_file: str, memory: Dict[str, Any]) -> bool:
     """Salva memória unificada de forma segura.
     
@@ -322,8 +390,17 @@ def load_unified_memory(memory_file: str, default_bluff: float = 0.17,
                         'first_seen_round': 0,  # 0 indica que ainda não jogou juntos
                         'last_seen_round': 0,
                         'total_rounds_against': 0,
-                        'rounds_against': []
+                        'rounds_against': [],
+                        # Parâmetros específicos inicializados com valores globais
+                        'bluff_probability': loaded.get('bluff_probability', default_bluff),
+                        'aggression_level': loaded.get('aggression_level', default_aggression),
+                        'tightness_threshold': loaded.get('tightness_threshold', default_tightness)
                     }
+                # Garante que bots existentes tenham os parâmetros específicos (migração)
+                elif 'bluff_probability' not in loaded['opponents'][bot_uuid]:
+                    loaded['opponents'][bot_uuid]['bluff_probability'] = loaded.get('bluff_probability', default_bluff)
+                    loaded['opponents'][bot_uuid]['aggression_level'] = loaded.get('aggression_level', default_aggression)
+                    loaded['opponents'][bot_uuid]['tightness_threshold'] = loaded.get('tightness_threshold', default_tightness)
     
     return loaded
 

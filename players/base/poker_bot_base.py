@@ -54,12 +54,77 @@ class PokerBotBase(BasePokerPlayer, ABC):
         # Sempre usa UUID fixo, ignorando o UUID do PyPokerEngine
         self.uuid = self._fixed_uuid
     
-    def _load_parameters_from_memory(self):
-        """Carrega parâmetros da memória"""
-        # Usa get() com defaults para garantir que sempre tenha valores
-        self.bluff_probability = self.memory.get('bluff_probability', self.config.default_bluff)
-        self.aggression_level = self.memory.get('aggression_level', self.config.default_aggression)
-        self.tightness_threshold = self.memory.get('tightness_threshold', self.config.default_tightness)
+    def _load_parameters_from_memory(self, opponent_uuid: str = None):
+        """Carrega parâmetros da memória, opcionalmente específicos para um oponente.
+        
+        Args:
+            opponent_uuid: UUID do oponente para usar parâmetros específicos (opcional)
+        """
+        # Se tem oponente específico e ele está na memória, usa parâmetros específicos
+        if opponent_uuid and opponent_uuid in self.memory.get('opponents', {}):
+            opp = self.memory['opponents'][opponent_uuid]
+            # Usa parâmetros específicos do oponente, com fallback para globais
+            self.bluff_probability = opp.get('bluff_probability', 
+                self.memory.get('bluff_probability', self.config.default_bluff))
+            self.aggression_level = opp.get('aggression_level',
+                self.memory.get('aggression_level', self.config.default_aggression))
+            self.tightness_threshold = opp.get('tightness_threshold',
+                self.memory.get('tightness_threshold', self.config.default_tightness))
+        else:
+            # Usa parâmetros globais
+            self.bluff_probability = self.memory.get('bluff_probability', self.config.default_bluff)
+            self.aggression_level = self.memory.get('aggression_level', self.config.default_aggression)
+            self.tightness_threshold = self.memory.get('tightness_threshold', self.config.default_tightness)
+    
+    def _get_primary_opponent_uuid(self, round_state) -> str:
+        """Identifica o oponente principal no round (o que mais interagiu).
+        
+        Args:
+            round_state: Estado do round
+            
+        Returns:
+            UUID do oponente principal ou None
+        """
+        if not hasattr(self, 'uuid') or not self.uuid:
+            return None
+        
+        from utils.uuid_utils import get_bot_class_uuid_from_name
+        
+        seats = round_state.get('seats', [])
+        my_seat = next((s for s in seats if isinstance(s, dict) and s.get('uuid') == self.uuid), None)
+        my_name = my_seat.get('name', 'Unknown') if my_seat else None
+        my_uuid_fixed = get_bot_class_uuid_from_name(my_name) if my_name else self.uuid
+        
+        # Identifica oponentes ativos
+        active_opponents = []
+        for seat in seats:
+            if isinstance(seat, dict):
+                opp_uuid_from_seat = seat.get('uuid')
+                if opp_uuid_from_seat and opp_uuid_from_seat != self.uuid:
+                    opp_name = seat.get('name', 'Unknown')
+                    opp_uuid_fixed = get_bot_class_uuid_from_name(opp_name)
+                    opp_uuid = opp_uuid_fixed if opp_uuid_fixed else opp_uuid_from_seat
+                    
+                    if opp_uuid != my_uuid_fixed and seat.get('state') == 'participating':
+                        active_opponents.append(opp_uuid)
+        
+        # Se tem apenas um oponente, usa ele
+        if len(active_opponents) == 1:
+            return active_opponents[0]
+        
+        # Se tem múltiplos oponentes, escolhe o que tem mais rounds jogados juntos
+        if len(active_opponents) > 1:
+            best_opp = None
+            max_rounds = 0
+            for opp_uuid in active_opponents:
+                if opp_uuid in self.memory.get('opponents', {}):
+                    rounds = self.memory['opponents'][opp_uuid].get('total_rounds_against', 0)
+                    if rounds > max_rounds:
+                        max_rounds = rounds
+                        best_opp = opp_uuid
+            return best_opp if best_opp else active_opponents[0]
+        
+        return None
     
     def declare_action(self, valid_actions, hole_card, round_state):
         """
@@ -73,6 +138,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
         # Identifica oponentes
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
+        
+        # Identifica oponente principal para usar parâmetros específicos
+        primary_opponent_uuid = self._get_primary_opponent_uuid(round_state)
         
         # Analisa contexto
         current_actions = analyze_current_round_actions(
@@ -89,8 +157,8 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 round_state, self.uuid, hand_strength, self.memory_manager
             )
         
-        # Atualiza valores da memória
-        self._load_parameters_from_memory()
+        # Atualiza valores da memória (usa parâmetros específicos do oponente se disponível)
+        self._load_parameters_from_memory(primary_opponent_uuid)
         
         # Decide blefe
         should_bluff = self._should_bluff(current_actions)

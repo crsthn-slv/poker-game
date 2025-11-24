@@ -1,5 +1,6 @@
 from typing import Tuple
 import re
+import os
 
 from pypokerengine.players import BasePokerPlayer  # type: ignore[reportMissingImports]
 from utils.console_formatter import ConsoleFormatter
@@ -32,9 +33,38 @@ class ConsolePlayer(BasePokerPlayer):
         self.win_probability_cache = {}
         self.last_cache_key = None  # Chave de cache usada na última vez
         self.preflop_active_count = None  # Número de jogadores ativos no preflop (para garantir estabilidade)
-        self.preflop_active_count = None  # Número de jogadores ativos no preflop (para garantir estabilidade)
         # Sistema de histórico
         self.game_history = None  # Será inicializado quando UUID for definido
+        # UUID fixo baseado no nome (será definido quando set_uuid for chamado)
+        self._fixed_uuid = None
+        self._player_name = None
+    
+    def set_uuid(self, uuid):
+        """
+        Define UUID fixo baseado no nome do jogador.
+        Ignora o UUID do PyPokerEngine e usa UUID determinístico baseado no nome.
+        Isso garante que o mesmo jogador sempre tenha o mesmo UUID.
+        """
+        # O nome será obtido do round_state quando disponível
+        # Por enquanto, usa UUID do PyPokerEngine se não tiver nome
+        self.uuid = uuid
+        self._fixed_uuid = uuid  # Será atualizado quando tiver o nome
+    
+    def _update_fixed_uuid_from_name(self, player_name):
+        """Atualiza UUID fixo baseado no nome do jogador."""
+        if player_name:
+            from utils.uuid_utils import get_player_uuid
+            fixed_uuid = get_player_uuid(player_name)
+            if fixed_uuid:
+                self._fixed_uuid = fixed_uuid
+                self._player_name = player_name
+                # Atualiza self.uuid para usar UUID fixo
+                if self.uuid != fixed_uuid:
+                    old_uuid = self.uuid
+                    self.uuid = fixed_uuid
+                    debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+                    if debug_mode:
+                        print(f"[DEBUG] ConsolePlayer UUID atualizado: {old_uuid} -> {fixed_uuid} ({player_name})")
 
     def _get_win_probability_cache_key(self, round_state):
         """Gera chave de cache baseada em street, número de jogadores ativos e cartas comunitárias.
@@ -86,6 +116,9 @@ class ConsolePlayer(BasePokerPlayer):
         hole_cards = normalize_hole_cards(hole_card)
         
         # Atualiza cache das cartas do jogador
+        # Obtém seats do round_state uma única vez
+        seats = round_state.get('seats', [])
+        
         if hole_cards:
             self.my_hole_cards = hole_cards
             # Tenta obter uuid para armazenar cartas no registry
@@ -94,7 +127,6 @@ class ConsolePlayer(BasePokerPlayer):
                 player_uuid_for_storage = self.uuid
             else:
                 # Fallback: tenta obter uuid do round_state
-                seats = round_state.get('seats', [])
                 for seat in seats:
                     if isinstance(seat, dict):
                         seat_hole_card = seat.get('hole_card', None)
@@ -108,9 +140,19 @@ class ConsolePlayer(BasePokerPlayer):
                                 break
             
             # Armazena cartas no registry se tiver uuid
+            # IMPORTANTE: Usa UUID fixo (self.uuid já é fixo para ConsolePlayer)
             if player_uuid_for_storage:
-                self.players_hole_cards[player_uuid_for_storage] = hole_cards
-                store_player_cards(player_uuid_for_storage, hole_cards)
+                # Usa UUID fixo se disponível, senão usa o UUID do PyPokerEngine
+                uuid_to_store = self.uuid if hasattr(self, 'uuid') and self.uuid else player_uuid_for_storage
+                self.players_hole_cards[uuid_to_store] = hole_cards
+                # Busca nome do jogador nos seats para mapear
+                player_name = None
+                if seats:
+                    for seat in seats:
+                        if isinstance(seat, dict) and seat.get('uuid') == player_uuid_for_storage:
+                            player_name = seat.get('name', '')
+                            break
+                store_player_cards(uuid_to_store, hole_cards, player_name)
                 import os
                 if os.environ.get('POKER_DEBUG', 'false').lower() == 'true':
                     from utils.cards_registry import get_all_cards
@@ -269,16 +311,15 @@ class ConsolePlayer(BasePokerPlayer):
                 elif debug_mode:
                     print(f"[DEBUG] player_uuid é None, não calculando probabilidade")
             except Exception as e:
-                # Log de debug opcional (ativar com POKER_DEBUG=true se necessário)
-                import os
+                # Log de erro mais informativo
                 debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
                 if debug_mode:
                     print(f"[DEBUG] Erro ao calcular probabilidade: {type(e).__name__}: {e}")
                     import traceback
                     traceback.print_exc()
                 # Silenciosamente ignora erros no cálculo (não deve quebrar o jogo)
-                # Mas permite que win_probability_display seja None (não será exibido)
-                pass
+                # win_probability_display será None e não será exibido
+                win_probability_display = None
             
             # Formata saída com probabilidade se disponível
             if win_probability_display is not None:
@@ -384,6 +425,16 @@ class ConsolePlayer(BasePokerPlayer):
         # Reseta flag de linha de pot no início de novo round
         self.pot_line_printed = False
         """Mostra divisor de round e inicializa novo round."""
+        
+        # IMPORTANTE: Atualiza UUID fixo baseado no nome do jogador nos seats
+        if seats and hasattr(self, 'uuid') and self.uuid:
+            for seat in seats:
+                if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                    player_name = seat.get('name', '')
+                    if player_name:
+                        self._update_fixed_uuid_from_name(player_name)
+                    break
+        
         # Mostra divisor de round de forma destacada
         print("\n" + self.formatter.format_round_divider(round_count))
         print()
@@ -392,22 +443,24 @@ class ConsolePlayer(BasePokerPlayer):
         self.last_pot_printed = 0
         self.pot_line_printed = False  # Reseta flag de linha de pot
         self.pot_updates = []  # Limpa atualizações acumuladas do pot
-        # Limpa cache de probabilidade para novo round
-        self.win_probability_cache = {}
-        self.last_cache_key = None
-        self.preflop_active_count = None
+        # Limpa todos os caches para novo round
+        self._clear_all_caches()
         # Limpa registro de cartas do round anterior
         clear_registry()
         # Armazena cartas do jogador em cache e no registro global
+        # IMPORTANTE: Usa UUID fixo
         if hole_card:
             hole_cards = normalize_hole_cards(hole_card)
             self.my_hole_cards = hole_cards
-            if hasattr(self, 'uuid') and self.uuid:
-                self.players_hole_cards[self.uuid] = hole_cards
-                store_player_cards(self.uuid, hole_cards)
+            # Usa UUID fixo se disponível, senão usa UUID do PyPokerEngine
+            uuid_to_store = self._fixed_uuid if self._fixed_uuid else (self.uuid if hasattr(self, 'uuid') and self.uuid else None)
+            if uuid_to_store:
+                self.players_hole_cards[uuid_to_store] = hole_cards
+                store_player_cards(uuid_to_store, hole_cards, self._player_name)
         # Tenta obter cartas dos outros jogadores dos seats se disponíveis
         # Nota: PyPokerEngine geralmente não fornece cartas dos oponentes aqui,
         # mas tentamos capturar se estiverem disponíveis
+        # IMPORTANTE: Armazena com UUID fixo para garantir consistência
         if seats:
             for seat in seats:
                 if isinstance(seat, dict):
@@ -417,43 +470,14 @@ class ConsolePlayer(BasePokerPlayer):
                         # Normaliza as cartas antes de armazenar
                         normalized_cards = normalize_hole_cards(seat_hole_cards)
                         if normalized_cards:
-                            self.players_hole_cards[seat_uuid] = normalized_cards
-                            store_player_cards(seat_uuid, normalized_cards)
+                            # Mapeia para UUID fixo antes de armazenar
+                            fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                            uuid_to_store = fixed_uuid if fixed_uuid else seat_uuid
+                            self.players_hole_cards[uuid_to_store] = normalized_cards
+                            store_player_cards(uuid_to_store, normalized_cards)
         
-        # Inicializa histórico se ainda não foi inicializado
-        if not self.game_history and hasattr(self, 'uuid') and self.uuid:
-            self.game_history = GameHistory(self.uuid, self.initial_stack)
-            # Registra jogadores
-            if seats:
-                self.game_history.register_players(seats)
-                # Tenta obter configurações do jogo dos seats
-                num_players = len([s for s in seats if isinstance(s, dict)])
-                
-                # Tenta obter blinds: primeiro dos parâmetros, depois calcula como fallback
-                small_blind_value = self.small_blind
-                big_blind_value = self.big_blind
-                
-                # Se não foram passados, tenta calcular usando BlindManager
-                if small_blind_value is None or big_blind_value is None:
-                    try:
-                        from game.blind_manager import BlindManager
-                        blind_manager = BlindManager(initial_reference_stack=self.initial_stack)
-                        calculated_sb, calculated_bb = blind_manager.get_blinds()
-                        if small_blind_value is None:
-                            small_blind_value = calculated_sb
-                        if big_blind_value is None:
-                            big_blind_value = calculated_bb
-                    except Exception:
-                        # Se falhar, usa 0 (será atualizado quando detectar ações de blind)
-                        small_blind_value = small_blind_value or 0
-                        big_blind_value = big_blind_value or 0
-                
-                self.game_history.set_game_config(
-                    small_blind=small_blind_value,
-                    big_blind=big_blind_value,
-                    max_rounds=10,  # Default, pode ser ajustado
-                    num_players=num_players
-                )
+        # Garante que histórico está inicializado
+        self._ensure_game_history_initialized(seats)
         
         # Inicia novo round no histórico
         if self.game_history and seats:
@@ -627,253 +651,607 @@ class ConsolePlayer(BasePokerPlayer):
                     if current_bb == 0 or amount > current_bb:
                         self.game_history.history["game_config"]["big_blind"] = amount
 
+    def _get_fixed_uuid_from_seat(self, seat, debug_mode=False):
+        """
+        Mapeia UUID do PyPokerEngine para UUID fixo usando o nome do jogador.
+        
+        Args:
+            seat: Dict com informações do seat (deve ter 'name' e 'uuid')
+            debug_mode: Se True, imprime debug
+        
+        Returns:
+            UUID fixo se encontrado, senão retorna o UUID original
+        """
+        if not isinstance(seat, dict):
+            return None
+        
+        seat_name = seat.get('name', '')
+        seat_uuid_pypoker = seat.get('uuid', '')
+        
+        if not seat_name:
+            return seat_uuid_pypoker
+        
+        from utils.uuid_utils import get_bot_class_uuid_from_name, get_player_uuid
+        
+        # Tenta UUID fixo do bot primeiro
+        fixed_uuid = get_bot_class_uuid_from_name(seat_name)
+        if fixed_uuid:
+            if debug_mode:
+                print(f"[DEBUG]   UUID mapeado: {seat_uuid_pypoker} -> {fixed_uuid} (bot: {seat_name})")
+            return fixed_uuid
+        
+        # Se não encontrou, tenta UUID fixo do jogador humano
+        player_fixed_uuid = get_player_uuid(seat_name)
+        if player_fixed_uuid:
+            if debug_mode:
+                print(f"[DEBUG]   UUID mapeado: {seat_uuid_pypoker} -> {player_fixed_uuid} (jogador: {seat_name})")
+            return player_fixed_uuid
+        
+        # Se não encontrou nenhum, retorna UUID original (pode ser jogador sem nome fixo)
+        if debug_mode:
+            print(f"[DEBUG]   UUID não mapeado (mantendo original): {seat_uuid_pypoker}")
+        return seat_uuid_pypoker
+    
+    def _get_player_cards(self, fixed_uuid, seat, all_cards, winners_with_cards, hand_info_dict, hand_info, seats, name, debug_mode=False):
+        """
+        Obtém cartas de um jogador usando múltiplas fontes em ordem de prioridade.
+        
+        Args:
+            fixed_uuid: UUID fixo do jogador
+            seat: Dict com informações do seat
+            all_cards: Dict com todas as cartas do registry
+            winners_with_cards: Dict com cartas dos winners
+            hand_info_dict: Dict processado do hand_info
+            hand_info: hand_info original (pode ser dict ou list)
+            seats: Lista de seats
+            name: Nome do jogador
+            debug_mode: Se True, imprime debug
+        
+        Returns:
+            Lista de cartas normalizadas ou None
+        """
+        if not fixed_uuid:
+            return None
+        
+        # 1. Do registry global usando UUID fixo (mais confiável)
+        hole_cards = all_cards.get(fixed_uuid)
+        if hole_cards:
+            if debug_mode:
+                print(f"[DEBUG]   Cartas encontradas no registry: {fixed_uuid}")
+            return normalize_hole_cards(hole_cards)
+        
+        # 2. Dos winners se este jogador é vencedor
+        if fixed_uuid in winners_with_cards:
+            if debug_mode:
+                print(f"[DEBUG]   Cartas encontradas nos winners: {fixed_uuid}")
+            hole_cards = normalize_hole_cards(winners_with_cards[fixed_uuid])
+            if hole_cards:
+                store_player_cards(fixed_uuid, hole_cards, name)
+            return hole_cards
+        
+        # 3. Do hand_info_dict usando UUID fixo
+        if fixed_uuid in hand_info_dict:
+            if debug_mode:
+                print(f"[DEBUG]   Cartas encontradas no hand_info_dict: {fixed_uuid}")
+            hand_info_item = hand_info_dict[fixed_uuid]
+            if isinstance(hand_info_item, dict):
+                # Tenta múltiplos formatos possíveis
+                hole_card_from_info = (
+                    hand_info_item.get('hole_card') or 
+                    hand_info_item.get('hole_cards') or
+                    (hand_info_item.get('hand', {}).get('hole_card') if isinstance(hand_info_item.get('hand'), dict) else None)
+                )
+                if hole_card_from_info:
+                    hole_cards = normalize_hole_cards(hole_card_from_info)
+                    if hole_cards:
+                        store_player_cards(fixed_uuid, hole_cards, name)
+                    return hole_cards
+        
+        # 4. Busca direta no hand_info (caso não esteja no dicionário processado)
+        if hand_info and isinstance(hand_info, list):
+            from utils.uuid_utils import get_bot_class_uuid_from_name, get_player_uuid
+            for item in hand_info:
+                if isinstance(item, dict):
+                    item_uuid = item.get('uuid')
+                    item_name = item.get('name', '')
+                    
+                    # Mapeia UUID do item para UUID fixo
+                    item_fixed_uuid = None
+                    if item_name:
+                        item_fixed_uuid = get_bot_class_uuid_from_name(item_name)
+                        if not item_fixed_uuid:
+                            item_fixed_uuid = get_player_uuid(item_name)
+                    
+                    # Compara com UUID fixo do seat
+                    if item_fixed_uuid == fixed_uuid or (not item_fixed_uuid and item_uuid == fixed_uuid):
+                        if debug_mode:
+                            print(f"[DEBUG]   Cartas encontradas na busca direta do hand_info: {fixed_uuid}")
+                        hole_card_from_info = (
+                            item.get('hole_card') or 
+                            item.get('hole_cards') or
+                            (item.get('hand', {}).get('hole_card') if isinstance(item.get('hand'), dict) else None)
+                        )
+                        if hole_card_from_info:
+                            hole_cards = normalize_hole_cards(hole_card_from_info)
+                            if hole_cards:
+                                store_player_cards(fixed_uuid, hole_cards, name)
+                            return hole_cards
+        
+        # 5. Do cache local do jogador
+        hole_cards = self.players_hole_cards.get(fixed_uuid)
+        if hole_cards:
+            if debug_mode:
+                print(f"[DEBUG]   Cartas encontradas no cache local: {fixed_uuid}")
+            return normalize_hole_cards(hole_cards)
+        
+        # 6. Do seat diretamente
+        hole_cards = seat.get('hole_card') or seat.get('hole_cards')
+        if hole_cards:
+            if debug_mode:
+                print(f"[DEBUG]   Cartas encontradas no seat: {fixed_uuid}")
+            hole_cards = normalize_hole_cards(hole_cards)
+            if hole_cards and fixed_uuid:
+                store_player_cards(fixed_uuid, hole_cards, name)
+            return hole_cards
+        
+        return None
+    
+    def _process_winners(self, winners, seats):
+        """
+        Processa winners e mapeia para UUIDs fixos.
+        
+        Args:
+            winners: Lista de winners (pode ser dicts ou UUIDs)
+            seats: Lista de seats
+        
+        Returns:
+            Tuple (winner_uuids, winners_with_cards)
+        """
+        winner_uuids = []
+        winners_with_cards = {}
+        
+        if not winners:
+            return winner_uuids, winners_with_cards
+        
+        from utils.uuid_utils import get_bot_class_uuid_from_name, get_player_uuid
+        
+        for winner in winners:
+            winner_uuid = None
+            winner_name = None
+            
+            if isinstance(winner, dict):
+                winner_uuid = winner.get('uuid')
+                winner_name = winner.get('name', '')
+                # Mapeia para UUID fixo usando o nome
+                if winner_name:
+                    fixed_uuid = get_bot_class_uuid_from_name(winner_name)
+                    if not fixed_uuid:
+                        fixed_uuid = get_player_uuid(winner_name)
+                    if fixed_uuid:
+                        winner_uuid = fixed_uuid
+                
+                if not winner_uuid:
+                    winner_uuid = winner
+                
+                # Verifica se o winner tem cartas diretamente
+                winner_cards = winner.get('hole_card') or winner.get('hole_cards')
+                if winner_cards and winner_uuid:
+                    winners_with_cards[winner_uuid] = winner_cards
+            else:
+                winner_uuid = winner
+            
+            if winner_uuid:
+                winner_uuids.append(winner_uuid)
+        
+        return winner_uuids, winners_with_cards
+    
+    def _process_hand_info(self, hand_info, seats, debug_mode=False):
+        """
+        Processa hand_info e mapeia para UUIDs fixos.
+        
+        Args:
+            hand_info: hand_info original (pode ser dict ou list)
+            seats: Lista de seats
+            debug_mode: Se True, imprime debug
+        
+        Returns:
+            Dict com {fixed_uuid: hand_info_item}
+        """
+        hand_info_dict = {}
+        
+        if not hand_info:
+            return hand_info_dict
+        
+        from utils.uuid_utils import get_bot_class_uuid_from_name, get_player_uuid
+        
+        if isinstance(hand_info, dict):
+            for key, value in hand_info.items():
+                if isinstance(value, dict):
+                    uuid_from_info = value.get('uuid')
+                    name_from_info = value.get('name', '')
+                    
+                    # Mapeia para UUID fixo usando o nome
+                    fixed_uuid = None
+                    if name_from_info:
+                        fixed_uuid = get_bot_class_uuid_from_name(name_from_info)
+                        if not fixed_uuid:
+                            fixed_uuid = get_player_uuid(name_from_info)
+                    
+                    uuid_to_use = fixed_uuid if fixed_uuid else (uuid_from_info or (key if isinstance(key, str) and key else None))
+                    if uuid_to_use:
+                        hand_info_dict[uuid_to_use] = value
+                        if debug_mode and fixed_uuid:
+                            print(f"[DEBUG]   hand_info mapeado: {uuid_from_info} -> {fixed_uuid} ({name_from_info})")
+                elif isinstance(value, (list, tuple)):
+                    # Se value é lista/tuple, pode conter cartas diretamente
+                    if isinstance(key, str) and key:
+                        # Tenta encontrar o nome do jogador nos seats para mapear
+                        fixed_uuid = None
+                        for seat in seats:
+                            if isinstance(seat, dict) and seat.get('uuid') == key:
+                                seat_name = seat.get('name', '')
+                                if seat_name:
+                                    fixed_uuid = get_bot_class_uuid_from_name(seat_name)
+                                    if not fixed_uuid:
+                                        fixed_uuid = get_player_uuid(seat_name)
+                                break
+                        uuid_to_use = fixed_uuid if fixed_uuid else key
+                        hand_info_dict[uuid_to_use] = {'hole_card': value}
+        
+        elif isinstance(hand_info, list):
+            for item in hand_info:
+                if isinstance(item, dict):
+                    uuid_from_info = item.get('uuid')
+                    name_from_info = item.get('name', '')
+                    
+                    # Se não tem nome no item, tenta buscar nos seats usando UUID
+                    if not name_from_info and uuid_from_info:
+                        for seat in seats:
+                            if isinstance(seat, dict) and seat.get('uuid') == uuid_from_info:
+                                name_from_info = seat.get('name', '')
+                                if debug_mode:
+                                    print(f"[DEBUG]   Nome encontrado nos seats para UUID {uuid_from_info}: {name_from_info}")
+                                break
+                    
+                    # Mapeia para UUID fixo usando o nome
+                    fixed_uuid = None
+                    if name_from_info:
+                        fixed_uuid = get_bot_class_uuid_from_name(name_from_info)
+                        if not fixed_uuid:
+                            fixed_uuid = get_player_uuid(name_from_info)
+                        if debug_mode and fixed_uuid:
+                            print(f"[DEBUG]   hand_info mapeado: {uuid_from_info} -> {fixed_uuid} ({name_from_info})")
+                    
+                    uuid_to_use = fixed_uuid if fixed_uuid else uuid_from_info
+                    if uuid_to_use:
+                        hand_info_dict[uuid_to_use] = item
+        
+        return hand_info_dict
+    
+    def _ensure_game_history_initialized(self, seats):
+        """
+        Garante que o histórico seja inicializado, mesmo sem UUID inicial.
+        
+        Args:
+            seats: Lista de seats
+        """
+        if self.game_history:
+            return
+        
+        # Tenta obter UUID de várias fontes
+        player_uuid = None
+        if hasattr(self, 'uuid') and self.uuid:
+            player_uuid = self.uuid
+        elif hasattr(self, '_fixed_uuid') and self._fixed_uuid:
+            player_uuid = self._fixed_uuid
+        else:
+            # Tenta encontrar nos seats pelo nome "You"
+            for seat in seats:
+                if isinstance(seat, dict) and seat.get('name', '').lower() == 'you':
+                    player_uuid = seat.get('uuid')
+                    if not hasattr(self, 'uuid'):
+                        self.uuid = player_uuid
+                    break
+        
+        if player_uuid:
+            try:
+                self.game_history = GameHistory(player_uuid, self.initial_stack)
+                if seats:
+                    self.game_history.register_players(seats)
+                    num_players = len([s for s in seats if isinstance(s, dict)])
+                    
+                    # Tenta obter blinds
+                    small_blind_value = self.small_blind or 0
+                    big_blind_value = self.big_blind or 0
+                    
+                    if small_blind_value == 0 or big_blind_value == 0:
+                        try:
+                            from game.blind_manager import BlindManager
+                            blind_manager = BlindManager(initial_reference_stack=self.initial_stack)
+                            calculated_sb, calculated_bb = blind_manager.get_blinds()
+                            if small_blind_value == 0:
+                                small_blind_value = calculated_sb
+                            if big_blind_value == 0:
+                                big_blind_value = calculated_bb
+                        except Exception:
+                            pass
+                    
+                    # Garante que os valores são int antes de passar para set_game_config
+                    small_blind_final = int(small_blind_value) if small_blind_value is not None else 0
+                    big_blind_final = int(big_blind_value) if big_blind_value is not None else 0
+                    
+                    self.game_history.set_game_config(
+                        small_blind=small_blind_final,
+                        big_blind=big_blind_final,
+                        max_rounds=10,
+                        num_players=num_players
+                    )
+            except Exception as e:
+                # Log erro mas não quebra o jogo
+                debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+                if debug_mode:
+                    print(f"[DEBUG] Erro ao inicializar histórico: {type(e).__name__}: {e}")
+    
+    def _clear_all_caches(self):
+        """Limpa todos os caches do jogador."""
+        self.win_probability_cache = {}
+        self.last_cache_key = None
+        self.preflop_active_count = None
+        self.players_hole_cards.clear()
+        self.my_hole_cards = None
+
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Mostra resultado final humanizado sem JSON bruto."""
-        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
-        seats = round_state.get('seats', [])
-        community_cards = get_community_cards(round_state)
-        current_street = round_state.get('street', 'river')
-        
-        # Processa winners (pode ser lista de dicts ou lista de strings/UUIDs)
-        winner_uuids = []
-        if winners:
-            for winner in winners:
-                if isinstance(winner, dict):
-                    winner_uuids.append(winner.get('uuid', winner))
+        try:
+            pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+            seats = round_state.get('seats', [])
+            community_cards = get_community_cards(round_state)
+            current_street = round_state.get('street', 'river')
+            debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+            
+            # Garante que histórico está inicializado
+            self._ensure_game_history_initialized(seats)
+            
+            # Armazena cartas dos seats que chegaram ao showdown
+            if seats:
+                for seat in seats:
+                    if isinstance(seat, dict):
+                        seat_uuid = seat.get('uuid', '')
+                        seat_name = seat.get('name', '')
+                        seat_state = seat.get('state', '')
+                        if seat_uuid and seat_state != 'folded':
+                            seat_hole_cards = (
+                                seat.get('hole_card') or 
+                                seat.get('hole_cards') or
+                                (getattr(seat, 'hole_card', None) if hasattr(seat, 'hole_card') else None)
+                            )
+                            if seat_hole_cards:
+                                try:
+                                    normalized_cards = normalize_hole_cards(seat_hole_cards)
+                                    if normalized_cards:
+                                        fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                                        if fixed_uuid:
+                                            store_player_cards(fixed_uuid, normalized_cards, seat_name)
+                                            if debug_mode:
+                                                print(f"[DEBUG] Cartas armazenadas do seat: {fixed_uuid} -> {normalized_cards}")
+                                except Exception as e:
+                                    if debug_mode:
+                                        print(f"[DEBUG] Erro ao armazenar cartas do seat: {e}")
+            
+            # Processa winners e hand_info usando métodos auxiliares
+            winner_uuids, winners_with_cards = self._process_winners(winners, seats)
+            hand_info_dict = self._process_hand_info(hand_info, seats, debug_mode)
+            
+            if debug_mode:
+                print(f"[DEBUG] Registry tem {len(get_all_cards())} jogadores")
+                print(f"[DEBUG] hand_info_dict tem {len(hand_info_dict)} jogadores")
+                print(f"[DEBUG] winner_uuids: {winner_uuids}")
+            
+            if winner_uuids or seats:
+                # Mostra última street e community cards antes do resultado
+                street_pt = self.formatter.format_street_pt(current_street)
+                if street_pt:
+                    print(f"\n–– {street_pt.upper()} ––")
                 else:
-                    winner_uuids.append(winner)
-        
-        # Processa hand_info (pode ser dict ou lista)
-        # hand_info contém informações das mãos dos jogadores que chegaram até o showdown
-        hand_info_dict = {}
-        if hand_info:
-            if isinstance(hand_info, dict):
-                # Se é dict, pode ser {uuid: info} ou um único item
-                for key, value in hand_info.items():
-                    if isinstance(value, dict):
-                        # Tenta obter uuid do value ou usar key como uuid
-                        uuid = value.get('uuid', key if isinstance(key, str) else None)
-                        if uuid:
-                            hand_info_dict[uuid] = value
-                        else:
-                            # Se não tem uuid, usa key como uuid
-                            hand_info_dict[key] = value
-            elif isinstance(hand_info, list):
-                for item in hand_info:
-                    if isinstance(item, dict):
-                        uuid = item.get('uuid', '')
-                        if uuid:
-                            hand_info_dict[uuid] = item
-                        # Se não tem uuid, tenta usar outros campos como identificador
-                        elif 'name' in item:
-                            # Tenta encontrar UUID pelo nome nos seats
-                            for seat in seats:
-                                if isinstance(seat, dict):
-                                    seat_name = self.formatter.clean_player_name(seat.get('name', ''))
-                                    item_name = self.formatter.clean_player_name(item.get('name', ''))
-                                    if seat_name == item_name:
-                                        seat_uuid = seat.get('uuid', '')
-                                        if seat_uuid:
-                                            hand_info_dict[seat_uuid] = item
-                                        break
-        
-        if winner_uuids or seats:
-            # Mostra última street e community cards antes do resultado
-            street_pt = self.formatter.format_street_pt(current_street)
-            if street_pt:
-                print(f"\n–– {street_pt.upper()} ––")
-            else:
-                print(f"\n–– {current_street.upper() if current_street else 'UNKNOWN'} ––")
-            
-            # Mostra community cards
-            if community_cards:
-                community_display = self.formatter.format_cards_display_with_color(community_cards)
-                print(f"Community cards: {community_display}")
-            
-            print("\n–––– ROUND RESULT ––––")
-            
-            # Mostra community cards novamente no resultado
-            if community_cards:
-                community_display = self.formatter.format_cards_display_with_color(community_cards)
-                print(f"\nCommunity cards: {community_display}")
-            
-            # Mostra cartas dos participantes que não desistiram
-            print("\nParticipant cards:")
-            # Busca cartas do registro global uma única vez para eficiência
-            all_cards = get_all_cards()
-            
-            for seat in seats:
-                if isinstance(seat, dict):
-                    seat_uuid = seat.get('uuid', '')
-                    name = self.formatter.clean_player_name(seat.get('name', ''))
-                    state = seat.get('state', '')
-                    
-                    # Determina se deve mostrar as cartas deste jogador
-                    is_winner = seat_uuid in winner_uuids
-                    is_folded = state == 'folded'
-                    is_player = hasattr(self, 'uuid') and self.uuid and seat_uuid == self.uuid
-                    
-                    # Se o jogador deu fold mas não é o jogador humano, mostra apenas "folded" (sem cartas)
-                    # Se for o jogador humano que deu fold, mostra as cartas mesmo assim para análise
-                    if is_folded and not is_player:
-                        full_line = f"  {name}: folded"
-                        dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
-                        print(dim_line)
+                    print(f"\n–– {current_street.upper() if current_street else 'UNKNOWN'} ––")
+                
+                # Mostra community cards
+                if community_cards:
+                    community_display = self.formatter.format_cards_display_with_color(community_cards)
+                    print(f"Community cards: {community_display}")
+                
+                print("\n–––– ROUND RESULT ––––")
+                
+                # Mostra community cards novamente no resultado
+                if community_cards:
+                    community_display = self.formatter.format_cards_display_with_color(community_cards)
+                    print(f"\nCommunity cards: {community_display}")
+                
+                # Mostra cartas dos participantes
+                print("\nParticipant cards:")
+                all_cards = get_all_cards()
+                
+                for seat in seats:
+                    if not isinstance(seat, dict):
                         continue
                     
-                    # Tenta obter cartas de várias fontes (ordem de prioridade):
-                    hole_cards = None
-                    
-                    # 1. Do registry global PRIMEIRO (mais confiável - armazenado durante o round)
-                    hole_cards = all_cards.get(seat_uuid)
-                    if hole_cards:
-                        hole_cards = normalize_hole_cards(hole_cards)
-                    
-                    # 2. Do hand_info (contém cartas dos jogadores que chegaram até o showdown)
-                    if not hole_cards and seat_uuid in hand_info_dict:
-                        hand_info_item = hand_info_dict[seat_uuid]
-                        if isinstance(hand_info_item, dict):
-                            # Tenta obter hole_card do hand_info
-                            hole_card_from_info = hand_info_item.get('hole_card', None)
-                            if hole_card_from_info:
-                                hole_cards = normalize_hole_cards(hole_card_from_info)
-                                # Se encontrou no hand_info, também armazena no registry para cache
-                                if hole_cards:
-                                    store_player_cards(seat_uuid, hole_cards)
-                    
-                    # 3. Do cache local do jogador
-                    if not hole_cards:
-                        hole_cards = self.players_hole_cards.get(seat_uuid)
-                        if hole_cards:
-                            hole_cards = normalize_hole_cards(hole_cards)
-                    
-                    # 4. Do seat diretamente (último recurso)
-                    if not hole_cards:
-                        hole_cards = seat.get('hole_card', None)
-                        if hole_cards:
-                            hole_cards = normalize_hole_cards(hole_cards)
-                            # Se encontrou no seat, armazena no registry
-                            if hole_cards:
-                                store_player_cards(seat_uuid, hole_cards)
-                    
-                    # Mostra cartas se encontrou
-                    if hole_cards and len(hole_cards) >= 2:
-                        cards_display = self.formatter.format_cards_display_with_color(hole_cards)
-                        hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
-                        # Se o jogador humano deu fold, adiciona indicador de folded mas mostra cartas
-                        folded_indicator = " (folded)" if is_folded and is_player else ""
-                        # Aplica cor cinza se jogador deu fold
-                        if is_folded:
-                            # Remove todos os códigos ANSI de cor das cartas para aplicar DIM em toda a linha
-                            # Remove todos os códigos ANSI (cores e reset) das cartas
-                            cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
-                            # Monta a linha completa sem cores nas cartas
-                            full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
-                            # Aplica DIM em toda a linha
-                            dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
-                            print(dim_line)
-                        else:
-                            print(f"  {name}: {cards_display} | {hand_desc}{folded_indicator}")
-                    else:
-                        # Se não encontrou cartas em nenhum lugar, mostra erro
-                        # Mas se for o jogador humano que deu fold, mostra folded mesmo sem cartas
-                        if is_folded and is_player:
-                            full_line = f"  {name}: folded (cards not found)"
-                            dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
-                            print(dim_line)
-                        else:
-                            print(f"  {name}: [error: cards not found]")
-            
-            # Limpa cache de cartas para próximo round (registry será limpo no próximo round_start)
-            self.players_hole_cards.clear()
-            self.my_hole_cards = None
-            
-            # Mostra ganhador(es)
-            if winner_uuids:
-                winner_names = []
-                player_won = False  # Verifica se o jogador humano venceu
-                player_hand_desc = None
-                num_winners = len(winner_uuids)
-                
-                for winner_uuid in winner_uuids:
-                    # Verifica se o jogador humano venceu
-                    if hasattr(self, 'uuid') and self.uuid and winner_uuid == self.uuid:
-                        player_won = True
-                        # Obtém descrição da mão do jogador
-                        all_cards = get_all_cards()
-                        hole_cards = all_cards.get(winner_uuid)
-                        if hole_cards:
-                            player_hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
-                    
-                    for seat in seats:
-                        if isinstance(seat, dict) and seat.get('uuid') == winner_uuid:
-                            name = self.formatter.clean_player_name(seat.get('name', ''))
-                            
-                            # Tenta obter mão do ganhador do registro global
-                            all_cards = get_all_cards()
-                            hole_cards = all_cards.get(winner_uuid)
-                            hand_desc = ""
-                            if hole_cards:
-                                hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
-                            
-                            if hand_desc:
-                                winner_names.append(f"{name} ({hand_desc})")
-                            else:
-                                winner_names.append(name)
-                            break
-                
-                if winner_names:
-                    winner_line = " | ".join(winner_names)
-                    pot_display = self.formatter.format_pot_with_color(pot)
-                    print(f"\nWinner(s): {winner_line} | Pot: {pot_display}")
-                
-                # Mostra mensagem destacada se o jogador humano venceu
-                if player_won:
-                    # Calcula pot ganho pelo jogador (dividido igualmente se houver múltiplos vencedores)
-                    player_pot = pot // num_winners if num_winners > 0 else pot
-                    # Obtém número do round do histórico
-                    round_number = 0
-                    if self.game_history and self.game_history.current_round:
-                        round_number = self.game_history.current_round.get("round_number", 0)
-                    print()
-                    print(self.formatter.format_round_winner(round_number, "You", player_pot, player_hand_desc))
-                    print()
-            
-            # Mostra stacks finais
-            final_stacks = []
-            for seat in seats:
-                if isinstance(seat, dict):
-                    name = self.formatter.clean_player_name(seat.get('name', ''))
-                    stack = seat.get('stack', 0)
-                    final_stacks.append(f"{name} {stack}")
-            
-            if final_stacks:
-                print(f"\nFinal stacks:")
-                print(" | ".join(final_stacks))
-            
-            # Registra resultado do round no histórico
-            if self.game_history:
-                self.game_history.record_round_result(winners, hand_info, round_state)
-                
-                # Verifica se é o último round (10 rounds é o padrão)
-                round_number = self.game_history.current_round.get("round_number", 0) if self.game_history.current_round else 0
-                if round_number >= 10:
-                    # Salva histórico ao final do jogo
                     try:
-                        history_file = self.game_history.save()
-                        print(f"\n[Histórico salvo em: {history_file}]")
+                        seat_uuid = seat.get('uuid', '')
+                        name = self.formatter.clean_player_name(seat.get('name', ''))
+                        state = seat.get('state', '')
+                        
+                        # Mapeia UUID e determina flags
+                        fixed_uuid = self._get_fixed_uuid_from_seat(seat, debug_mode)
+                        is_winner = fixed_uuid in winner_uuids if fixed_uuid else (seat_uuid in winner_uuids)
+                        is_folded = state == 'folded'
+                        is_player = hasattr(self, 'uuid') and self.uuid and (seat_uuid == self.uuid or fixed_uuid == self.uuid)
+                        
+                        # Se jogador deu fold e não é o jogador humano, mostra apenas "folded"
+                        if is_folded and not is_player:
+                            full_line = f"  {name}: folded"
+                            dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                            print(dim_line)
+                            continue
+                        
+                        # Obtém cartas usando método centralizado
+                        hole_cards = self._get_player_cards(
+                            fixed_uuid, seat, all_cards, winners_with_cards, 
+                            hand_info_dict, hand_info, seats, name, debug_mode
+                        )
+                        
+                        # Exibe cartas ou mensagem de erro
+                        if hole_cards and len(hole_cards) >= 2:
+                            cards_display = self.formatter.format_cards_display_with_color(hole_cards)
+                            hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
+                            folded_indicator = " (folded)" if is_folded and is_player else ""
+                            
+                            if is_folded:
+                                cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
+                                full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
+                                dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
+                                print(dim_line)
+                            else:
+                                print(f"  {name}: {cards_display} | {hand_desc}{folded_indicator}")
+                        else:
+                            # Mensagem de erro mais informativa
+                            error_msg = f"  {name}: [erro: cartas não encontradas"
+                            if debug_mode:
+                                error_msg += f" (UUID: {seat_uuid}, fixed: {fixed_uuid})"
+                            error_msg += "]"
+                            if is_folded and is_player:
+                                error_msg = f"  {name}: folded (cartas não encontradas)"
+                                dim_line = f"{self.formatter.DIM}{error_msg}{self.formatter.RESET}"
+                                print(dim_line)
+                            else:
+                                print(error_msg)
                     except Exception as e:
-                        print(f"\n[Erro ao salvar histórico: {e}]")
+                        # Tratamento de erro robusto
+                        error_msg = f"  {name}: [erro ao processar: {type(e).__name__}]"
+                        if debug_mode:
+                            error_msg += f" - {str(e)}"
+                            import traceback
+                            traceback.print_exc()
+                        print(error_msg)
             
-            # Pausa para aguardar input antes de continuar
-            print()
-            self.__wait_for_continue()
-            
-            # Reseta pot impresso para próximo round
-            self.last_pot_printed = 0
-            # Limpa cache de cartas (já foi limpo acima, mas garantindo)
-            self.players_hole_cards.clear()
-            self.my_hole_cards = None
+                # Mostra ganhador(es)
+                if winner_uuids:
+                    try:
+                        winner_names = []
+                        player_won = False
+                        player_hand_desc = None
+                        num_winners = len(winner_uuids)
+                        all_cards = get_all_cards()
+                        
+                        for winner_uuid in winner_uuids:
+                            # Verifica se o jogador humano venceu
+                            if hasattr(self, 'uuid') and self.uuid and winner_uuid == self.uuid:
+                                player_won = True
+                                hole_cards = all_cards.get(winner_uuid)
+                                if hole_cards:
+                                    player_hand_desc = self.formatter.get_hand_strength_heuristic(
+                                        hole_cards, community_cards, current_street
+                                    )
+                            
+                            # Encontra nome do winner nos seats
+                            for seat in seats:
+                                if isinstance(seat, dict):
+                                    seat_uuid = seat.get('uuid', '')
+                                    fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                                    if seat_uuid == winner_uuid or fixed_uuid == winner_uuid:
+                                        name = self.formatter.clean_player_name(seat.get('name', ''))
+                                        hole_cards = all_cards.get(winner_uuid)
+                                        hand_desc = ""
+                                        if hole_cards:
+                                            hand_desc = self.formatter.get_hand_strength_heuristic(
+                                                hole_cards, community_cards, current_street
+                                            )
+                                        
+                                        if hand_desc:
+                                            winner_names.append(f"{name} ({hand_desc})")
+                                        else:
+                                            winner_names.append(name)
+                                        break
+                        
+                        if winner_names:
+                            winner_line = " | ".join(winner_names)
+                            pot_display = self.formatter.format_pot_with_color(pot)
+                            print(f"\nWinner(s): {winner_line} | Pot: {pot_display}")
+                        
+                        # Mostra mensagem destacada se o jogador humano venceu
+                        if player_won:
+                            player_pot = pot // num_winners if num_winners > 0 else pot
+                            round_number = 0
+                            if self.game_history and self.game_history.current_round:
+                                round_number = self.game_history.current_round.get("round_number", 0)
+                            print()
+                            print(self.formatter.format_round_winner(round_number, "You", player_pot, player_hand_desc))
+                            print()
+                    except Exception as e:
+                        if debug_mode:
+                            print(f"[DEBUG] Erro ao processar winners: {type(e).__name__}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                        print(f"\n[Erro ao processar winners]")
+                
+                # Mostra stacks finais
+                try:
+                    final_stacks = []
+                    for seat in seats:
+                        if isinstance(seat, dict):
+                            name = self.formatter.clean_player_name(seat.get('name', ''))
+                            stack = seat.get('stack', 0)
+                            final_stacks.append(f"{name} {stack}")
+                    
+                    if final_stacks:
+                        print(f"\nFinal stacks:")
+                        print(" | ".join(final_stacks))
+                except Exception as e:
+                    if debug_mode:
+                        print(f"[DEBUG] Erro ao mostrar stacks finais: {type(e).__name__}: {e}")
+                
+                # Registra resultado do round no histórico
+                if self.game_history:
+                    try:
+                        self.game_history.record_round_result(winners, hand_info, round_state)
+                        
+                        # Salva histórico ao final do jogo (não apenas no round 10)
+                        round_number = 0
+                        if self.game_history.current_round:
+                            round_number = self.game_history.current_round.get("round_number", 0)
+                        
+                        # Tenta salvar histórico (pode falhar se jogo terminar antes do round 10)
+                        if round_number >= 10:
+                            try:
+                                history_file = self.game_history.save()
+                                print(f"\n[Histórico salvo em: {history_file}]")
+                            except Exception as e:
+                                if debug_mode:
+                                    print(f"[DEBUG] Erro ao salvar histórico: {type(e).__name__}: {e}")
+                                print(f"\n[Aviso: não foi possível salvar histórico]")
+                    except Exception as e:
+                        if debug_mode:
+                            print(f"[DEBUG] Erro ao registrar resultado: {type(e).__name__}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                
+                # Pausa para aguardar input antes de continuar
+                print()
+                self.__wait_for_continue()
+                
+                # Limpa todos os caches para próximo round
+                self._clear_all_caches()
+                self.last_pot_printed = 0
+        
+        except Exception as e:
+            # Tratamento de erro geral para não quebrar o jogo
+            debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+            print(f"\n[Erro ao processar resultado do round: {type(e).__name__}]")
+            if debug_mode:
+                print(f"[DEBUG] Detalhes: {e}")
+                import traceback
+                traceback.print_exc()
+            # Limpa caches mesmo em caso de erro
+            self._clear_all_caches()
 
     def __wait_until_input(self):
         """Método não utilizado mais - mantido para compatibilidade."""

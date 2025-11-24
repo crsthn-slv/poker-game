@@ -183,6 +183,9 @@ Todos os bots usam a mesma estrutura JSON:
       "first_seen_round": 1,
       "last_seen_round": 10,
       "total_rounds_against": 10,
+      "bluff_probability": 0.15,
+      "aggression_level": 0.52,
+      "tightness_threshold": 28,
       "rounds_against": [
         {
           "round": 1,
@@ -328,6 +331,28 @@ def declare_action(self, valid_actions, hole_card, round_state):
 
 Isso permite que os bots **reajam imediatamente** às ações dos oponentes, não apenas aprendam após o round.
 
+### Sistema de Identificação de Oponentes (UUIDs Fixos)
+
+**IMPORTANTE:** O sistema usa UUIDs determinísticos baseados na classe do bot para garantir rastreamento consistente.
+
+**Como Funciona:**
+- Cada tipo de bot tem um UUID fixo baseado em sua classe (não no nome)
+- O mesmo tipo de bot sempre tem o mesmo UUID, independente do nome ou da partida
+- Isso garante que os bots reconheçam corretamente os mesmos oponentes entre partidas
+- Todos os 21 bots conhecidos são pré-registrados na memória desde o início
+
+**Vantagens:**
+- Rastreamento consistente: um bot sempre reconhece o mesmo oponente
+- Memória não cresce infinitamente: máximo de 20 oponentes por bot (21 bots totais - 1 próprio)
+- Aprendizado acumulado: parâmetros específicos por oponente são mantidos entre partidas
+
+**Exemplo:**
+```python
+# TightPlayer sempre tem o mesmo UUID (baseado em sua classe)
+# Mesmo que seja chamado de "Tight", "Blaze" ou qualquer outro nome
+# Todos os outros bots reconhecem TightPlayer pelo mesmo UUID fixo
+```
+
 ### Registro de Ações e Oponentes
 
 Durante o jogo, os bots registram:
@@ -367,6 +392,7 @@ def receive_round_result_message(self, winners, hand_info, round_state):
 
 Para cada oponente, o bot registra:
 - **Nome** do oponente
+- **Parâmetros específicos** (`bluff_probability`, `aggression_level`, `tightness_threshold`) - aprendidos especificamente para este oponente
 - **Ações observadas** durante cada round
 - **Cartas** (quando o oponente chega ao showdown)
 - **Força da mão** calculada a partir das cartas
@@ -376,6 +402,31 @@ Para cada oponente, o bot registra:
 Isso permite que o bot aprenda padrões observados sem inferir valores abstratos.
 
 **Nota:** O histórico de oponentes é usado para aprendizado de longo prazo. Para reação em tempo real, os bots usam `analyze_current_round_actions()` que analisa apenas as ações do round atual.
+
+### Parâmetros Específicos por Oponente
+
+**NOVO:** Cada bot mantém parâmetros de estratégia específicos para cada oponente que já enfrentou:
+
+- **`bluff_probability`**: Probabilidade de blefe contra este oponente específico
+- **`aggression_level`**: Nível de agressão contra este oponente específico
+- **`tightness_threshold`**: Threshold de seletividade contra este oponente específico
+
+**Inicialização:**
+- Quando um oponente é registrado pela primeira vez, seus parâmetros específicos são inicializados com os valores globais do bot
+- Conforme o bot joga mais rounds contra o oponente, os parâmetros evoluem independentemente
+
+**Uso na Decisão:**
+- Durante `declare_action()`, o bot identifica o oponente principal no round
+- Usa os parâmetros específicos desse oponente para tomar decisões (com fallback para parâmetros globais se não houver parâmetros específicos)
+- Isso permite que o bot adapte sua estratégia para cada oponente individualmente
+
+**Exemplo:**
+```python
+# Bot pode ter estratégia diferente contra cada oponente
+# Parâmetros globais: bluff=0.17, aggression=0.55, tightness=27
+# Contra TightPlayer: bluff=0.15, aggression=0.52, tightness=28 (mais conservador)
+# Contra AggressivePlayer: bluff=0.20, aggression=0.60, tightness=25 (mais agressivo)
+```
 
 ---
 
@@ -729,14 +780,15 @@ def receive_round_start_message(self, round_count, hole_card, seats):
 
 **Fluxo automático:**
 1. Identifica oponentes
-2. Analisa ações do round atual (`analyze_current_round_actions`)
-3. Avalia força da mão (`evaluate_hand_strength`)
-4. Analisa possível blefe dos oponentes (`analyze_possible_bluff`)
-5. Carrega parâmetros atualizados da memória
-6. Decide se deve blefar (baseado em `config.bluff_probability`)
-7. Escolhe ação (blefe ou normal) baseado em configuração
-8. Registra ação na memória
-9. Retorna ação e valor
+2. Identifica oponente principal no round (para usar parâmetros específicos)
+3. Analisa ações do round atual (`analyze_current_round_actions`)
+4. Avalia força da mão (`evaluate_hand_strength`)
+5. Analisa possível blefe dos oponentes (`analyze_possible_bluff`)
+6. Carrega parâmetros atualizados da memória (específicos do oponente principal ou globais)
+7. Decide se deve blefar (baseado em parâmetros específicos ou globais)
+8. Escolhe ação (blefe ou normal) baseado em configuração e parâmetros específicos
+9. Registra ação na memória
+10. Retorna ação e valor
 
 **Você não precisa implementar isso!** Tudo é automático baseado na configuração.
 
@@ -762,13 +814,15 @@ def receive_round_start_message(self, round_count, hole_card, seats):
 
 **O que faz automaticamente:**
 1. Processa resultado usando `memory_manager.process_round_result()`
+   - Registra round contra cada oponente
+   - **Aprende parâmetros específicos para cada oponente** (após 5+ rounds)
 2. Atualiza stack atual
 3. Atualiza estatísticas (`total_rounds`, `wins`)
-4. Executa aprendizado baseado em configuração:
+4. Executa aprendizado global baseado em configuração:
    - Ajusta agressão/blefe quando win rate > `win_rate_threshold_high`
    - Reduz agressão/aumenta threshold quando win rate < `win_rate_threshold_low`
    - Velocidade controlada por `learning_speed`
-5. Salva memória atualizada
+5. Salva memória atualizada (incluindo parâmetros específicos por oponente)
 
 **Você não precisa implementar isso!** O aprendizado padrão é suficiente para a maioria dos casos.
 
@@ -858,6 +912,74 @@ self.opponent_history[uuid]['patterns']['aggression'] = \
 avg_opponent_aggression = self._get_avg_opponent_aggression(active_opponents)
 if avg_opponent_aggression > 0.7:
     base_probability *= 0.7  # Reduz blefe contra oponentes agressivos
+```
+
+#### 5. Aprendizado por Oponente Específico (Todos os Bots)
+
+**NOVO:** Todos os bots agora aprendem parâmetros específicos para cada oponente individualmente.
+
+**Características:**
+- Cada bot mantém parâmetros de estratégia (`bluff_probability`, `aggression_level`, `tightness_threshold`) específicos para cada oponente
+- Parâmetros evoluem independentemente baseado na performance contra cada oponente
+- Aprendizado ativo após 5+ rounds contra um oponente
+- Decisões usam parâmetros específicos do oponente principal no round
+
+**Como Funciona:**
+
+1. **Inicialização:**
+   - Quando um oponente é registrado pela primeira vez, seus parâmetros específicos são inicializados com os valores globais do bot
+   - Todos os 21 bots conhecidos são pré-registrados na memória (mesmo que ainda não tenham jogado juntos)
+
+2. **Aprendizado:**
+   ```python
+   # Após cada round, o bot aprende com o resultado contra cada oponente
+   def learn_from_opponent_result(memory, opp_uuid, i_won, opp_won):
+       # Calcula taxa de vitória contra este oponente (últimos 10 rounds)
+       recent_rounds = opp['rounds_against'][-10:]
+       win_rate = wins_against / len(recent_rounds)
+       
+       # Se está ganhando bem (>60%): aumenta agressão e blefe
+       if win_rate > 0.6:
+           opp['aggression_level'] *= 1.01  # +1%
+           opp['bluff_probability'] *= 1.01
+       
+       # Se está perdendo (<40%): reduz agressão, aumenta seletividade
+       elif win_rate < 0.4:
+           opp['tightness_threshold'] += 1
+           opp['aggression_level'] /= 1.01  # -1%
+           opp['bluff_probability'] /= 1.01
+   ```
+
+3. **Uso na Decisão:**
+   ```python
+   def declare_action(self, valid_actions, hole_card, round_state):
+       # Identifica oponente principal no round
+       primary_opponent_uuid = self._get_primary_opponent_uuid(round_state)
+       
+       # Carrega parâmetros específicos deste oponente (ou globais se não houver)
+       self._load_parameters_from_memory(primary_opponent_uuid)
+       
+       # Usa parâmetros específicos para tomar decisão
+       # ...
+   ```
+
+**Vantagens:**
+- Bots adaptam estratégia para cada oponente individualmente
+- Aprendizado mais preciso e contextualizado
+- Estratégias diferentes para oponentes diferentes (ex: mais conservador contra Tight, mais agressivo contra Aggressive)
+
+**Exemplo Prático:**
+```python
+# Bot LearningPlayer tem:
+# Parâmetros globais: bluff=0.17, aggression=0.55, tightness=27
+
+# Após jogar 20 rounds contra TightPlayer:
+# Parâmetros vs Tight: bluff=0.15, aggression=0.52, tightness=28
+# (aprendeu que precisa ser mais conservador contra Tight)
+
+# Após jogar 15 rounds contra AggressivePlayer:
+# Parâmetros vs Aggressive: bluff=0.20, aggression=0.60, tightness=25
+# (aprendeu que pode ser mais agressivo contra Aggressive)
 ```
 
 ### Algoritmos de Aprendizado
@@ -1481,6 +1603,9 @@ Para entender como um bot decide sua ação, siga este fluxo:
 
 - Salvamento de memória é feito assincronamente (não bloqueia jogo)
 - Históricos são limitados (10-50 rodadas) para evitar crescimento infinito
+- **Oponentes rastreados**: Máximo de 20 oponentes por bot (21 bots totais - 1 próprio)
+- **Parâmetros específicos por oponente**: Mantidos indefinidamente e evoluem com aprendizado
+- **UUIDs fixos**: Garantem rastreamento consistente e evitam duplicação de oponentes
 - Operações de arquivo falham silenciosamente para não quebrar o jogo
 
 ### Debugging

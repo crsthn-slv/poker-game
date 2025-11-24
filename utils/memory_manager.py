@@ -8,7 +8,8 @@ from typing import Dict, List, Optional, Any
 from .unified_memory import (
     create_default_memory, register_new_opponent, parse_hand_info,
     extract_hole_cards, record_opponent_round, record_my_action,
-    evaluate_action_result, save_unified_memory, load_unified_memory
+    evaluate_action_result, save_unified_memory, load_unified_memory,
+    learn_from_opponent_result
 )
 from .hand_utils import evaluate_hand_strength, get_community_cards
 
@@ -136,14 +137,30 @@ class UnifiedMemoryManager:
         hand_info_dict = parse_hand_info(hand_info, round_state)
         community_cards = get_community_cards(round_state)
         
-        # Identifica oponentes
-        opponents_uuids = [
-            s.get('uuid') for s in round_state.get('seats', [])
-            if isinstance(s, dict) and s.get('uuid') != my_uuid and s.get('state') == 'participating'
-        ]
+        # Identifica oponentes (converte para UUIDs fixos)
+        from utils.uuid_utils import get_bot_class_uuid_from_name
+        
+        # Obtém UUID fixo do próprio bot
+        my_seat = next((s for s in round_state.get('seats', []) 
+                       if isinstance(s, dict) and s.get('uuid') == my_uuid), None)
+        my_name = my_seat.get('name', 'Unknown') if my_seat else None
+        my_uuid_fixed = get_bot_class_uuid_from_name(my_name) if my_name else my_uuid
+        
+        # Identifica oponentes e converte para UUIDs fixos
+        opponents_uuids_fixed = []
+        for seat in round_state.get('seats', []):
+            if isinstance(seat, dict):
+                opp_uuid_from_seat = seat.get('uuid')
+                if opp_uuid_from_seat and opp_uuid_from_seat != my_uuid:
+                    opp_name = seat.get('name', 'Unknown')
+                    opp_uuid_fixed = get_bot_class_uuid_from_name(opp_name)
+                    opp_uuid = opp_uuid_fixed if opp_uuid_fixed else opp_uuid_from_seat
+                    
+                    if opp_uuid != my_uuid_fixed and seat.get('state') == 'participating':
+                        opponents_uuids_fixed.append(opp_uuid)
         
         # Processa cada oponente
-        for opp_uuid in opponents_uuids:
+        for opp_uuid in opponents_uuids_fixed:
             if opp_uuid not in self.memory['opponents']:
                 continue
             
@@ -174,6 +191,14 @@ class UnifiedMemoryManager:
                 opponent_actions, reached_showdown, hole_cards, hand_strength,
                 opp_won, won, community_cards
             )
+            
+            # Aprende com o resultado contra este oponente
+            learn_from_opponent_result(
+                self.memory, opp_uuid, won, opp_won,
+                learning_speed=0.01,  # 1% de ajuste por round
+                win_rate_threshold_high=0.6,
+                win_rate_threshold_low=0.4
+            )
         
         # Avalia ações do bot
         my_seat = next(
@@ -197,7 +222,7 @@ class UnifiedMemoryManager:
         # Salva histórico do round
         round_history_entry = {
             'round': self.memory['total_rounds'],
-            'opponents_uuids': opponents_uuids,
+            'opponents_uuids': opponents_uuids_fixed,
             'my_actions': self._current_round_actions.copy(),
             'final_result': {
                 'won': won,
