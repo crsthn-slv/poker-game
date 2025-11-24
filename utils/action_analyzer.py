@@ -2,6 +2,7 @@
 Utilitário para analisar ações do round atual antes da decisão do bot.
 Permite que os bots reajam em tempo real às ações dos oponentes.
 """
+from utils.action_dataclasses import CurrentActions
 
 
 def analyze_current_round_actions(round_state, my_uuid):
@@ -27,13 +28,7 @@ def analyze_current_round_actions(round_state, my_uuid):
     street_actions = action_histories.get(current_street, [])
     
     if not street_actions:
-        return {
-            'has_raises': False,
-            'raise_count': 0,
-            'call_count': 0,
-            'last_action': None,
-            'total_aggression': 0.0
-        }
+        return CurrentActions()
     
     # Analisa ações (excluindo as minhas)
     raises = 0
@@ -75,18 +70,19 @@ def analyze_current_round_actions(round_state, my_uuid):
             passive_opportunity_score += 0.15
         passive_opportunity_score = min(1.0, passive_opportunity_score)
     
-    return {
-        'has_raises': raises > 0,
-        'raise_count': raises,
-        'call_count': calls,
-        'last_action': last_action_type,
-        'total_aggression': aggression,
-        'is_passive': is_passive,
-        'passive_opportunity_score': passive_opportunity_score
-    }
+    return CurrentActions(
+        has_raises=raises > 0,
+        raise_count=raises,
+        call_count=calls,
+        last_action=last_action_type,
+        total_aggression=aggression,
+        is_passive=is_passive,
+        passive_opportunity_score=passive_opportunity_score
+    )
 
 
 def analyze_possible_bluff(round_state, my_uuid, my_hand_strength, memory_manager=None):
+    from utils.action_dataclasses import BluffAnalysis
     """
     Analisa se os oponentes podem estar blefando baseado em:
     - Ações do round atual (muitos raises = possível blefe)
@@ -121,14 +117,14 @@ def analyze_possible_bluff(round_state, my_uuid, my_hand_strength, memory_manage
     
     # Fatores que indicam possível blefe:
     # 1. Muitos raises na street atual
-    if current_actions['raise_count'] >= 2:
+    if current_actions.raise_count >= 2:
         bluff_prob += 0.4  # Muitos raises = possível blefe
         factors['multiple_raises'] = True
-    elif current_actions['raise_count'] == 1:
+    elif current_actions.raise_count == 1:
         bluff_prob += 0.2  # Um raise = possível blefe
     
     # 2. Agressão alta (muitos raises vs calls)
-    if current_actions['total_aggression'] > 0.6:
+    if current_actions.total_aggression > 0.6:
         bluff_prob += 0.2
         factors['high_aggression'] = True
     
@@ -180,15 +176,15 @@ def analyze_possible_bluff(round_state, my_uuid, my_hand_strength, memory_manage
     
     # Confiança na análise
     confidence = 0.5  # Base
-    if current_actions['raise_count'] >= 2:
+    if current_actions.raise_count >= 2:
         confidence += 0.2  # Mais confiança com múltiplos raises
     if memory_manager and active_opponents:
         confidence += 0.1  # Mais confiança com histórico
     
-    return {
-        'possible_bluff_probability': bluff_prob,
-        'should_call_bluff': should_call,
-        'bluff_confidence': min(1.0, confidence),
-        'analysis_factors': factors
-    }
+    return BluffAnalysis(
+        possible_bluff_probability=bluff_prob,
+        should_call_bluff=should_call,
+        bluff_confidence=min(1.0, confidence),
+        analysis_factors=factors
+    )
 

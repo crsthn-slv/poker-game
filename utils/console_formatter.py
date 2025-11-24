@@ -303,10 +303,13 @@ class ConsoleFormatter:
         
         # Agrupa ações por jogador
         player_actions = {}  # {player_uuid: [(street, action_type, amount, paid)]}
+        # Rastreia última ação de cada jogador por street para detectar all-in
+        last_action_index_by_player = {}  # {player_uuid: {street: index}}
         
         # Ordem das streets
         street_order = ['preflop', 'flop', 'turn', 'river']
         
+        # Primeira passagem: rastreia índices das últimas ações de cada jogador por street
         for street in street_order:
             if street not in action_histories:
                 continue
@@ -315,7 +318,30 @@ class ConsoleFormatter:
             if not street_history:
                 continue
             
-            for action in street_history:
+            for idx, action in enumerate(street_history):
+                if not isinstance(action, dict):
+                    continue
+                
+                player_uuid = action.get('uuid', '')
+                if not player_uuid:
+                    player_name = action.get('player', '')
+                    player_uuid = player_name if player_name else "unknown"
+                
+                # Rastreia índice da última ação do jogador nesta street
+                if player_uuid not in last_action_index_by_player:
+                    last_action_index_by_player[player_uuid] = {}
+                last_action_index_by_player[player_uuid][street] = idx
+        
+        # Segunda passagem: formata ações e detecta all-in
+        for street in street_order:
+            if street not in action_histories:
+                continue
+            
+            street_history = action_histories.get(street, [])
+            if not street_history:
+                continue
+            
+            for idx, action in enumerate(street_history):
                 if not isinstance(action, dict):
                     continue
                 
@@ -344,6 +370,23 @@ class ConsoleFormatter:
                 amount = action.get('amount', 0)
                 paid = action.get('paid', 0)
                 
+                # Detecta all-in: verifica se esta é a última ação do jogador nesta street
+                # e se o stack atual é 0 após essa ação
+                is_all_in = False
+                if round_state and player_uuid in uuid_to_stack:
+                    current_stack = uuid_to_stack.get(player_uuid, 0)
+                    # Verifica se esta é a última ação do jogador nesta street
+                    is_last_action = (
+                        player_uuid in last_action_index_by_player and
+                        street in last_action_index_by_player[player_uuid] and
+                        last_action_index_by_player[player_uuid][street] == idx
+                    )
+                    # Se o stack atual é 0, a ação foi CALL ou RAISE, e esta é a última ação, é all-in
+                    if (current_stack == 0 and 
+                        action_type in ['CALL', 'RAISE'] and 
+                        is_last_action):
+                        is_all_in = True
+                
                 # Formata ação
                 if action_type == 'SMALLBLIND':
                     action_display = f'SB({amount})'
@@ -351,11 +394,17 @@ class ConsoleFormatter:
                     action_display = f'BB({amount})'
                 elif action_type == 'CALL':
                     if paid > 0:
-                        action_display = f'call({paid})'
+                        if is_all_in:
+                            action_display = f'all-in({paid})'
+                        else:
+                            action_display = f'call({paid})'
                     else:
                         action_display = 'check'
                 elif action_type == 'RAISE':
-                    action_display = f'raise({amount})'
+                    if is_all_in:
+                        action_display = f'all-in({amount})'
+                    else:
+                        action_display = f'raise({amount})'
                 elif action_type == 'CHECK':
                     action_display = 'check'
                 elif action_type == 'FOLD':
@@ -411,14 +460,16 @@ class ConsoleFormatter:
         
         return result
     
-    def format_action_costs(self, valid_actions):
+    def format_action_costs(self, valid_actions, round_state=None, player_uuid=None):
         """Formata custos das ações disponíveis.
         
         Args:
             valid_actions: Lista de ações válidas do PyPokerEngine
+            round_state: Estado do round (opcional, para calcular valor adicional de call)
+            player_uuid: UUID do jogador (opcional, para calcular valor adicional de call)
         
         Returns:
-            Lista de strings formatadas
+            Lista de tuplas (texto_formatado, é_disponível)
         """
         if not valid_actions:
             return []
@@ -429,19 +480,139 @@ class ConsoleFormatter:
             amount = action.get('amount', 0)
             
             if action_type == 'fold':
-                action_texts.append("FOLD")
+                action_texts.append(("FOLD", True))
             elif action_type == 'call':
-                if amount > 0:
-                    action_texts.append(f"CALL ({amount})")
+                # IMPORTANTE: O amount do PyPokerEngine já é o valor adicional a pagar
+                # Mas vamos garantir que está correto calculando baseado no histórico se disponível
+                call_amount = amount
+                player_stack = 0
+                
+                # Obtém stack do jogador para verificar se pode fazer call completo
+                if round_state and player_uuid:
+                    seats = round_state.get('seats', [])
+                    for seat in seats:
+                        if isinstance(seat, dict):
+                            seat_uuid = seat.get('uuid', '')
+                            if seat_uuid == player_uuid:
+                                player_stack = seat.get('stack', 0)
+                                break
+                
+                # Se temos round_state e player_uuid, calcula valor adicional baseado no que já foi apostado
+                if round_state and player_uuid:
+                    try:
+                        # Calcula quanto o jogador já apostou nesta rodada
+                        action_histories = round_state.get('action_histories', {})
+                        current_street = round_state.get('street', 'preflop')
+                        
+                        # Soma todas as apostas do jogador na street atual
+                        already_bet = 0
+                        if current_street in action_histories:
+                            for action_item in action_histories[current_street]:
+                                if isinstance(action_item, dict):
+                                    action_uuid = action_item.get('uuid', '')
+                                    if action_uuid == player_uuid:
+                                        # Para CALL, usa 'paid', para RAISE usa 'amount'
+                                        if action_item.get('action') == 'CALL':
+                                            already_bet += action_item.get('paid', 0)
+                                        elif action_item.get('action') == 'RAISE':
+                                            already_bet += action_item.get('amount', 0)
+                                        elif action_item.get('action') in ['SMALLBLIND', 'BIGBLIND']:
+                                            already_bet += action_item.get('amount', 0)
+                        
+                        # O PyPokerEngine já retorna o valor adicional no amount
+                        # Mas se o amount parece ser o valor total (maior que o que já foi apostado),
+                        # calcula o adicional
+                        if already_bet > 0 and amount > already_bet:
+                            # Se o amount é maior que o que já foi apostado, pode ser o valor total
+                            # Nesse caso, o valor adicional seria amount - already_bet
+                            call_amount = amount - already_bet
+                        else:
+                            # Caso contrário, amount já é o valor adicional
+                            call_amount = amount
+                    except Exception:
+                        # Em caso de erro, usa o amount original
+                        call_amount = amount
+                
+                # IMPORTANTE: Se o stack é menor que o call_amount, será all-in
+                # Mostra ALL IN em vez de CALL quando apropriado
+                if player_stack > 0 and call_amount > 0 and player_stack < call_amount:
+                    # Stack insuficiente para call completo - será all-in
+                    action_texts.append((f"ALL IN ({player_stack})", True))
+                elif call_amount > 0:
+                    action_texts.append((f"CALL ({call_amount})", True))
                 else:
-                    action_texts.append("CHECK (0)")
+                    action_texts.append(("CHECK (0)", True))
             elif action_type == 'raise':
-                min_raise = action.get('amount', {}).get('min', 0)
-                max_raise = action.get('amount', {}).get('max', 0)
-                if min_raise == max_raise:
-                    action_texts.append(f"RAISE ({min_raise})")
+                # Verifica se raise é possível
+                raise_amount = action.get('amount', {})
+                player_stack = 0
+                
+                # Obtém stack do jogador para verificar se pode fazer raise completo
+                if round_state and player_uuid:
+                    seats = round_state.get('seats', [])
+                    for seat in seats:
+                        if isinstance(seat, dict):
+                            seat_uuid = seat.get('uuid', '')
+                            if seat_uuid == player_uuid:
+                                player_stack = seat.get('stack', 0)
+                                break
+                
+                if isinstance(raise_amount, dict):
+                    min_raise = raise_amount.get('min', -1)
+                    max_raise = raise_amount.get('max', -1)
+                    # Sempre mostra raise, mas marca como indisponível se min == -1
+                    if min_raise >= 0:
+                        # IMPORTANTE: Se o min_raise exceder o stack, será all-in
+                        if player_stack > 0 and min_raise > player_stack:
+                            # Stack insuficiente para raise mínimo - será all-in
+                            action_texts.append((f"ALL IN ({player_stack})", True))
+                        elif min_raise == max_raise:
+                            # Verifica se o raise único excederá o stack
+                            if player_stack > 0 and min_raise > player_stack:
+                                action_texts.append((f"ALL IN ({player_stack})", True))
+                            else:
+                                action_texts.append((f"RAISE ({min_raise})", True))
+                        else:
+                            # Range de raise - verifica se o mínimo já excede o stack
+                            if player_stack > 0 and min_raise > player_stack:
+                                action_texts.append((f"ALL IN ({player_stack})", True))
+                            else:
+                                # Limita max_raise ao stack se necessário
+                                display_max = min(max_raise, player_stack) if player_stack > 0 else max_raise
+                                if min_raise == display_max:
+                                    action_texts.append((f"RAISE ({min_raise})", True))
+                                else:
+                                    action_texts.append((f"RAISE ({min_raise}-{display_max})", True))
+                    else:
+                        # Raise não é possível, mas mostra esmaecido
+                        action_texts.append(("RAISE (unavailable)", False))
                 else:
-                    action_texts.append(f"RAISE ({min_raise}-{max_raise})")
+                    # Se amount não é dict, trata como valor único
+                    if amount > 0:
+                        # Verifica se o amount excederá o stack
+                        if player_stack > 0 and amount > player_stack:
+                            action_texts.append((f"ALL IN ({player_stack})", True))
+                        else:
+                            action_texts.append((f"RAISE ({amount})", True))
+                    else:
+                        action_texts.append(("RAISE (unavailable)", False))
+        
+        # IMPORTANTE: Adiciona "All In" sempre disponível no final
+        # Calcula o valor do all-in baseado no stack do jogador
+        all_in_amount = 0
+        if round_state and player_uuid:
+            seats = round_state.get('seats', [])
+            for seat in seats:
+                if isinstance(seat, dict):
+                    seat_uuid = seat.get('uuid', '')
+                    if seat_uuid == player_uuid:
+                        all_in_amount = seat.get('stack', 0)
+                        break
+        
+        if all_in_amount > 0:
+            action_texts.append((f"ALL IN ({all_in_amount})", True))
+        else:
+            action_texts.append(("ALL IN", True))
         
         return action_texts
     

@@ -296,7 +296,7 @@ if __name__ == "__main__":
     print(f"\nRandomly selected bots:")
     for bot_info in selected_bots:
         print(f"  - {bot_info['name']}")
-    print("\nUse 'f' for FOLD, 'c' for CALL, 'r' for RAISE")
+    print("\nUse 'f' for FOLD, 'c' for CALL, 'r' for RAISE, 'a' for ALL IN")
     print("Type 'q' at any time to quit")
     print("=" * 60)
     print()

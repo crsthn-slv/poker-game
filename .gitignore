@@ -102,3 +102,31 @@ cython_debug/
 # Davia
 .davia/
 .cursor/rules/davia-documentation.mdc
+
+# Documentação (não pública)
+docs/
+!docs/README.md
+
+# Relatórios e dados de análise
+*.md
+!README.md
+!CHANGELOG.md
+!CODE_OF_CONDUCT.md
+!CONTRIBUTING.md
+!LICENSE
+!SECURITY.md
+relatorio_*.md
+analise_*.md
+dados_completos_*.json
+
+# Algoritmos de teste
+tests/
+!tests/__init__.py
+
+# Versão web
+web/
+
+# Dados de histórico e resultados de testes
+data/history/
+data/test_results_*.json
+data/opponent_registry.json

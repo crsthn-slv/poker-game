@@ -19,17 +19,20 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         
         # Probabilidade inicial de blefe (0.0 = nunca blefa, 1.0 = sempre blefa)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.10-0.25
-        default_bluff=0.12,
+        # Cautious: blefa menos frequentemente
+        default_bluff=0.10,
         
         # Nível inicial de agressão (0.0 = passivo, 1.0 = muito agressivo)
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.40-0.65
         # Controla frequência de raises vs calls
-        default_aggression=0.48,
+        # Cautious: agressão baixa
+        default_aggression=0.42,
         
         # Threshold inicial de seletividade (quanto maior, mais seletivo)
         # Mínimo: 15 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para não foldar
-        default_tightness=25,
+        # Cautious: mais seletivo (joga menos mãos)
+        default_tightness=30,
         
         # ============================================================
         # THRESHOLDS DE DECISÃO
@@ -38,17 +41,20 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=20,
+        # Cautious: threshold alto (folda mais mãos)
+        fold_threshold_base=24,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise
-        raise_threshold=29,
+        # Cautious: threshold alto (raise menos frequentemente)
+        raise_threshold=32,
         
         # Threshold para mão muito forte (sempre faz raise)
         # Mínimo: 30 | Máximo: 60 | Típico: 30-55
         # Mão com força >= este valor = raise garantido
-        strong_hand_threshold=55,
+        # Cautious: threshold alto (só raise com mãos muito fortes)
+        strong_hand_threshold=58,
         
         # ============================================================
         # AJUSTES DE VALOR DE RAISE
@@ -119,7 +125,8 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Quanto aumenta agressão quando campo está passivo (só calls)
         # Mínimo: 0.0 | Máximo: 0.50 | Típico: 0.10-0.35
         # Multiplicado pelo passive_opportunity_score
-        passive_aggression_boost=0.10,
+        # Cautious: aproveita menos oportunidades passivas
+        passive_aggression_boost=0.08,
         
         # Fator de redução do threshold em campo passivo
         # Mínimo: 2.0 | Máximo: 5.0 | Típico: 3.0-4.0
@@ -134,7 +141,8 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Threshold para fazer raise em campo passivo
         # Mínimo: 20 | Máximo: 50 | Típico: 20-35
         # Mão precisa ter força >= este valor para raise em campo passivo
-        passive_raise_threshold=50,
+        # Cautious: threshold muito alto (só raise com mãos excepcionais)
+        passive_raise_threshold=55,
         
         # Score mínimo de oportunidade para raise em campo passivo
         # Mínimo: 0.0 | Máximo: 1.0 | Típico: 0.4-0.7
@@ -173,3 +181,10 @@ class CautiousPlayer(PokerBotBase):
     def __init__(self, memory_file="cautious_player_memory.json"):
         config = _create_config(memory_file)
         super().__init__(config)
+    
+    def _get_risk_sensitivity(self):
+        """
+        Sobrescreve: Cautious tem alta sensibilidade ao risco.
+        Retorna 1.5 para ser mais conservador em situações de risco.
+        """
+        return 1.5

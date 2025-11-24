@@ -44,12 +44,16 @@ class UnifiedMemoryManager:
     def identify_opponents(self, round_state: Dict[str, Any], my_uuid: str) -> None:
         """Identifica e registra oponentes no round atual.
         
+        MELHORIA #10: Usa registro persistente de oponentes para melhor identificação.
+        
         Args:
             round_state: Estado do round
             my_uuid: UUID do bot
         """
         from utils.uuid_utils import get_bot_class_uuid_from_name
+        from utils.opponent_registry import get_opponent_registry, register_opponent
         
+        registry = get_opponent_registry()
         seats = round_state.get('seats', [])
         current_round = self.memory['total_rounds'] + 1
         
@@ -64,9 +68,25 @@ class UnifiedMemoryManager:
                 if opp_uuid_from_seat and opp_uuid_from_seat != my_uuid:
                     opp_name = seat.get('name', 'Unknown')
                     
-                    # Obtém UUID fixo do oponente
-                    opp_uuid_fixed = get_bot_class_uuid_from_name(opp_name)
-                    opp_uuid = opp_uuid_fixed if opp_uuid_fixed else opp_uuid_from_seat
+                    # MELHORIA #10: Tenta obter UUID do registro persistente primeiro
+                    opp_uuid_registered = registry.get_opponent_uuid(opp_name)
+                    
+                    if opp_uuid_registered:
+                        # Usa UUID do registro persistente
+                        opp_uuid = opp_uuid_registered
+                    else:
+                        # Fallback: obtém UUID fixo baseado em nome
+                        opp_uuid_fixed = get_bot_class_uuid_from_name(opp_name)
+                        opp_uuid = opp_uuid_fixed if opp_uuid_fixed else opp_uuid_from_seat
+                        
+                        # MELHORIA #10: Registra no registro persistente para uso futuro
+                        if opp_uuid and opp_uuid != my_uuid_fixed:
+                            # Tenta identificar classe do bot
+                            bot_class = None
+                            if opp_uuid_fixed:
+                                # UUID fixo indica que é um bot conhecido
+                                bot_class = f"bot_{opp_name}"
+                            register_opponent(opp_name, opp_uuid, bot_class)
                     
                     # Compara UUIDs fixos para evitar rastrear a si mesmo
                     if opp_uuid != my_uuid_fixed:
