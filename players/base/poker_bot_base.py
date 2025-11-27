@@ -5,6 +5,7 @@ Subclasses apenas injetam configuração.
 """
 from abc import ABC
 import random
+import os
 from typing import Optional
 from pypokerengine.players import BasePokerPlayer
 from utils.memory_manager import UnifiedMemoryManager
@@ -64,6 +65,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
         self.current_stack = None
         self.current_spr = None  # SPR atualizado internamente
         
+        # NOVO: Estado interno para round count
+        self.current_round_count = 0
+        
         # MELHORIA: Memória de curto prazo (últimas 5 ações)
         self.recent_actions = []  # Últimas 5 ações: [{'action': str, 'hand_strength': int, 'street': str}, ...]
         self.recent_bluffs = []  # Últimos 3 blefes: [{'round': int, 'street': str}, ...]
@@ -90,121 +94,12 @@ class PokerBotBase(BasePokerPlayer, ABC):
         # Sempre usa UUID fixo, ignorando o UUID do PyPokerEngine
         self.uuid = self._fixed_uuid
     
-    def _load_parameters_from_memory(self, opponent_uuid: Optional[str] = None):
-        """Carrega parâmetros da memória, opcionalmente específicos para um oponente.
-        
-        Args:
-            opponent_uuid: UUID do oponente para usar parâmetros específicos (opcional)
-        """
-        # Se tem oponente específico e ele está na memória, usa parâmetros específicos
-        if opponent_uuid and opponent_uuid in self.memory.get('opponents', {}):
-            opp = self.memory['opponents'][opponent_uuid]
-            # Usa parâmetros específicos do oponente, com fallback para globais
-            self.bluff_probability = opp.get('bluff_probability', 
-                self.memory.get('bluff_probability', self.config.default_bluff))
-            self.aggression_level = opp.get('aggression_level',
-                self.memory.get('aggression_level', self.config.default_aggression))
-            self.tightness_threshold = opp.get('tightness_threshold',
-                self.memory.get('tightness_threshold', self.config.default_tightness))
-        else:
-            # Usa parâmetros globais
-            self.bluff_probability = self.memory.get('bluff_probability', self.config.default_bluff)
-            self.aggression_level = self.memory.get('aggression_level', self.config.default_aggression)
-            self.tightness_threshold = self.memory.get('tightness_threshold', self.config.default_tightness)
-    
-    def _get_position(self, round_state) -> str:
-        """
-        MELHORIA: Identifica posição na mesa baseado na ordem de ação.
-        
-        Posição é fundamental no poker:
-        - Early: Primeiros a agir (precisa de mãos mais fortes)
-        - Middle: Meio da mesa (jogo balanceado)
-        - Late: Últimos a agir (pode jogar mais mãos, tem vantagem informacional)
-        - Blinds: Nas blinds (situação especial)
-        
-        Args:
-            round_state: Estado do round
-            
-        Returns:
-            str: 'early', 'middle', 'late', ou 'blinds'
-        """
-        if not hasattr(self, 'uuid') or not self.uuid:
-            return 'middle'  # Fallback
-        
-        seats = round_state.get('seats', [])
-        if not seats:
-            return 'middle'
-        
-        # Identifica jogadores ativos (participating)
-        active_seats = [s for s in seats if isinstance(s, dict) and s.get('state') == 'participating']
-        if len(active_seats) < 2:
-            return 'middle'
-        
-        # Encontra índice do bot
-        my_index = None
-        for i, seat in enumerate(active_seats):
-            if seat.get('uuid') == self.uuid:
-                my_index = i
-                break
-        
-        if my_index is None:
-            return 'middle'
-        
-        total_players = len(active_seats)
-        
-        # Determina posição baseado na ordem
-        # Early: primeiro terço
-        # Middle: segundo terço
-        # Late: último terço
-        if total_players <= 2:
-            # Heads-up: posição é relativa
-            return 'late' if my_index == 1 else 'early'
-        elif total_players == 3:
-            # 3 jogadores: early (0), middle (1), late (2)
-            if my_index == 0:
-                return 'early'
-            elif my_index == 1:
-                return 'middle'
-            else:
-                return 'late'
-        else:
-            # 4+ jogadores: divide em terços
-            early_cutoff = total_players // 3
-            late_start = (total_players * 2) // 3
-            
-            if my_index < early_cutoff:
-                return 'early'
-            elif my_index >= late_start:
-                return 'late'
-            else:
-                return 'middle'
-    
-    def _adjust_for_position(self, fold_threshold: int, position: str) -> int:
-        """
-        MELHORIA: Ajusta threshold baseado em posição na mesa.
-        
-        Método virtual que pode ser sobrescrito por subclasses para personalizar
-        ajustes de posição baseados na personalidade do bot.
-        
-        Args:
-            fold_threshold: Threshold atual
-            position: Posição na mesa ('early', 'middle', 'late', 'blinds')
-            
-        Returns:
-            int: Threshold ajustado
-        """
-        if position == 'late':
-            # Late position: pode jogar mais mãos (reduz threshold em 2-3 pontos)
-            return fold_threshold - 3
-        elif position == 'early':
-            # Early position: precisa de mãos mais fortes (aumenta threshold em 2-3 pontos)
-            return fold_threshold + 3
-        elif position == 'middle':
-            # Middle position: ajuste mínimo
-            return fold_threshold + 1
-        else:  # blinds
-            # Blinds: situação especial, ajuste conservador
-            return fold_threshold + 2
+    def _load_parameters_from_memory(self):
+        """Carrega parâmetros globais da memória."""
+        # Usa parâmetros globais
+        self.bluff_probability = self.memory.get('bluff_probability', self.config.default_bluff)
+        self.aggression_level = self.memory.get('aggression_level', self.config.default_aggression)
+        self.tightness_threshold = self.memory.get('tightness_threshold', self.config.default_tightness)
     
     def _update_recent_memory(self, action: str, hand_strength: int, street: str, was_bluff: bool):
         """
@@ -243,56 +138,6 @@ class PokerBotBase(BasePokerPlayer, ABC):
             if len(self.recent_bluffs) > 3:
                 self.recent_bluffs.pop(0)
     
-    def _get_primary_opponent_uuid(self, round_state) -> Optional[str]:
-        """Identifica o oponente principal no round (o que mais interagiu).
-        
-        Args:
-            round_state: Estado do round
-            
-        Returns:
-            UUID do oponente principal ou None
-        """
-        if not hasattr(self, 'uuid') or not self.uuid:
-            return None
-        
-        from utils.uuid_utils import get_bot_class_uuid_from_name
-        
-        seats = round_state.get('seats', [])
-        my_seat = next((s for s in seats if isinstance(s, dict) and s.get('uuid') == self.uuid), None)
-        my_name = my_seat.get('name', 'Unknown') if my_seat else None
-        my_uuid_fixed = get_bot_class_uuid_from_name(my_name) if my_name else self.uuid
-        
-        # Identifica oponentes ativos
-        active_opponents = []
-        for seat in seats:
-            if isinstance(seat, dict):
-                opp_uuid_from_seat = seat.get('uuid')
-                if opp_uuid_from_seat and opp_uuid_from_seat != self.uuid:
-                    opp_name = seat.get('name', 'Unknown')
-                    opp_uuid_fixed = get_bot_class_uuid_from_name(opp_name)
-                    opp_uuid = opp_uuid_fixed if opp_uuid_fixed else opp_uuid_from_seat
-                    
-                    if opp_uuid != my_uuid_fixed and seat.get('state') == 'participating':
-                        active_opponents.append(opp_uuid)
-        
-        # Se tem apenas um oponente, usa ele
-        if len(active_opponents) == 1:
-            return active_opponents[0]
-        
-        # Se tem múltiplos oponentes, escolhe o que tem mais rounds jogados juntos
-        if len(active_opponents) > 1:
-            best_opp = None
-            max_rounds = 0
-            for opp_uuid in active_opponents:
-                if opp_uuid in self.memory.get('opponents', {}):
-                    rounds = self.memory['opponents'][opp_uuid].get('total_rounds_against', 0)
-                    if rounds > max_rounds:
-                        max_rounds = rounds
-                        best_opp = opp_uuid
-            return best_opp if best_opp else active_opponents[0]
-        
-        return None
-    
     def declare_action(self, valid_actions, hole_card, round_state):
         """
         Lógica UNIVERSAL de decisão.
@@ -313,7 +158,10 @@ class PokerBotBase(BasePokerPlayer, ABC):
             valid_actions, round_state, metrics
         )
         
-        # 5. Registra ação
+        # 5. Debug: mostra cartas e decisão
+        self._debug_show_cards_and_decision(hole_card, round_state, action, amount, metrics)
+        
+        # 6. Registra ação
         self._record_action(action, amount, metrics, round_state)
         
         return action, amount
@@ -330,12 +178,6 @@ class PokerBotBase(BasePokerPlayer, ABC):
     
     def _collect_decision_metrics(self, hole_card, round_state):
         """MELHORIA #5: Coleta métricas e contexto para decisão."""
-        # Identifica oponente principal para usar parâmetros específicos
-        primary_opponent_uuid = self._get_primary_opponent_uuid(round_state)
-        
-        # MELHORIA: Identifica posição na mesa
-        position = self._get_position(round_state)
-        
         # Analisa contexto
         current_actions = analyze_current_round_actions(
             round_state, self.uuid
@@ -351,18 +193,13 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 round_state, self.uuid, hand_strength, self.memory_manager
             )
         
-        # Atualiza valores da memória (usa parâmetros específicos do oponente se disponível)
-        if primary_opponent_uuid:
-            self._load_parameters_from_memory(primary_opponent_uuid)
-        else:
-            self._load_parameters_from_memory()
+        # Atualiza valores da memória (usa parâmetros globais)
+        self._load_parameters_from_memory()
         
         return {
             'current_actions': current_actions,
             'hand_strength': hand_strength,
-            'bluff_analysis': bluff_analysis,
-            'primary_opponent_uuid': primary_opponent_uuid,
-            'position': position  # MELHORIA: Adiciona posição
+            'bluff_analysis': bluff_analysis
         }
     
     def _update_internal_state(self, round_state):
@@ -487,12 +324,14 @@ class PokerBotBase(BasePokerPlayer, ABC):
             
             # Usa módulo de sizing dedicado (MELHORIA #11)
             # Blefes usam sizing "small" (mão fraca = hand_strength=0)
+            round_count = getattr(self, 'current_round_count', 0)
             amount = self.sizing_calculator.calculate_bet_size(
                 min_amount, max_amount, round_state, 
                 hand_strength=0,  # Mão fraca para blefe
                 my_stack=my_stack,
                 strong_hand_threshold=self.config.strong_hand_threshold,
-                raise_threshold=self.config.raise_threshold
+                raise_threshold=self.config.raise_threshold,
+                round_count=round_count
             )
             return raise_action['action'], amount
         else:
@@ -531,25 +370,40 @@ class PokerBotBase(BasePokerPlayer, ABC):
             elif current_actions.last_action == 'raise':
                 fold_threshold += self.config.raise_threshold_adjustment_base
         
-        # MELHORIA: Ajusta threshold por posição na mesa
-        position = metrics.get('position', 'middle') if metrics else 'middle'
-        fold_threshold = self._adjust_for_position(fold_threshold, position)
-        
-        # 3. MELHORIA SIMPLIFICADA: Ajusta threshold por risco e multiway (sistema simplificado)
-        fold_threshold = self._adjust_threshold_for_risk_and_multiway_simple(
+        # 3. Ajusta threshold por risco (simplificado: 2 níveis)
+        fold_threshold = self._adjust_threshold_for_risk_simple(
             fold_threshold, round_state, valid_actions
         )
         
-        # 4. Considera pot odds (já existente)
+        # SOLUÇÃO 3: Ajuste por número de jogadores (especialmente importante no preflop)
+        street = round_state.get('street', 'preflop')
+        active_players = len([
+            s for s in round_state.get('seats', []) 
+            if s.get('state') == 'participating'
+        ])
+        
+        # Com muitos jogadores no preflop, aumenta threshold significativamente
+        if street == 'preflop' and active_players >= 6:
+            # +2 pontos por jogador acima de 5
+            fold_threshold += (active_players - 5) * 2
+        
+        # SOLUÇÃO 2: Pot odds APENAS no pós-flop e com limite mais conservador
         pot_size = round_state.get('pot', {}).get('main', {}).get('amount', 0)
         call_amount = valid_actions[1]['amount'] if len(valid_actions) > 1 else 0
         
-        if call_amount > 0:
+        if call_amount > 0 and street != 'preflop':  # Só aplica pós-flop
             pot_odds_ratio = pot_size / call_amount if call_amount > 0 else 0
-            if pot_odds_ratio > 5.0:
-                fold_threshold = max(fold_threshold - 5, self.config.fold_threshold_base - 10)
-            elif pot_odds_ratio > 3.0:
-                fold_threshold = max(fold_threshold - 3, self.config.fold_threshold_base - 8)
+            # Limite mais conservador: pot odds precisam ser MUITO favoráveis (> 6:1)
+            if pot_odds_ratio > 6.0:
+                # Ajuste menor: máximo -2 pontos, não -8
+                fold_threshold = max(fold_threshold - 2, self.config.fold_threshold_base - 3)
+        
+        # NOVO: Ajuste por número de rounds (mais conservador com mais rounds)
+        round_count = getattr(self, 'current_round_count', 0)
+        if round_count > 0:
+            # Aumenta threshold em 1 ponto por cada 5 rounds (máximo +6 pontos)
+            rounds_adjustment = min(6, (round_count // 5) * 1)
+            fold_threshold += rounds_adjustment
         
         # 5. Considera análise de blefe (módulo separado, não misturado)
         # (já considerado no passo 1)
@@ -576,51 +430,22 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 self.current_stack = my_stack
                 
                 # FASE 2: Calcula sizing apenas se decisão for RAISE (MELHORIA #11)
+                round_count = getattr(self, 'current_round_count', 0)
                 amount = self.sizing_calculator.calculate_bet_size(
                     min_amount, max_amount, round_state, hand_strength,
                     my_stack=my_stack,
                     strong_hand_threshold=self.config.strong_hand_threshold,
-                    raise_threshold=self.config.raise_threshold
+                    raise_threshold=self.config.raise_threshold,
+                    round_count=round_count
                 )
                 return raise_action['action'], amount
         
-        # 6.3. Campo passivo: pode fazer raise com mão média
-        if current_actions and current_actions.is_passive:
-            passive_score = current_actions.passive_opportunity_score
-            if (hand_strength >= self.config.passive_raise_threshold and
-                passive_score > self.config.passive_raise_score_threshold and
-                is_raise_available):
-                # FASE 2: Calcula sizing apenas se decisão for RAISE
-                raise_action = valid_actions[2]
-                min_amount = raise_action['amount']['min']
-                max_amount = raise_action['amount']['max']
-                
-                # Atualiza stack interno antes de calcular sizing (MELHORIA #4)
-                my_stack = self._get_my_stack(round_state)
-                self.current_stack = my_stack
-                
-                amount = self.sizing_calculator.calculate_bet_size(
-                    min_amount, max_amount, round_state, hand_strength,
-                    my_stack=my_stack,
-                    strong_hand_threshold=self.config.strong_hand_threshold,
-                    raise_threshold=self.config.raise_threshold
-                )
-                return raise_action['action'], amount
-        
-        # 6.4. Mão forte: decide call ou raise baseado em agressão
+        # 6.3. Mão forte: decide call ou raise baseado em agressão
         adjusted_aggression = self.aggression_level
         
         # Reduz agressão se muitos raises
         if current_actions and current_actions.raise_count >= 2:
             adjusted_aggression *= self.config.raise_count_aggression_reduction
-        
-        # Aumenta agressão se campo passivo
-        if current_actions and current_actions.is_passive:
-            passive_score = current_actions.passive_opportunity_score
-            adjusted_aggression = min(
-                0.95,
-                adjusted_aggression + (passive_score * self.config.passive_aggression_boost)
-            )
         
         # Compara força da mão com threshold ajustado
         if hand_strength >= fold_threshold:
@@ -636,11 +461,13 @@ class PokerBotBase(BasePokerPlayer, ABC):
                     my_stack = self._get_my_stack(round_state)
                     self.current_stack = my_stack
                     
+                    round_count = getattr(self, 'current_round_count', 0)
                     amount = self.sizing_calculator.calculate_bet_size(
                         min_amount, max_amount, round_state, hand_strength,
                         my_stack=my_stack,
                         strong_hand_threshold=self.config.strong_hand_threshold,
-                        raise_threshold=self.config.raise_threshold
+                        raise_threshold=self.config.raise_threshold,
+                        round_count=round_count
                     )
                     return raise_action['action'], amount
             
@@ -648,7 +475,7 @@ class PokerBotBase(BasePokerPlayer, ABC):
             call_action = valid_actions[1]
             return call_action['action'], call_action['amount']
         
-        # 6.5. Hook para lógica especial de bot: força raise em certas condições
+        # 6.4. Hook para lógica especial de bot: força raise em certas condições
         # Método virtual que pode ser sobrescrito por subclasses
         if self._should_force_raise(hand_strength, fold_threshold, round_state):
             if is_raise_available:
@@ -661,15 +488,17 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 my_stack = self._get_my_stack(round_state)
                 self.current_stack = my_stack
                 
+                round_count = getattr(self, 'current_round_count', 0)
                 amount = self.sizing_calculator.calculate_bet_size(
                     min_amount, max_amount, round_state, hand_strength,
                     my_stack=my_stack,
                     strong_hand_threshold=self.config.strong_hand_threshold,
-                    raise_threshold=self.config.raise_threshold
+                    raise_threshold=self.config.raise_threshold,
+                    round_count=round_count
                 )
                 return raise_action['action'], amount
         
-        # 6.6. Mão média: CALL
+        # 6.5. Mão média: CALL
         call_action = valid_actions[1]
         return call_action['action'], call_action['amount']
     
@@ -696,6 +525,87 @@ class PokerBotBase(BasePokerPlayer, ABC):
         from utils.hand_utils import evaluate_hand_strength
         community_cards = round_state.get('community_card', []) if round_state else None
         return evaluate_hand_strength(hole_card, community_cards)
+    
+    def _is_debug_mode(self) -> bool:
+        """Verifica se modo debug está ativado"""
+        log_level = os.environ.get('POKER_PLAYER_LOG_LEVEL', 'WARNING').upper()
+        return log_level == 'DEBUG'
+    
+    def _debug_show_cards_and_decision(self, hole_card, round_state, action, amount, metrics):
+        """Mostra cartas e decisão do bot em modo debug"""
+        if not self._is_debug_mode():
+            return
+        
+        from utils.hand_utils import normalize_hole_cards
+        hole_cards = normalize_hole_cards(hole_card)
+        hand_strength = metrics.get('hand_strength', 0)
+        street = round_state.get('street', 'preflop')
+        community_cards = round_state.get('community_card', [])
+        
+        # Formata cartas
+        cards_str = ' '.join(hole_cards) if hole_cards else 'N/A'
+        community_str = ' '.join(community_cards) if community_cards else 'Nenhuma'
+        
+        # Formata ação
+        action_str = f"{action.upper()}"
+        if action == 'raise':
+            action_str += f" {amount}"
+        elif action == 'call':
+            action_str += f" {amount}"
+        
+        print(f"🎴 [DEBUG] {self.config.name} | Round {self.memory.get('total_rounds', 0) + 1} | {street.upper()}")
+        print(f"   Cartas: {cards_str} | Força: {hand_strength}")
+        print(f"   Comunitárias: {community_str}")
+        print(f"   Decisão: {action_str}")
+        
+        # Mostra contexto adicional
+        current_actions = metrics.get('current_actions')
+        if current_actions:
+            if current_actions.has_raises:
+                print(f"   ⚠️  Raises na mesa: {current_actions.raise_count}")
+        
+        bluff_analysis = metrics.get('bluff_analysis')
+        if bluff_analysis and bluff_analysis.possible_bluff_probability > 0.3:
+            print(f"   🎭 Possível blefe detectado: {bluff_analysis.possible_bluff_probability:.1%}")
+        
+        print()  # Linha em branco para separar
+    
+    def _debug_show_all_cards(self, round_count):
+        """Mostra cartas de todos os bots em modo debug"""
+        if not self._is_debug_mode():
+            return
+        
+        from utils.cards_registry import get_all_cards
+        from utils.uuid_utils import get_bot_class_uuid_from_name
+        
+        all_cards = get_all_cards()
+        if not all_cards:
+            return
+        
+        print(f"🎴 [DEBUG] Round {round_count} - Cartas de todos os bots:")
+        
+        # Tenta obter nomes dos bots pelos UUIDs
+        for uuid, cards in all_cards.items():
+            # Tenta encontrar nome do bot pelo UUID
+            bot_name = None
+            # Verifica se é o próprio bot
+            if hasattr(self, 'uuid') and self.uuid == uuid:
+                bot_name = self.config.name
+            else:
+                # Tenta mapear UUID para nome conhecido
+                from utils.uuid_utils import get_all_known_bot_names
+                for known_name in get_all_known_bot_names():
+                    known_uuid = get_bot_class_uuid_from_name(known_name)
+                    if known_uuid == uuid:
+                        bot_name = known_name
+                        break
+            
+            if not bot_name:
+                bot_name = f"Bot-{uuid[:8]}"
+            
+            cards_str = ' '.join(cards) if cards else 'N/A'
+            print(f"   {bot_name}: {cards_str}")
+        print()  # Linha em branco para separar
     
     # ============================================================
     # Sistema de Decisão e Bet Sizing Contextual
@@ -759,42 +669,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
         
         return risk
     
-    def _count_active_players(self, round_state):
+    def _adjust_threshold_for_risk_simple(self, fold_threshold, round_state, valid_actions):
         """
-        Conta jogadores ativos no pote (multiway).
-        
-        Returns:
-            int: Número de jogadores ativos (mínimo 2)
-        """
-        active_count = 0
-        for seat in round_state.get('seats', []):
-            if seat.get('stack', 0) > 0:
-                active_count += 1
-        return max(2, active_count)  # Mínimo 2 (heads-up)
-    
-    def _get_risk_sensitivity(self):
-        """
-        Retorna sensibilidade ao risco baseada na personalidade.
-        
-        Método virtual que pode ser sobrescrito por subclasses para personalizar
-        sensibilidade ao risco. Implementação padrão retorna 1.0 (balanced).
-        
-        Herdabilidade: personalidade afeta apenas sensibilidade, nunca regras base.
-        
-        Returns:
-            float: Multiplicador de sensibilidade (0.7 a 1.5)
-        """
-        # Implementação padrão: balanced
-        return 1.0
-    
-    def _adjust_threshold_for_risk_and_multiway_simple(self, fold_threshold, round_state, valid_actions):
-        """
-        MELHORIA SIMPLIFICADA: Ajusta threshold de forma mais simples e previsível.
-        
-        Sistema simplificado com snapshot único ao invés de múltiplos ajustes incrementais:
-        - Calcula % do stack uma vez
-        - Aplica ajuste único baseado em 3 níveis claros
-        - Multiway: ajuste simples e direto
+        Ajusta threshold por risco de forma simplificada (2 níveis).
         
         Args:
             fold_threshold: Threshold atual para fold
@@ -816,41 +693,24 @@ class PokerBotBase(BasePokerPlayer, ABC):
             # Sem aposta: retorna threshold original
             return fold_threshold
         
-        # Calcula % do stack (snapshot único)
+        # Calcula % do stack
         stack_ratio = call_amount / my_stack
         
-        # Sensibilidade por personalidade
-        sensitivity = self._get_risk_sensitivity()
-        
-        # SISTEMA SIMPLIFICADO: 3 níveis claros
-        # Baixo risco (< 10%): pode jogar mais mãos
-        # Médio risco (10-30%): ajuste mínimo
-        # Alto risco (> 30%): precisa de mão mais forte
-        if stack_ratio < 0.10:
+        # Sistema simplificado: 2 níveis
+        # Baixo risco (< 20%): pode jogar mais mãos
+        # Alto risco (>= 20%): precisa de mão mais forte
+        if stack_ratio < 0.20:
             # Baixo risco: reduz threshold em 2 pontos
             threshold_adjustment = -2
-        elif stack_ratio < 0.30:
-            # Médio risco: ajuste mínimo (+1 ponto)
-            threshold_adjustment = 1
         else:
-            # Alto risco: aumenta threshold em 4 pontos
-            threshold_adjustment = 4
-        
-        # Aplica sensibilidade de personalidade
-        threshold_adjustment = int(threshold_adjustment * sensitivity)
-        
-        # Ajuste multiway: simples e direto
-        active_players = self._count_active_players(round_state)
-        if active_players > 2 and stack_ratio >= 0.10:
-            # Multiway com aposta média/alta: +1 ponto por jogador extra
-            multiway_adjustment = (active_players - 2) * 1
-            threshold_adjustment += multiway_adjustment
+            # Alto risco: aumenta threshold em 2 pontos
+            threshold_adjustment = 2
         
         # Aplica ajuste
         adjusted_threshold = fold_threshold + threshold_adjustment
         
-        # Limites de segurança (mantém consistência)
-        max_threshold = self.config.fold_threshold_base + 15  # Reduzido de 25
+        # Limites de segurança
+        max_threshold = self.config.fold_threshold_base + 15
         min_threshold = max(5, self.config.fold_threshold_base - 5)
         
         return max(min_threshold, min(adjusted_threshold, max_threshold))
@@ -890,6 +750,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
     
     def receive_round_start_message(self, round_count, hole_card, seats):
         """Salva memória periodicamente"""
+        # NOVO: Atualiza round count
+        self.current_round_count = round_count
+        
         if round_count % 5 == 0:
             self.memory_manager.save()
         
@@ -899,7 +762,24 @@ class PokerBotBase(BasePokerPlayer, ABC):
             from utils.hand_utils import normalize_hole_cards
             hole_cards = normalize_hole_cards(hole_card)
             if hole_cards:
-                store_player_cards(self.uuid, hole_cards)
+                # Tenta obter o nome do bot dos seats primeiro (nome do jogo, ex: "King")
+                # Se não encontrar, usa o nome da configuração (ex: "CFR")
+                bot_name = self.config.name
+                if seats:
+                    for seat in seats:
+                        if isinstance(seat, dict):
+                            seat_uuid = seat.get('uuid', '')
+                            # Verifica se o UUID do seat corresponde ao nosso UUID fixo
+                            if seat_uuid == self.uuid or seat_uuid == getattr(self, '_fixed_uuid', None):
+                                seat_name = seat.get('name', '')
+                                if seat_name:
+                                    bot_name = seat_name
+                                    break
+                
+                store_player_cards(self.uuid, hole_cards, bot_name)
+        
+        # Debug: mostra cartas de todos os bots no início do round
+        self._debug_show_all_cards(round_count)
     
     def receive_street_start_message(self, street, round_state):
         """Hook para futuras extensões"""
