@@ -42,7 +42,7 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
         # Aggressive: threshold baixo (joga mais mãos)
-        fold_threshold_base=12,
+        fold_threshold_base=10,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
@@ -63,12 +63,12 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         # Multiplicador mínimo para calcular valor do raise
         # Mínimo: 10 | Máximo: 30 | Típico: 15-25
         # Usado para calcular: min_amount + (random entre min e max)
-        raise_multiplier_min=20,
+        raise_multiplier_min=40,
         
         # Multiplicador máximo para calcular valor do raise
         # Mínimo: 15 | Máximo: 35 | Típico: 20-30
         # Usado para calcular: min_amount + (random entre min e max)
-        raise_multiplier_max=30,
+        raise_multiplier_max=60,
         
         # ============================================================
         # COMPORTAMENTO DE BLEFE
@@ -172,6 +172,9 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         # Mínimo: 5 | Máximo: 20 | Típico: 10-15
         # Bot só ajusta estratégia após este número de rodadas
         rounds_before_learning=10,
+        
+        # Panic Rule (Aggressive aguenta mais pressão)
+        raise_count_panic_threshold=5,
     )
 
 

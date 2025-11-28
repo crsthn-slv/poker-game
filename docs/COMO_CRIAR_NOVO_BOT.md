@@ -4,95 +4,49 @@ Guia rápido para criar um novo bot de poker usando a **arquitetura refatorada b
 
 ## 🎯 Nova Arquitetura (Simplificada)
 
-Com a refatoração, criar um novo bot é **muito mais simples**: apenas **15 linhas de código**!
+Com a refatoração, criar um novo bot é **muito mais simples**: apenas configuração!
 
 A lógica está toda em `PokerBotBase`, você só precisa definir a **configuração**.
 
-## Template Mínimo
+## Processo Simplificado
 
-Crie um arquivo `players/meu_novo_bot_player.py`:
+### Passo 1: Criar Arquivo do Bot
 
-```python
-"""
-Meu novo bot - apenas configuração, ZERO lógica.
-Toda lógica está em PokerBotBase.
-"""
-from players.base.poker_bot_base import PokerBotBase
-from players.base.bot_config import BotConfig
+Crie um novo arquivo em `players/` com o nome do bot (ex: `meu_novo_bot_player.py`).
 
+### Passo 2: Definir Função de Configuração
 
-def _create_config(memory_file: str = "meu_novo_bot_memory.json") -> BotConfig:
-    """Cria configuração para meu novo bot"""
-    return BotConfig(
-        # Identificação do bot
-        name="MeuNovoBot",
-        memory_file=memory_file,
-        
-        # Parâmetros de personalidade base
-        default_bluff=0.20,
-        default_aggression=0.55,
-        default_tightness=25,
-        
-        # Thresholds de decisão
-        fold_threshold_base=18,
-        raise_threshold=25,
-        strong_hand_threshold=30,
-        
-        # Ajustes de valor de raise
-        raise_multiplier_min=15,
-        raise_multiplier_max=20,
-        
-        # Comportamento de blefe
-        bluff_call_ratio=0.50,
-        bluff_raise_prob_few_players=0.50,
-        bluff_raise_prob_many_players=0.50,
-        
-        # Reação a ações dos oponentes
-        raise_count_sensitivity=2.0,
-        raise_threshold_adjustment_base=5,
-        raise_threshold_adjustment_per_raise=2,
-        
-        # Detecção e pagamento de blefe
-        bluff_detection_threshold=25,
-        
-        # Comportamento em campo passivo
-        passive_aggression_boost=0.15,
-        passive_threshold_reduction_factor=4.0,
-        passive_threshold_min=20,
-        passive_raise_threshold=25,
-        passive_raise_score_threshold=0.4,
-        
-        # Sistema de aprendizado
-        learning_speed=0.001,
-        win_rate_threshold_high=0.60,
-        win_rate_threshold_low=0.30,
-        rounds_before_learning=10,
-    )
+Crie uma função `_create_config()` que retorna um `BotConfig` com todos os parâmetros personalizados do seu bot. Esta função define:
+- Identificação do bot (nome e arquivo de memória)
+- Parâmetros de personalidade base (blefe, agressão, seletividade)
+- Thresholds de decisão (fold, raise, mãos fortes)
+- Comportamento de blefe (probabilidades de call vs raise)
+- Reação a ações dos oponentes (sensibilidade a raises)
+- Detecção e pagamento de blefe (threshold personalizado)
+- Comportamento em campo passivo (aumento de agressão)
+- Sistema de aprendizado (velocidade, thresholds de win rate)
 
+### Passo 3: Criar Classe do Bot
 
-class MeuNovoBotPlayer(PokerBotBase):
-    """Descrição do bot."""
-    
-    def __init__(self, memory_file="meu_novo_bot_memory.json"):
-        config = _create_config(memory_file)
-        super().__init__(config)
-```
+Crie uma classe que herda de `PokerBotBase` e implementa apenas o método `__init__()` que:
+1. Chama `_create_config()` para obter a configuração
+2. Passa a configuração para `super().__init__(config)`
 
-**Pronto!** Seu bot está funcionando. Apenas **15 linhas de código**!
+**Pronto!** Seu bot está funcionando.
 
 ## O que o PokerBotBase já faz automaticamente
 
 O `PokerBotBase` já implementa **TUDO** para você:
 
-✅ **Análise de ações do round atual** (`analyze_current_round_actions`)
-✅ **Análise de possível blefe** (`analyze_possible_bluff`)
-✅ **Decisão de blefe** baseada em configuração
-✅ **Ação normal** com todos os ajustes contextuais
-✅ **Detecção de campo passivo** e aumento de agressão
-✅ **Pagamento de blefes** baseado em threshold configurado
-✅ **Todos os métodos `receive_*`** (game_start, round_start, etc.)
-✅ **Sistema de aprendizado** baseado em configuração
-✅ **Gerenciamento de memória** completo
+✅ **Análise de ações do round atual** - Detecta raises, calls e nível de agressão
+✅ **Análise de possível blefe** - Calcula probabilidade de blefe dos oponentes
+✅ **Decisão de blefe** - Baseada em configuração e contexto
+✅ **Ação normal** - Com todos os ajustes contextuais (raises, campo passivo, etc.)
+✅ **Detecção de campo passivo** - Aumenta agressão quando detecta oportunidade
+✅ **Pagamento de blefes** - Baseado em threshold configurado
+✅ **Todos os métodos `receive_*`** - Handlers de eventos do jogo
+✅ **Sistema de aprendizado** - Baseado em configuração
+✅ **Gerenciamento de memória** - Completo e automático
 
 **Você não precisa implementar nada disso!** Apenas configure os parâmetros.
 
@@ -112,8 +66,8 @@ O `BotConfig` define todos os parâmetros do bot. Principais campos:
 
 ### Comportamento de Blefe
 - `bluff_call_ratio`: Probabilidade de fazer call vs raise no blefe
-- `bluff_raise_prob_few_players`: Prob de raise no blefe com poucos jogadores
-- `bluff_raise_prob_many_players`: Prob de raise no blefe com muitos jogadores
+- `bluff_raise_prob_few_players`: Probabilidade de raise no blefe com poucos jogadores
+- `bluff_raise_prob_many_players`: Probabilidade de raise no blefe com muitos jogadores
 
 ### Ajustes Contextuais
 - `passive_aggression_boost`: Quanto aumenta agressão em campo passivo
@@ -130,19 +84,11 @@ O `BotConfig` define todos os parâmetros do bot. Principais campos:
 
 ## Estrutura de Memória
 
-O `UnifiedMemoryManager` (gerenciado automaticamente pelo `PokerBotBase`) gerencia:
-
-```python
-{
-    'bluff_probability': float,      # 0.0-1.0 (atualizado pelo aprendizado)
-    'aggression_level': float,        # 0.0-1.0 (atualizado pelo aprendizado)
-    'tightness_threshold': int,       # 0-100 (atualizado pelo aprendizado)
-    'total_rounds': int,
-    'wins': int,
-    'opponents': {},                  # Histórico de oponentes
-    'round_history': []                # Últimos rounds
-}
-```
+O `UnifiedMemoryManager` (gerenciado automaticamente pelo `PokerBotBase`) gerencia uma estrutura de memória que contém:
+- Parâmetros de estratégia (bluff_probability, aggression_level, tightness_threshold) - atualizados pelo aprendizado
+- Estatísticas (total_rounds, wins)
+- Histórico de oponentes (ações observadas, cartas quando disponíveis, resultados)
+- Histórico de rounds (ações do bot, resultados, contexto)
 
 **Campos personalizados:** Se precisar, você pode adicionar campos customizados no preset, mas a maioria dos casos não precisa.
 
@@ -161,20 +107,8 @@ O `PokerBotBase` já implementa aprendizado automático baseado na configuraçã
 
 Se precisar de aprendizado customizado, você pode sobrescrever `receive_round_result_message()`:
 
-```python
-class MeuNovoBotPlayer(PokerBotBase):
-    def __init__(self, memory_file="meu_novo_bot_memory.json"):
-        config = _create_config(memory_file)
-        super().__init__(config)
-    
-    def receive_round_result_message(self, winners, hand_info, round_state):
-        # Chama aprendizado padrão
-        super().receive_round_result_message(winners, hand_info, round_state)
-        
-        # Adiciona lógica customizada se necessário
-        # (geralmente não é necessário)
-        pass
-```
+1. Chama o aprendizado padrão com `super().receive_round_result_message()`
+2. Adiciona lógica customizada se necessário
 
 **Nota:** Na maioria dos casos, o aprendizado padrão é suficiente. Apenas sobrescreva se precisar de comportamento muito específico.
 
@@ -182,36 +116,17 @@ class MeuNovoBotPlayer(PokerBotBase):
 
 ### Modo Web
 
-Adicione em `web/server.py`:
-
-```python
-from players.meu_bot import MeuBot
-
-AVAILABLE_BOTS = [
-    # ... outros bots ...
-    MeuBot,
-]
-```
+Adicione o bot na lista de bots disponíveis em `web/server.py` para que ele apareça na interface web.
 
 ## Funcionalidades Avançadas
 
 ### Reação em Tempo Real às Ações
 
-Todos os bots devem analisar ações do round atual e possível blefe:
+Todos os bots devem analisar ações do round atual e possível blefe. Isso é feito automaticamente pelo `PokerBotBase`:
 
-```python
-# 1. Analisa ações do round atual
-current_actions = analyze_current_round_actions(round_state, self.uuid)
-
-# 2. Analisa possível blefe dos oponentes
-bluff_analysis = analyze_possible_bluff(
-    round_state, self.uuid, hand_strength, self.memory_manager
-)
-
-# 3. Usa nas decisões
-# - Ajusta threshold baseado em current_actions
-# - Paga blefe baseado em bluff_analysis
-```
+1. Analisa ações do round atual - Detecta raises, calls e nível de agressão
+2. Analisa possível blefe dos oponentes - Calcula probabilidade de blefe
+3. Usa nas decisões - Ajusta threshold baseado em ações e paga blefe baseado em análise
 
 ### Escolhendo o Threshold para Pagar Blefe
 
@@ -273,7 +188,7 @@ Com a nova arquitetura, criar um bot é muito mais simples:
 
 ## Recursos
 
-- **Exemplos de bots:** `players/aggressive_player.py`, `players/balanced_player.py`, `players/cautious_player.py` (todos ~140-170 linhas com configuração completa)
+- **Exemplos de bots:** `players/aggressive_player.py`, `players/balanced_player.py`, `players/cautious_player.py` (todos com configuração completa)
 - **Classe base:** `players/base/poker_bot_base.py` (toda a lógica)
 - **Configuração:** `players/base/bot_config.py` (todos os parâmetros)
 - **Sistema de memória:** `utils/memory_manager.py` (gerenciado automaticamente)
@@ -286,11 +201,11 @@ Com a nova arquitetura, criar um bot é muito mais simples:
 
 Todas essas funcionalidades são **implementadas automaticamente** pelo `PokerBotBase`:
 
-✅ **Análise de ações em tempo real** - Usa `analyze_current_round_actions()` automaticamente
+✅ **Análise de ações em tempo real** - Usa análise automática de ações do round atual
 ✅ **Detecção de campo passivo** - Ajusta comportamento automaticamente baseado em `passive_aggression_boost`
-✅ **Análise de possível blefe** - Usa `analyze_possible_bluff()` automaticamente
+✅ **Análise de possível blefe** - Usa análise automática de blefe dos oponentes
 ✅ **Pagamento de blefes** - Baseado em `bluff_detection_threshold` configurado
-✅ **Avaliação de força da mão** - Usa `evaluate_hand_strength()` automaticamente
+✅ **Avaliação de força da mão** - Usa avaliação automática de força da mão
 ✅ **Ajuste de threshold** - Baseado em `raise_count_sensitivity` e `raise_threshold_adjustment_*`
 ✅ **Sistema de aprendizado** - Baseado em `learning_speed` e `win_rate_threshold_*`
 
@@ -316,20 +231,5 @@ Se precisar de comportamento muito específico, você pode:
 
 1. **Ajustar parâmetros no preset** (recomendado)
 2. **Sobrescrever métodos específicos** em seu bot (avançado)
-
-**Exemplo de sobrescrita (geralmente não necessário):**
-
-```python
-class MeuNovoBotPlayer(PokerBotBase):
-    def _normal_action(self, valid_actions, hand_strength, round_state,
-                       current_actions=None, bluff_analysis=None):
-        # Chama lógica padrão
-        result = super()._normal_action(valid_actions, hand_strength, round_state,
-                                        current_actions, bluff_analysis)
-        
-        # Adiciona lógica customizada se necessário
-        # (geralmente não é necessário)
-        return result
-```
 
 **Nota:** Na maioria dos casos, ajustar os parâmetros do preset é suficiente.

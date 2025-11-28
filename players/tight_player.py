@@ -42,19 +42,19 @@ def _create_config(memory_file: str = "tight_player_memory.json") -> BotConfig:
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
         # Tight: threshold alto (folda muitas mãos)
-        fold_threshold_base=26,
+        fold_threshold_base=45,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise
         # Tight: threshold alto (raise raramente)
-        raise_threshold=34,
+        raise_threshold=65,
         
         # Threshold para mão muito forte (sempre faz raise)
         # Mínimo: 30 | Máximo: 60 | Típico: 30-55
         # Mão com força >= este valor = raise garantido
         # Tight: threshold alto (só raise com mãos muito fortes)
-        strong_hand_threshold=58,
+        strong_hand_threshold=75,
         
         # ============================================================
         # AJUSTES DE VALOR DE RAISE

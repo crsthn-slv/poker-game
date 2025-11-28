@@ -1,27 +1,17 @@
-"""
-Módulo dedicado para cálculo de bet sizing.
-Centraliza toda lógica de sizing para facilitar ajustes e testes.
-"""
 import random
-from typing import Optional, Dict, Tuple
-
+from typing import Optional, Dict, List, Any
 
 class BetSizingCalculator:
-    """Calculadora de tamanho de apostas baseada em contexto."""
+    """
+    Calculadora de tamanho de apostas (Bet Sizing).
+    Centraliza a lógica de quanto apostar.
+    """
     
-    def __init__(self, config=None):
-        """
-        Inicializa calculadora de sizing.
-        
-        Args:
-            config: Configuração do bot (opcional, para personalidade)
-        """
+    def __init__(self, config):
         self.config = config
-    
-    def get_sizing_ranges(self, street: str) -> Dict[str, Tuple[float, float]]:
-        """
-        Retorna ranges de sizing por street.
         
+    def get_sizing_ranges(self, street: str) -> Dict[str, tuple]:
+        """
         Ranges (não valores fixos) para evitar comportamentos repetitivos:
         - Preflop: ranges em BB
         - Pós-flop: ranges em percentagem do pote
@@ -345,4 +335,3 @@ class BetSizingCalculator:
         
         min_amount = amount_info.get('min', -1)
         return min_amount != -1
-

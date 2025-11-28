@@ -17,12 +17,13 @@ class QuitGameException(Exception):
 
 class ConsolePlayer(BasePokerPlayer):
 
-    def __init__(self, input_receiver=None, initial_stack=100, small_blind=None, big_blind=None):
+    def __init__(self, input_receiver=None, initial_stack=100, small_blind=None, big_blind=None, show_win_probability=False):
         self.input_receiver = input_receiver if input_receiver else self.__gen_raw_input_wrapper()
         self.formatter = ConsoleFormatter()
         self.initial_stack = initial_stack
         self.small_blind = small_blind  # Blind pequeno (pode ser None)
         self.big_blind = big_blind  # Blind grande (pode ser None)
+        self.show_win_probability = show_win_probability  # Se deve mostrar probabilidade de vitória
         self.last_pot_printed = 0  # Rastreia último pot impresso para evitar repetições
         self.pot_line_printed = False  # Indica se já imprimiu linha de pot atual
         self.pot_updates = []  # Lista de atualizações do pot para exibir na mesma linha
@@ -179,147 +180,150 @@ class ConsolePlayer(BasePokerPlayer):
             # de jogadores ativos muda, para evitar recalcular a cada ação do jogador.
             win_probability = None
             win_probability_display = None
-            try:
-                import os
-                debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
-                
-                if debug_mode:
-                    print(f"[DEBUG] Iniciando cálculo de probabilidade - hole_cards={hole_cards}, street={current_street}")
-                
-                # Tenta obter uuid do self primeiro, senão tenta obter do round_state
-                player_uuid = None
-                if hasattr(self, 'uuid') and self.uuid:
-                    player_uuid = self.uuid
-                    if debug_mode:
-                        print(f"[DEBUG] UUID obtido de self.uuid: {player_uuid}")
-                else:
-                    if debug_mode:
-                        print(f"[DEBUG] self.uuid não disponível, tentando obter do round_state...")
-                    # Fallback: tenta obter uuid do round_state procurando pelo jogador que tem as cartas
-                    seats = round_state.get('seats', [])
-                    for seat in seats:
-                        if isinstance(seat, dict):
-                            seat_hole_card = seat.get('hole_card', None)
-                            # Se o seat tem as mesmas cartas que recebemos, é o nosso uuid
-                            if seat_hole_card and hole_cards:
-                                seat_hole_cards = normalize_hole_cards(seat_hole_card)
-                                if seat_hole_cards == hole_cards:
-                                    player_uuid = seat.get('uuid')
-                                    if debug_mode:
-                                        print(f"[DEBUG] UUID encontrado no round_state: {player_uuid}")
-                                    # Armazena para uso futuro
-                                    if not hasattr(self, 'uuid'):
-                                        self.uuid = player_uuid
-                                    break
-                    if not player_uuid and debug_mode:
-                        print(f"[DEBUG] UUID não encontrado no round_state!")
-                
-                if player_uuid:
-                    if debug_mode:
-                        print(f"[DEBUG] Calculando probabilidade para uuid={player_uuid}")
-                    # Gera chave de cache
-                    cache_key = self._get_win_probability_cache_key(round_state)
+            
+            # Só calcula probabilidade se estiver habilitado
+            if self.show_win_probability:
+                try:
+                    import os
+                    debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
                     
-                    # No preflop, garante que a probabilidade seja estável entre ações
-                    # A probabilidade só deve mudar quando alguém desiste (fold)
-                    if current_street == 'preflop':
-                        seats = round_state.get('seats', [])
-                        current_active_count = sum(
-                            1 for seat in seats
-                            if isinstance(seat, dict) and seat.get('state') == 'participating'
-                        )
-                        
-                        # Se já temos um número de jogadores ativos registrado e não mudou,
-                        # usa a chave de cache anterior (garante estabilidade)
-                        if (self.preflop_active_count is not None and 
-                            current_active_count == self.preflop_active_count and
-                            self.last_cache_key and
-                            self.last_cache_key in self.win_probability_cache):
-                            cache_key = self.last_cache_key
-                        else:
-                            # Atualiza o número de jogadores ativos registrado
-                            self.preflop_active_count = current_active_count
+                    if debug_mode:
+                        print(f"[DEBUG] Iniciando cálculo de probabilidade - hole_cards={hole_cards}, street={current_street}")
                     
-                    # Verifica se já temos no cache
-                    if cache_key in self.win_probability_cache:
-                        # Usa valor do cache
-                        cached_data = self.win_probability_cache[cache_key]
-                        win_probability = cached_data.get('prob_pct')
-                        win_probability_display = cached_data.get('display')
+                    # Tenta obter uuid do self primeiro, senão tenta obter do round_state
+                    player_uuid = None
+                    if hasattr(self, 'uuid') and self.uuid:
+                        player_uuid = self.uuid
                         if debug_mode:
-                            print(f"[DEBUG] Usando cache: {win_probability_display}")
+                            print(f"[DEBUG] UUID obtido de self.uuid: {player_uuid}")
                     else:
                         if debug_mode:
-                            print(f"[DEBUG] Cache miss, calculando nova probabilidade...")
-                        # Calcula nova probabilidade
-                        # No preflop, retorna intervalo de confiança
-                        if current_street == 'preflop':
-                            if debug_mode:
-                                print(f"[DEBUG] Chamando calculate_win_probability_for_player (preflop)...")
-                            win_prob_data = calculate_win_probability_for_player(
-                                player_uuid=player_uuid,
-                                round_state=round_state,
-                                return_confidence=True
-                            )
-                            if debug_mode:
-                                print(f"[DEBUG] Resultado: {win_prob_data}")
-                            if win_prob_data is not None:
-                                # Formata intervalo de confiança (ex: 25-30%)
-                                min_pct = int(round(win_prob_data['min'] * 100))
-                                max_pct = int(round(win_prob_data['max'] * 100))
-                                win_probability = int(round(win_prob_data['prob'] * 100))
-                                win_probability_display = f"{min_pct}–{max_pct}%"
-                                if debug_mode:
-                                    print(f"[DEBUG] Probabilidade formatada: {win_probability_display}")
-                                
-                                # Armazena no cache
-                                self.win_probability_cache[cache_key] = {
-                                    'prob_pct': win_probability,
-                                    'display': win_probability_display,
-                                    'data': win_prob_data
-                                }
-                            elif debug_mode:
-                                print(f"[DEBUG] calculate_win_probability_for_player retornou None!")
-                        else:
-                            # Em outras streets, mostra apenas o valor único
-                            if debug_mode:
-                                print(f"[DEBUG] Chamando calculate_win_probability_for_player (street={current_street})...")
-                            win_prob = calculate_win_probability_for_player(
-                                player_uuid=player_uuid,
-                                round_state=round_state,
-                                return_confidence=False
-                            )
-                            if debug_mode:
-                                print(f"[DEBUG] Resultado: {win_prob}")
-                            if win_prob is not None:
-                                win_probability = int(round(win_prob * 100))
-                                win_probability_display = f"{win_probability}%"
-                                if debug_mode:
-                                    print(f"[DEBUG] Probabilidade formatada: {win_probability_display}")
-                                
-                                # Armazena no cache
-                                self.win_probability_cache[cache_key] = {
-                                    'prob_pct': win_probability,
-                                    'display': win_probability_display,
-                                    'data': {'prob': win_prob}
-                                }
-                            elif debug_mode:
-                                print(f"[DEBUG] calculate_win_probability_for_player retornou None!")
+                            print(f"[DEBUG] self.uuid não disponível, tentando obter do round_state...")
+                        # Fallback: tenta obter uuid do round_state procurando pelo jogador que tem as cartas
+                        seats = round_state.get('seats', [])
+                        for seat in seats:
+                            if isinstance(seat, dict):
+                                seat_hole_card = seat.get('hole_card', None)
+                                # Se o seat tem as mesmas cartas que recebemos, é o nosso uuid
+                                if seat_hole_card and hole_cards:
+                                    seat_hole_cards = normalize_hole_cards(seat_hole_card)
+                                    if seat_hole_cards == hole_cards:
+                                        player_uuid = seat.get('uuid')
+                                        if debug_mode:
+                                            print(f"[DEBUG] UUID encontrado no round_state: {player_uuid}")
+                                        # Armazena para uso futuro
+                                        if not hasattr(self, 'uuid'):
+                                            self.uuid = player_uuid
+                                        break
+                        if not player_uuid and debug_mode:
+                            print(f"[DEBUG] UUID não encontrado no round_state!")
                     
-                    # Atualiza última chave usada
-                    self.last_cache_key = cache_key
-                elif debug_mode:
-                    print(f"[DEBUG] player_uuid é None, não calculando probabilidade")
-            except Exception as e:
-                # Log de erro mais informativo
-                debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
-                if debug_mode:
-                    print(f"[DEBUG] Erro ao calcular probabilidade: {type(e).__name__}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                # Silenciosamente ignora erros no cálculo (não deve quebrar o jogo)
-                # win_probability_display será None e não será exibido
-                win_probability_display = None
+                    if player_uuid:
+                        if debug_mode:
+                            print(f"[DEBUG] Calculando probabilidade para uuid={player_uuid}")
+                        # Gera chave de cache
+                        cache_key = self._get_win_probability_cache_key(round_state)
+                        
+                        # No preflop, garante que a probabilidade seja estável entre ações
+                        # A probabilidade só deve mudar quando alguém desiste (fold)
+                        if current_street == 'preflop':
+                            seats = round_state.get('seats', [])
+                            current_active_count = sum(
+                                1 for seat in seats
+                                if isinstance(seat, dict) and seat.get('state') == 'participating'
+                            )
+                            
+                            # Se já temos um número de jogadores ativos registrado e não mudou,
+                            # usa a chave de cache anterior (garante estabilidade)
+                            if (self.preflop_active_count is not None and 
+                                current_active_count == self.preflop_active_count and
+                                self.last_cache_key and
+                                self.last_cache_key in self.win_probability_cache):
+                                cache_key = self.last_cache_key
+                            else:
+                                # Atualiza o número de jogadores ativos registrado
+                                self.preflop_active_count = current_active_count
+                        
+                        # Verifica se já temos no cache
+                        if cache_key in self.win_probability_cache:
+                            # Usa valor do cache
+                            cached_data = self.win_probability_cache[cache_key]
+                            win_probability = cached_data.get('prob_pct')
+                            win_probability_display = cached_data.get('display')
+                            if debug_mode:
+                                print(f"[DEBUG] Usando cache: {win_probability_display}")
+                        else:
+                            if debug_mode:
+                                print(f"[DEBUG] Cache miss, calculando nova probabilidade...")
+                            # Calcula nova probabilidade
+                            # No preflop, retorna intervalo de confiança
+                            if current_street == 'preflop':
+                                if debug_mode:
+                                    print(f"[DEBUG] Chamando calculate_win_probability_for_player (preflop)...")
+                                win_prob_data = calculate_win_probability_for_player(
+                                    player_uuid=player_uuid,
+                                    round_state=round_state,
+                                    return_confidence=True
+                                )
+                                if debug_mode:
+                                    print(f"[DEBUG] Resultado: {win_prob_data}")
+                                if win_prob_data is not None:
+                                    # Formata intervalo de confiança (ex: 25-30%)
+                                    min_pct = int(round(win_prob_data['min'] * 100))
+                                    max_pct = int(round(win_prob_data['max'] * 100))
+                                    win_probability = int(round(win_prob_data['prob'] * 100))
+                                    win_probability_display = f"{min_pct}–{max_pct}%"
+                                    if debug_mode:
+                                        print(f"[DEBUG] Probabilidade formatada: {win_probability_display}")
+                                    
+                                    # Armazena no cache
+                                    self.win_probability_cache[cache_key] = {
+                                        'prob_pct': win_probability,
+                                        'display': win_probability_display,
+                                        'data': win_prob_data
+                                    }
+                                elif debug_mode:
+                                    print(f"[DEBUG] calculate_win_probability_for_player retornou None!")
+                            else:
+                                # Em outras streets, mostra apenas o valor único
+                                if debug_mode:
+                                    print(f"[DEBUG] Chamando calculate_win_probability_for_player (street={current_street})...")
+                                win_prob = calculate_win_probability_for_player(
+                                    player_uuid=player_uuid,
+                                    round_state=round_state,
+                                    return_confidence=False
+                                )
+                                if debug_mode:
+                                    print(f"[DEBUG] Resultado: {win_prob}")
+                                if win_prob is not None:
+                                    win_probability = int(round(win_prob * 100))
+                                    win_probability_display = f"{win_probability}%"
+                                    if debug_mode:
+                                        print(f"[DEBUG] Probabilidade formatada: {win_probability_display}")
+                                    
+                                    # Armazena no cache
+                                    self.win_probability_cache[cache_key] = {
+                                        'prob_pct': win_probability,
+                                        'display': win_probability_display,
+                                        'data': {'prob': win_prob}
+                                    }
+                                elif debug_mode:
+                                    print(f"[DEBUG] calculate_win_probability_for_player retornou None!")
+                        
+                        # Atualiza última chave usada
+                        self.last_cache_key = cache_key
+                    elif debug_mode:
+                        print(f"[DEBUG] player_uuid é None, não calculando probabilidade")
+                except Exception as e:
+                    # Log de erro mais informativo
+                    debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+                    if debug_mode:
+                        print(f"[DEBUG] Erro ao calcular probabilidade: {type(e).__name__}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    # Silenciosamente ignora erros no cálculo (não deve quebrar o jogo)
+                    # win_probability_display será None e não será exibido
+                    win_probability_display = None
             
             # Formata saída com probabilidade se disponível
             if win_probability_display is not None:
@@ -699,6 +703,20 @@ class ConsolePlayer(BasePokerPlayer):
         amount = new_action.get('amount', 0)
         paid = new_action.get('paid', 0)
         
+        # Detecta all-in: verifica se o jogador tem stack 0 após esta ação
+        is_all_in = False
+        if round_state:
+            seats = round_state.get('seats', [])
+            action_uuid = new_action.get('uuid')
+            if action_uuid:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == action_uuid:
+                        current_stack = seat.get('stack', 0)
+                        # Se o stack é 0 após CALL ou RAISE, é all-in
+                        if current_stack == 0 and action_type in ['CALL', 'RAISE']:
+                            is_all_in = True
+                        break
+        
         # Formata ação de forma compacta
         action_parts = []
         
@@ -711,11 +729,17 @@ class ConsolePlayer(BasePokerPlayer):
             action_parts.append(f"{player_name} {action_name} {amount}")
         elif action_type == 'CALL':
             if paid > 0:
-                action_parts.append(f"{player_name} {action_name} {paid}")
+                if is_all_in:
+                    action_parts.append(f"{player_name} all-in({paid})")
+                else:
+                    action_parts.append(f"{player_name} {action_name} {paid}")
             else:
                 action_parts.append(f"{player_name} {action_name}")
         elif action_type == 'RAISE':
-            action_parts.append(f"{player_name} {action_name} {amount}")
+            if is_all_in:
+                action_parts.append(f"{player_name} all-in({amount})")
+            else:
+                action_parts.append(f"{player_name} {action_name} {amount}")
         elif action_type == 'CHECK':
             action_parts.append(f"{player_name} {action_name}")
         
@@ -1279,18 +1303,15 @@ class ConsolePlayer(BasePokerPlayer):
                             all_in_indicator = " (all-in)" if is_eliminated and not is_folded else ""
                             
                             if is_folded:
+                                # Jogador que deu fold - mostra esmaecido
                                 cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
                                 full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
                                 dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                                 print(dim_line)
-                            elif is_eliminated:
-                                # Jogador eliminado (all-in) mas participou do showdown - mostra cartas esmaecidas
-                                cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
-                                full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{all_in_indicator}"
-                                dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
-                                print(dim_line)
                             else:
-                                print(f"  {name}: {cards_display} | {hand_desc}{folded_indicator}")
+                                # Jogador que chegou ao showdown (com ou sem all-in) - mostra normalmente
+                                # Se fez all-in, mostra indicador, mas não esmaece
+                                print(f"  {name}: {cards_display} | {hand_desc}{all_in_indicator}")
                         else:
                             # Mensagem de erro mais informativa
                             error_msg = f"  {name}: [erro: cartas não encontradas"
@@ -1372,15 +1393,27 @@ class ConsolePlayer(BasePokerPlayer):
                             traceback.print_exc()
                         print(f"\n[Erro ao processar winners]")
                 
-                # Mostra stacks finais (jogadores eliminados aparecem esmaecidos)
+                # Mostra stacks finais
+                # Jogadores que chegaram ao showdown não aparecem esmaecidos, mesmo com stack 0 (all-in)
+                # Apenas jogadores que deram fold ou não participaram aparecem esmaecidos
                 try:
                     final_stacks = []
+                    all_cards = get_all_cards()
                     for seat in seats:
                         if isinstance(seat, dict):
                             name = self.formatter.clean_player_name(seat.get('name', ''))
                             stack = seat.get('stack', 0)
-                            # Jogadores eliminados aparecem esmaecidos
-                            if stack == 0:
+                            seat_uuid = seat.get('uuid', '')
+                            state = seat.get('state', '')
+                            
+                            # Verifica se o jogador chegou ao showdown (tem cartas ou não deu fold)
+                            fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                            uuid_to_check = fixed_uuid if fixed_uuid else seat_uuid
+                            has_cards = uuid_to_check in all_cards if uuid_to_check else False
+                            reached_showdown = has_cards or (state != 'folded' and stack == 0)
+                            
+                            # Só esmaece se não chegou ao showdown (deu fold ou não participou)
+                            if stack == 0 and not reached_showdown:
                                 dim_line = f"{self.formatter.DIM}{name} {stack}{self.formatter.RESET}"
                                 final_stacks.append(dim_line)
                             else:
@@ -1514,8 +1547,43 @@ class ConsolePlayer(BasePokerPlayer):
                 player_stack = _get_player_stack(round_state)
                 
                 if player_stack > 0:
-                    # Retorna raise com o valor do stack total (all-in)
-                    return 'raise', player_stack
+                    # Verifica se há ação de raise válida disponível
+                    raise_action = None
+                    for action_data in valid_actions:
+                        if action_data.get('action') == 'raise':
+                            raise_action = action_data
+                            break
+                    
+                    if raise_action:
+                        # Valida limites do raise
+                        raise_amount = raise_action.get('amount', {})
+                        if isinstance(raise_amount, dict):
+                            min_raise = raise_amount.get('min', 0)
+                            max_raise = raise_amount.get('max', float('inf'))
+                            # Garante que o all-in está dentro dos limites válidos
+                            all_in_amount = min(player_stack, max_raise) if max_raise != float('inf') else player_stack
+                            # Se o stack é menor que min_raise, ainda pode fazer all-in
+                            if all_in_amount >= min_raise or player_stack <= min_raise:
+                                return 'raise', all_in_amount
+                            else:
+                                print(f"⚠️  Seu stack ({player_stack}) é menor que o raise mínimo ({min_raise}). Fazendo all-in...")
+                                return 'raise', player_stack
+                        else:
+                            # Formato simples, retorna o stack total
+                            return 'raise', player_stack
+                    else:
+                        # Se não há raise disponível, tenta call como all-in
+                        # (pode acontecer em situações especiais)
+                        call_action = None
+                        for action_data in valid_actions:
+                            if action_data.get('action') == 'call':
+                                call_action = action_data
+                                break
+                        if call_action:
+                            return 'call', call_action.get('amount', 0)
+                        else:
+                            print("Erro: Não há ações válidas para all-in. Use outra ação.")
+                            return self.__receive_action_from_console(valid_actions, round_state)
                 else:
                     print("Erro: Não foi possível determinar stack para all-in")
                     return self.__receive_action_from_console(valid_actions, round_state)
@@ -1549,12 +1617,13 @@ class ConsolePlayer(BasePokerPlayer):
                     call_amount = action_data['amount']
                     
                     # IMPORTANTE: Verifica se o jogador tem stack suficiente para o call
-                    # Se não tiver, converte para all-in automaticamente
+                    # Se não tiver ou se o call vai usar todas as fichas, converte para all-in automaticamente
                     player_stack = _get_player_stack(round_state)
                     
-                    # Se o stack é menor que o call_amount, faz all-in
-                    if player_stack > 0 and call_amount > 0 and player_stack < call_amount:
-                        # Stack insuficiente - retorna all-in com o stack total
+                    # Se o stack é menor ou igual ao call_amount, faz all-in
+                    # (quando são iguais, o call usa todas as fichas, então é all-in)
+                    if player_stack > 0 and call_amount > 0 and player_stack <= call_amount:
+                        # Stack insuficiente ou exato - retorna all-in com o stack total
                         return 'raise', player_stack
                     else:
                         # Stack suficiente ou call_amount é 0 (check)

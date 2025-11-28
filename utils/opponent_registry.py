@@ -143,3 +143,6 @@ def get_opponent_uuid_by_name(name: str) -> Optional[str]:
     """Obtém UUID de um oponente pelo nome (função de conveniência)."""
     return get_opponent_registry().get_opponent_uuid(name)
 
+
+
+

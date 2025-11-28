@@ -52,10 +52,13 @@ class BotConfig:
     bluff_raise_prob_many_players: float = 0.50  # Prob de raise no blefe com muitos jogadores
     
     # Ajustes de threshold baseados em ações
-    raise_threshold_adjustment_base: int = 3  # Ajuste base quando há raise
-    raise_threshold_adjustment_per_raise: int = 2  # Ajuste por cada raise adicional
+    raise_threshold_adjustment_base: int = 2  # Ajuste base quando há raise
+    raise_threshold_adjustment_per_raise: int = 1  # Ajuste por cada raise adicional
     
     # Ajustes de threshold para campo passivo
     passive_threshold_reduction_factor: float = 4.0  # Fator de redução de threshold em campo passivo
     passive_threshold_min: int = 20  # Threshold mínimo em campo passivo
+    
+    # Panic Rule
+    raise_count_panic_threshold: int = 3  # Número de raises para ativar "Panic Rule" (foldar se não tiver mão forte)
 
