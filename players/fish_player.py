@@ -33,7 +33,7 @@ def _create_config(memory_file: str = "fish_player_memory.json") -> BotConfig:
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=10,
+        fold_threshold_base=9,
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise
@@ -132,6 +132,12 @@ def _create_config(memory_file: str = "fish_player_memory.json") -> BotConfig:
         # Mínimo: 5 | Máximo: 20 | Típico: 10-15
         # Bot só ajusta estratégia após este número de rodadas
         rounds_before_learning=15,
+        
+        # EQUITY BASED DECISIONS
+        # Fish: Paga com quase qualquer coisa (15%+)
+        min_equity_call=0.15,
+        # Fish: Aumenta por valor com equity baixa (50%+)
+        strong_equity_raise=0.50,
     )
 
 

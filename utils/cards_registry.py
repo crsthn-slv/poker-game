@@ -2,7 +2,7 @@
 Registro global de cartas dos jogadores.
 Permite acesso às cartas de todos os jogadores durante o round.
 
-IMPORTANTE: Este registry sempre usa UUID fixo para garantir consistência.
+IMPORTANTE: Todos os UUIDs são sempre fixos e determinísticos.
 """
 import os
 
@@ -14,31 +14,20 @@ def store_player_cards(player_uuid, hole_cards, player_name=None):
     """
     Armazena as cartas de um jogador no registro.
     
-    IMPORTANTE: Sempre armazena com UUID fixo. Se player_uuid não for um UUID fixo,
-    tenta mapear usando player_name.
-    
     Args:
-        player_uuid: UUID do jogador (pode ser UUID fixo ou UUID do PyPokerEngine)
+        player_uuid: UUID do jogador (sempre fixo)
         hole_cards: Lista de cartas do jogador (ex: ['SA', 'HK'])
-        player_name: Nome do jogador (opcional, usado para mapear para UUID fixo)
+        player_name: Nome do jogador (opcional, para debug)
     """
     if not player_uuid or not hole_cards:
         return
     
-    # Tenta mapear para UUID fixo se tiver nome
-    fixed_uuid = player_uuid
-    if player_name:
-        from utils.uuid_utils import get_bot_class_uuid_from_name, get_player_uuid
-        mapped_uuid = get_bot_class_uuid_from_name(player_name)
-        if not mapped_uuid:
-            mapped_uuid = get_player_uuid(player_name)
-        if mapped_uuid:
-            fixed_uuid = mapped_uuid
-            debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
-            if debug_mode:
-                print(f"[DEBUG] Registry: mapeado {player_uuid} -> {fixed_uuid} ({player_name})")
+    # UUID já é sempre fixo, armazena diretamente
+    _player_cards[player_uuid] = hole_cards
     
-    _player_cards[fixed_uuid] = hole_cards
+    debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+    if debug_mode and player_name:
+        print(f"[DEBUG] Registry: armazenado {player_uuid} ({player_name})")
 
 
 def get_player_cards(player_uuid):

@@ -104,6 +104,7 @@ def get_bot_class_uuid_from_name(bot_name: str) -> Optional[str]:
         'Karter': 'players.calm_player.CalmPlayer',
         'Ember': 'players.thoughtful_player.ThoughtfulPlayer',
         'Talon': 'players.steady_aggressive_player.SteadyAggressivePlayer',
+
     }
     
     class_identifier = name_to_class_map.get(bot_name)

@@ -34,6 +34,23 @@ Guia passo a passo para criar um novo bot:
 - Testando o bot
 - Exemplos completos
 
+### 🏗️ [Arquitetura dos Bots](ARQUITETURA_BOTS.md)
+Documentação sobre a arquitetura refatorada dos bots:
+- Estrutura hierárquica
+- Componentes principais
+- Redução de código duplicado
+- Como funciona a personalização
+- Benefícios da arquitetura
+
+### 🎮 [Jogo do Console](JOGO_CONSOLE.md)
+Documentação sobre o modo de jogo console interativo:
+- Como iniciar o jogo
+- Configuração inicial
+- Interface do jogo (HUD)
+- Sistema de probabilidade de vitória
+- Comandos e ações disponíveis
+- Fluxo do jogo
+
 ## 🔧 Documentação Técnica
 
 ### 🎯 [Algoritmos e Estratégias](ALGORITHMS_DOCUMENTATION.md)

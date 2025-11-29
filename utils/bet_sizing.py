@@ -1,27 +1,17 @@
-"""
-Módulo dedicado para cálculo de bet sizing.
-Centraliza toda lógica de sizing para facilitar ajustes e testes.
-"""
 import random
-from typing import Optional, Dict, Tuple
-
+from typing import Optional, Dict, List, Any
 
 class BetSizingCalculator:
-    """Calculadora de tamanho de apostas baseada em contexto."""
+    """
+    Calculadora de tamanho de apostas (Bet Sizing).
+    Centraliza a lógica de quanto apostar.
+    """
     
-    def __init__(self, config=None):
-        """
-        Inicializa calculadora de sizing.
-        
-        Args:
-            config: Configuração do bot (opcional, para personalidade)
-        """
+    def __init__(self, config):
         self.config = config
-    
-    def get_sizing_ranges(self, street: str) -> Dict[str, Tuple[float, float]]:
-        """
-        Retorna ranges de sizing por street.
         
+    def get_sizing_ranges(self, street: str) -> Dict[str, tuple]:
+        """
         Ranges (não valores fixos) para evitar comportamentos repetitivos:
         - Preflop: ranges em BB
         - Pós-flop: ranges em percentagem do pote
@@ -151,11 +141,54 @@ class BetSizingCalculator:
         else:  # len == 5
             return 'river'
     
+    def _get_big_blind(self, round_state: Dict, min_amount: int) -> int:
+        """
+        Tenta inferir o big blind do round_state.
+        
+        Prioridade de fontes:
+        1. round_state['small_blind_amount'] * 2 (fonte confiável)
+        2. Inferir de min_amount (min_amount geralmente é 2x BB no preflop)
+        3. Calcular de stack usando regra de 5% (fallback dinâmico)
+        
+        Args:
+            round_state: Estado do round
+            min_amount: Valor mínimo de raise (geralmente 2x BB no preflop)
+        
+        Returns:
+            int: Big blind estimado
+        """
+        # FONTE PRIMÁRIA: small_blind_amount do round_state
+        if 'small_blind_amount' in round_state:
+            small_blind = round_state.get('small_blind_amount', 0)
+            if small_blind > 0:
+                return small_blind * 2
+        
+        # FALLBACK 1: Tenta inferir do min_amount (no preflop, min_amount geralmente é 2x BB)
+        if min_amount > 0:
+            # Assume que min_amount é 2x BB no preflop
+            estimated_bb = min_amount // 2
+            if estimated_bb > 0:
+                return estimated_bb
+        
+        # FALLBACK 2: Calcula de stack usando regra de 5% (BB = 5% da maior stack)
+        seats = round_state.get('seats', [])
+        if seats:
+            max_stack = max((seat.get('stack', 0) for seat in seats), default=0)
+            if max_stack > 0:
+                # BB é aproximadamente 5% da stack
+                estimated_bb = int(max_stack * 0.05)
+                if estimated_bb > 0:
+                    return estimated_bb
+        
+        # FALLBACK FINAL: usa min_amount / 2 ou 1
+        return max(1, min_amount // 2) if min_amount > 0 else 1
+    
     def calculate_bet_size(self, min_amount: int, max_amount: int, 
                            round_state: Dict, hand_strength: int,
                            my_stack: int,
                            strong_hand_threshold: int = 50,
-                           raise_threshold: int = 27) -> int:
+                           raise_threshold: int = 27,
+                           round_count: int = 0) -> int:
         """
         Calcula tamanho da aposta usando SPR, street e ranges estocásticos.
         
@@ -166,7 +199,12 @@ class BetSizingCalculator:
         4. Seleciona range correspondente
         5. Aplica variação estocástica mínima dentro do range
         6. Ajusta por SPR (limites rígidos)
-        7. Garante limites do engine (clamp)
+        7. Ajusta por número de rounds (mais conservador com mais rounds)
+        8. Garante limites do engine (clamp)
+        
+        SOLUÇÃO 1: Preflop usa múltiplos de BB, não % do pote.
+        SOLUÇÃO 4: Limite máximo de raise no preflop (6x BB) - APLICADO DEPOIS de todos os ajustes.
+        NOVO: Considera número de rounds (mais conservador com mais rounds).
         
         Args:
             min_amount: Mínimo permitido pelo engine
@@ -176,6 +214,7 @@ class BetSizingCalculator:
             my_stack: Stack atual do jogador
             strong_hand_threshold: Threshold para mão muito forte
             raise_threshold: Threshold mínimo para raise
+            round_count: Número do round atual (0 = primeiro round)
         
         Returns:
             int: Tamanho da aposta calculado (clamped entre min_amount e max_amount)
@@ -214,8 +253,30 @@ class BetSizingCalculator:
             # Prefere meio do range (40-60% do range)
             target_ratio = range_min + (range_max - range_min) * random.uniform(0.40, 0.60)
         
-        # Calcula amount baseado em % do pote
-        base_amount = int(pot_size * target_ratio)
+        # SOLUÇÃO 1: Preflop usa múltiplos de BB, não % do pote
+        if street == 'preflop':
+            # Preflop: usa múltiplos de BB
+            big_blind = self._get_big_blind(round_state, min_amount)
+            if big_blind > 0:
+                # Converte ranges (0.25-0.80) para múltiplos de BB (2.5-8x BB)
+                # range_min=0.25 -> 2.5x BB, range_max=0.80 -> 8x BB
+                bb_multiplier = range_min * 10  # 0.25 -> 2.5x BB
+                bb_multiplier_max = range_max * 10  # 0.80 -> 8x BB
+                # Aplica variação dentro do range de múltiplos
+                if personality_preference == 'aggressive':
+                    final_multiplier = bb_multiplier + (bb_multiplier_max - bb_multiplier) * random.uniform(0.70, 1.0)
+                elif personality_preference == 'cautious':
+                    final_multiplier = bb_multiplier + (bb_multiplier_max - bb_multiplier) * random.uniform(0.0, 0.30)
+                else:  # balanced
+                    final_multiplier = bb_multiplier + (bb_multiplier_max - bb_multiplier) * random.uniform(0.40, 0.60)
+                
+                base_amount = int(big_blind * final_multiplier)
+            else:
+                # Fallback: usa % do pote se não conseguir inferir BB
+                base_amount = int(pot_size * target_ratio)
+        else:
+            # Pós-flop: usa % do pote (como estava)
+            base_amount = int(pot_size * target_ratio)
         
         # Ajuste por SPR: limites rígidos para evitar all-ins arbitrários
         if spr < 3.0:  # SPR baixo: situação de all-in
@@ -225,6 +286,19 @@ class BetSizingCalculator:
             max_stack_bet = int(my_stack * 0.40)  # Máximo 40% do stack
             base_amount = min(base_amount, max_stack_bet)
         # SPR alto (> 10): sem limite de stack, usa apenas % do pote
+        
+        # NOVO: Ajuste por número de rounds (mais conservador com mais rounds)
+        if round_count > 0:
+            # Reduz sizing em 5% por cada 5 rounds (máximo 30% de redução)
+            rounds_factor = min(0.30, (round_count // 5) * 0.05)
+            base_amount = int(base_amount * (1.0 - rounds_factor))
+        
+        # SOLUÇÃO 4: Limite máximo de raise no preflop (6x BB) - MOVIDO PARA DEPOIS de todos os ajustes
+        if street == 'preflop':
+            big_blind = self._get_big_blind(round_state, min_amount)
+            if big_blind > 0:
+                max_preflop_raise = big_blind * 6
+                base_amount = min(base_amount, max_preflop_raise)
         
         # CLAMP: Garante limites do engine (MELHORIA #1)
         final_amount = self._clamp_amount(min_amount, max_amount, base_amount)
@@ -272,4 +346,3 @@ class BetSizingCalculator:
         
         min_amount = amount_info.get('min', -1)
         return min_amount != -1
-

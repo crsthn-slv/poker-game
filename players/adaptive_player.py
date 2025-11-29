@@ -33,7 +33,7 @@ def _create_config(memory_file: str = "adaptive_player_memory.json") -> BotConfi
         # Threshold base para foldar (força mínima para não foldar)
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
-        fold_threshold_base=20,
+        fold_threshold_base=19,
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
         # Mão precisa ter força >= este valor para considerar raise

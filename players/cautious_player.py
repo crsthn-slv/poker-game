@@ -42,7 +42,7 @@ def _create_config(memory_file: str = "cautious_player_memory.json") -> BotConfi
         # Mínimo: 10 | Máximo: 35 | Típico: 15-30
         # Mão com força < este valor = fold
         # Cautious: threshold alto (folda mais mãos)
-        fold_threshold_base=24,
+        fold_threshold_base=23,
         
         # Threshold mínimo para considerar fazer raise
         # Mínimo: 20 | Máximo: 40 | Típico: 25-35
