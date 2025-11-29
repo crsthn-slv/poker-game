@@ -145,32 +145,43 @@ class BetSizingCalculator:
         """
         Tenta inferir o big blind do round_state.
         
-        No preflop, min_amount geralmente é 2x BB (raise mínimo).
-        Se não conseguir inferir, usa min_amount / 2 como estimativa.
+        Prioridade de fontes:
+        1. round_state['small_blind_amount'] * 2 (fonte confiável)
+        2. Inferir de min_amount (min_amount geralmente é 2x BB no preflop)
+        3. Calcular de stack usando regra de 5% (fallback dinâmico)
         
         Args:
             round_state: Estado do round
             min_amount: Valor mínimo de raise (geralmente 2x BB no preflop)
         
         Returns:
-            int: Big blind estimado (ou min_amount / 2 como fallback)
+            int: Big blind estimado
         """
-        # Tenta obter do round_state diretamente
-        if 'small_blind' in round_state:
-            # Se tem small_blind, big_blind geralmente é 2x
-            small_blind = round_state.get('small_blind', 0)
+        # FONTE PRIMÁRIA: small_blind_amount do round_state
+        if 'small_blind_amount' in round_state:
+            small_blind = round_state.get('small_blind_amount', 0)
             if small_blind > 0:
                 return small_blind * 2
         
-        # Tenta inferir do min_amount (no preflop, min_amount geralmente é 2x BB)
+        # FALLBACK 1: Tenta inferir do min_amount (no preflop, min_amount geralmente é 2x BB)
         if min_amount > 0:
             # Assume que min_amount é 2x BB no preflop
             estimated_bb = min_amount // 2
             if estimated_bb > 0:
                 return estimated_bb
         
-        # Fallback: usa min_amount / 2
-        return max(1, min_amount // 2) if min_amount > 0 else 50  # Default 50 se não conseguir
+        # FALLBACK 2: Calcula de stack usando regra de 5% (BB = 5% da maior stack)
+        seats = round_state.get('seats', [])
+        if seats:
+            max_stack = max((seat.get('stack', 0) for seat in seats), default=0)
+            if max_stack > 0:
+                # BB é aproximadamente 5% da stack
+                estimated_bb = int(max_stack * 0.05)
+                if estimated_bb > 0:
+                    return estimated_bb
+        
+        # FALLBACK FINAL: usa min_amount / 2 ou 1
+        return max(1, min_amount // 2) if min_amount > 0 else 1
     
     def calculate_bet_size(self, min_amount: int, max_amount: int, 
                            round_state: Dict, hand_strength: int,
