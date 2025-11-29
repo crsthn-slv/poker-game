@@ -170,6 +170,12 @@ def _create_config(memory_file: str = "tight_player_memory.json") -> BotConfig:
         # Mínimo: 5 | Máximo: 20 | Típico: 10-15
         # Bot só ajusta estratégia após este número de rodadas
         rounds_before_learning=10,
+        
+        # EQUITY BASED DECISIONS
+        # Tight: Só paga com boa equity (35%+)
+        min_equity_call=0.35,
+        # Tight: Só aumenta por valor com equity muito alta (70%+)
+        strong_equity_raise=0.70,
     )
 
 

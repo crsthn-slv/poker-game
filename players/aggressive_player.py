@@ -175,6 +175,12 @@ def _create_config(memory_file: str = "aggressive_player_memory.json") -> BotCon
         
         # Panic Rule (Aggressive aguenta mais pressão)
         raise_count_panic_threshold=5,
+        
+        # EQUITY BASED DECISIONS
+        # Aggressive: Paga com equity média/baixa (20%+) - persegue draws
+        min_equity_call=0.20,
+        # Aggressive: Aumenta por valor com equity boa (55%+)
+        strong_equity_raise=0.55,
     )
 
 

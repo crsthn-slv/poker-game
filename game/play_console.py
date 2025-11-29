@@ -331,9 +331,12 @@ if __name__ == "__main__":
         
         # Registra os bots selecionados aleatoriamente
         for bot_info in selected_bots:
+            bot_instance = bot_info['class']()
+            # Sincroniza nome do bot para garantir que fallback de posição funcione
+            bot_instance.config.name = bot_info['name']
             config.register_player(
                 name=bot_info['name'],
-                algorithm=bot_info['class']()
+                algorithm=bot_instance
             )
         
         # Mostra informações do jogo
@@ -353,6 +356,19 @@ if __name__ == "__main__":
         print()
         
         game_result = start_poker(config, verbose=0)
+        
+        # IMPORTANTE: Se o jogador humano fez fold, ele não recebe receive_round_result_message
+        # do PyPokerEngine. Precisamos chamar manualmente para mostrar o showdown.
+        if game_result and 'round_state' in game_result:
+            last_round = game_result['round_state']
+            if last_round:
+                # Chama receive_round_result_message manualmente no ConsolePlayer
+                # para garantir que o showdown seja exibido mesmo quando o jogador fez fold
+                console_player.receive_round_result_message(
+                    winners=game_result.get('winners', []),
+                    hand_info=game_result.get('hand_info', []),
+                    round_state=last_round
+                )
         
         # O resultado final é mostrado pelo ConsolePlayer.receive_round_result_message
         # Não precisamos imprimir o JSON bruto aqui

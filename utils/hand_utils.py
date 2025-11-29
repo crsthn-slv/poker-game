@@ -391,6 +391,103 @@ def score_to_strength_level_heuristic(base_strength: int) -> str:
         return HandStrengthLevel.POOR.value
 
 
+def analyze_board_texture(community_cards: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Analisa a textura do board para detectar pares, trips, e outras características
+    que todos os jogadores compartilham.
+    
+    Isso ajuda os bots a reconhecerem quando a "força" da mão vem principalmente
+    do board (que todos veem) vs das cartas privadas.
+    
+    Args:
+        community_cards: Lista de cartas comunitárias
+        
+    Returns:
+        Dict com informações sobre o board:
+        {
+            'has_pair': bool,           # Board tem um par
+            'has_trips': bool,          # Board tem trips
+            'has_quads': bool,          # Board tem quads
+            'pair_rank': str or None,   # Rank do par no board
+            'trips_rank': str or None,  # Rank dos trips no board
+            'high_card_rank': int,      # Valor da carta mais alta (2-14)
+            'num_high_cards': int,      # Quantas cartas altas (J+) no board
+            'is_paired': bool,          # Alias para has_pair (compatibilidade)
+            'board_strength': str,      # 'weak', 'medium', 'strong'
+        }
+    """
+    result = {
+        'has_pair': False,
+        'has_trips': False,
+        'has_quads': False,
+        'pair_rank': None,
+        'trips_rank': None,
+        'high_card_rank': 0,
+        'num_high_cards': 0,
+        'is_paired': False,
+        'board_strength': 'weak'
+    }
+    
+    if not community_cards or len(community_cards) < 3:
+        return result
+    
+    # Conta ranks no board
+    rank_counts = {}
+    ranks = []
+    for card in community_cards:
+        rank = card[1]  # Segundo caractere é o rank
+        ranks.append(rank)
+        rank_counts[rank] = rank_counts.get(rank, 0) + 1
+    
+    # Detecta pares, trips, quads
+    max_count = max(rank_counts.values()) if rank_counts else 0
+    
+    if max_count >= 4:
+        result['has_quads'] = True
+        result['has_trips'] = True
+        result['has_pair'] = True
+        result['is_paired'] = True
+        # Encontra qual rank tem quads
+        for rank, count in rank_counts.items():
+            if count >= 4:
+                result['trips_rank'] = rank
+                result['pair_rank'] = rank
+                break
+        result['board_strength'] = 'strong'
+        
+    elif max_count >= 3:
+        result['has_trips'] = True
+        result['has_pair'] = True
+        result['is_paired'] = True
+        # Encontra qual rank tem trips
+        for rank, count in rank_counts.items():
+            if count >= 3:
+                result['trips_rank'] = rank
+                result['pair_rank'] = rank
+                break
+        result['board_strength'] = 'strong'
+        
+    elif max_count >= 2:
+        result['has_pair'] = True
+        result['is_paired'] = True
+        # Encontra qual rank tem par
+        for rank, count in rank_counts.items():
+            if count >= 2:
+                result['pair_rank'] = rank
+                break
+        result['board_strength'] = 'medium'
+    
+    # Detecta carta mais alta
+    rank_values = [get_rank_value(r) for r in ranks]
+    result['high_card_rank'] = max(rank_values) if rank_values else 0
+    
+    # Conta cartas altas (J, Q, K, A = 11+)
+    high_cards = ['J', 'Q', 'K', 'A']
+    result['num_high_cards'] = sum(1 for r in ranks if r in high_cards)
+    
+    return result
+
+
 def evaluate_hand_potential(
     hole_card: List[str], 
     community_cards: Optional[List[str]] = None

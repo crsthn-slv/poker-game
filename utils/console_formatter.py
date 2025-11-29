@@ -823,4 +823,201 @@ class ConsoleFormatter:
         
         # Retorna mensagem formatada com bordas destacadas
         return f"{color}{'─' * 80}{self.RESET}\n{color}{self.BOLD}{message_line}{self.RESET}\n{color}{'─' * 80}{self.RESET}"
+    
+    def format_hand_name_bold(self, hand_description):
+        """Formata nome da mão em negrito.
+        
+        Args:
+            hand_description: Descrição da mão (ex: "Two Pair", "Flush")
+        
+        Returns:
+            String com o nome da mão em negrito
+        """
+        if not hand_description:
+            return ""
+        
+        return f"{self.BOLD}{hand_description}{self.RESET}"
+
+    def get_player_position(self, seat, round_state):
+        """
+        Determina a posição de um jogador na mesa.
+        
+        Args:
+            seat: Dict com informações do seat
+            round_state: Estado do round
+        
+        Returns:
+            String com a posição (SB, BB, BTN, CO, MP, UTG) ou None
+        """
+        try:
+            if not round_state or not seat:
+                return None
+            
+            dealer_btn = round_state.get('dealer_btn')
+            if dealer_btn is None:
+                return None
+            
+            seats = round_state.get('seats', [])
+            if not seats:
+                return None
+            
+            # Filtra apenas jogadores ativos
+            active_players = [s for s in seats if isinstance(s, dict) and s.get('state') == 'participating']
+            num_players = len(active_players)
+            
+            if num_players < 2:
+                return None
+            
+            # Encontra índice do dealer e do jogador na lista de ativos
+            player_uuid = seat.get('uuid')
+            if not player_uuid:
+                return None
+            
+            player_index = -1
+            dealer_index = -1
+            dealer_uuid = seats[dealer_btn].get('uuid') if dealer_btn < len(seats) else None
+            
+            for i, player in enumerate(active_players):
+                if player.get('uuid') == player_uuid:
+                    player_index = i
+                if player.get('uuid') == dealer_uuid:
+                    dealer_index = i
+            
+            if player_index == -1 or dealer_index == -1:
+                return None
+            
+            # Calcula distância do dealer (sentido horário)
+            distance_from_dealer = (player_index - dealer_index) % num_players
+            
+            # Determina posição baseada na distância
+            if num_players == 2:
+                # Heads-up: Dealer é SB, outro é BB
+                return "SB" if distance_from_dealer == 0 else "BB"
+            
+            if distance_from_dealer == 0:
+                return "BTN"
+            elif distance_from_dealer == 1:
+                return "SB"
+            elif distance_from_dealer == 2:
+                return "BB"
+            elif distance_from_dealer == 3:
+                return "UTG"
+            elif distance_from_dealer == num_players - 1:
+                return "CO"
+            else:
+                return "MP"
+        
+        except Exception:
+            return None
+
+    def format_player_status_table(self, round_state, action_histories, current_street, valid_actions=None):
+        """
+        Formata tabela de status dos jogadores com resumo do round.
+        
+        Args:
+            round_state: Estado do round
+            action_histories: Histórico de ações
+            current_street: Street atual
+            valid_actions: Ações válidas para o jogador atual (para calcular To Call)
+            
+        Returns:
+            String formatada com a tabela
+        """
+        if not round_state:
+            return ""
+            
+        seats = round_state.get('seats', [])
+        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+        
+        # Calcula To Call (baseado na ação de call disponível para o jogador atual)
+        to_call = 0
+        if valid_actions:
+            for action in valid_actions:
+                if action.get('action') == 'call':
+                    to_call = action.get('amount', 0)
+                    break
+        
+        # Calcula apostas da rodada atual e última ação
+        player_bets = {}
+        player_last_actions = {}
+        
+        if current_street in action_histories:
+            for action in action_histories[current_street]:
+                if not isinstance(action, dict):
+                    continue
+                    
+                uuid = action.get('uuid')
+                action_type = action.get('action', '')
+                amount = action.get('amount', 0)
+                paid = action.get('paid', 0)
+                
+                # Atualiza última ação
+                action_str = action_type.lower()
+                if action_type == 'RAISE':
+                    action_str = f"raise({amount})"
+                    player_bets[uuid] = amount
+                elif action_type == 'CALL':
+                    action_str = f"call({paid})"
+                    # Para CALL, somamos o valor pago ao total apostado na rodada
+                    player_bets[uuid] = player_bets.get(uuid, 0) + paid
+                elif action_type in ['SMALLBLIND', 'BIGBLIND']:
+                    player_bets[uuid] = amount
+                elif action_type == 'FOLD':
+                    action_str = "fold"
+                elif action_type == 'CHECK':
+                    action_str = "check"
+                
+                player_last_actions[uuid] = action_str
+                
+        # Constrói a tabela
+        lines = []
+        lines.append(f"{self.BOLD}Round Summary:{self.RESET}")
+        lines.append(f"Pot: {self.format_pot_with_color(pot)}")
+        lines.append(f"To Call: {to_call}")
+        lines.append("")
+        lines.append(f"{self.BOLD}Player Status:{self.RESET}")
+        
+        # Cabeçalho da tabela
+        # Ajustando larguras: Player(15), Position(10), Stack(10), Bet Current Round(18), Last Action(15)
+        header = f"| {'Player':<15} | {'Position':<10} | {'Stack':<10} | {'Bet Current Round':<18} | {'Last Action':<15} |"
+        separator = f"|{'-'*17}|{'-'*12}|{'-'*12}|{'-'*21}|{'-'*17}|"
+        
+        lines.append(header)
+        lines.append(separator)
+        
+        for seat in seats:
+            if not isinstance(seat, dict): continue
+            
+            uuid = seat.get('uuid')
+            name = self.clean_player_name(seat.get('name', ''))
+            stack = seat.get('stack', 0)
+            state = seat.get('state', '')
+            
+            # Obtém posição
+            position = self.get_player_position(seat, round_state) or "-"
+            
+            # Obtém aposta e última ação
+            bet = player_bets.get(uuid, 0)
+            last_action = player_last_actions.get(uuid, "-")
+            
+            # Se não tem ação nesta street, mas está participando, pode ser que ainda vai agir
+            if last_action == "-" and state == 'participating':
+                last_action = ""
+            elif state == 'folded' and last_action == "-":
+                # Se deu fold em street anterior
+                last_action = "fold"
+            
+            # Formata linha
+            line = f"| {name:<15} | {position:<10} | {stack:<10} | {bet:<18} | {last_action:<15} |"
+            
+            # Se o jogador deu fold, mostra esmaecido
+            if state == 'folded' or last_action == "fold":
+                line = f"{self.DIM}{line}{self.RESET}"
+            # Se é o jogador atual ("You"), destaca em negrito/cor
+            elif name == "You":
+                line = f"{self.GREEN}{line}{self.RESET}"
+                
+            lines.append(line)
+            
+        return "\n".join(lines)
 

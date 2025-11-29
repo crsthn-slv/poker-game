@@ -48,8 +48,13 @@ class GameHistory:
         """
         self.player_uuid = player_uuid
         self.initial_stack = initial_stack
-        self.game_id = str(uuid.uuid4())
         self.start_time = datetime.now()
+        
+        # Gera game_id determinístico baseado em timestamp + player_uuid
+        timestamp_str = self.start_time.isoformat()
+        game_id_source = f"{player_uuid}_{timestamp_str}"
+        GAME_NAMESPACE = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+        self.game_id = str(uuid.uuid5(GAME_NAMESPACE, game_id_source))
         
         # Estrutura do histórico
         self.history = {

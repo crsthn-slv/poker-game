@@ -36,8 +36,6 @@ class ConsolePlayer(BasePokerPlayer):
         self.preflop_active_count = None  # Número de jogadores ativos no preflop (para garantir estabilidade)
         # Sistema de histórico
         self.game_history = None  # Será inicializado quando UUID for definido
-        # UUID fixo baseado no nome (será definido quando set_uuid for chamado)
-        self._fixed_uuid = None
         self._player_name = None
     
     def set_uuid(self, uuid):
@@ -46,26 +44,18 @@ class ConsolePlayer(BasePokerPlayer):
         Ignora o UUID do PyPokerEngine e usa UUID determinístico baseado no nome.
         Isso garante que o mesmo jogador sempre tenha o mesmo UUID.
         """
-        # O nome será obtido do round_state quando disponível
-        # Por enquanto, usa UUID do PyPokerEngine se não tiver nome
-        self.uuid = uuid
-        self._fixed_uuid = uuid  # Será atualizado quando tiver o nome
-    
-    def _update_fixed_uuid_from_name(self, player_name):
-        """Atualiza UUID fixo baseado no nome do jogador."""
-        if player_name:
-            from utils.uuid_utils import get_player_uuid
-            fixed_uuid = get_player_uuid(player_name)
-            if fixed_uuid:
-                self._fixed_uuid = fixed_uuid
-                self._player_name = player_name
-                # Atualiza self.uuid para usar UUID fixo
-                if self.uuid != fixed_uuid:
-                    old_uuid = self.uuid
-                    self.uuid = fixed_uuid
-                    debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
-                    if debug_mode:
-                        print(f"[DEBUG] ConsolePlayer UUID atualizado: {old_uuid} -> {fixed_uuid} ({player_name})")
+        # Por padrão, usa "You" como nome do jogador humano
+        from utils.uuid_utils import get_player_uuid
+        fixed_uuid = get_player_uuid("You")
+        if fixed_uuid:
+            self.uuid = fixed_uuid
+            self._player_name = "You"
+            debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+            if debug_mode:
+                print(f"[DEBUG] ConsolePlayer UUID: PyPokerEngine={uuid} -> Fixed={fixed_uuid} (You)")
+        else:
+            # Fallback: usa UUID do PyPokerEngine se não conseguir gerar fixo
+            self.uuid = uuid
 
     def _get_win_probability_cache_key(self, round_state):
         """Gera chave de cache baseada em street, número de jogadores ativos e cartas comunitárias.
@@ -448,13 +438,10 @@ class ConsolePlayer(BasePokerPlayer):
         # Atualiza último pot impresso
         self.last_pot_printed = pot_amount
         
-        # 5. Histórico de ações por jogador (uma linha por jogador)
-        if action_histories:
-            history_by_player = self.formatter.format_history_by_player(action_histories, current_street, round_state)
-            if history_by_player:
-                print("Action history:")
-                for line in history_by_player:
-                    print(line)
+        # 5. Tabela de status dos jogadores e histórico
+        status_table = self.formatter.format_player_status_table(round_state, action_histories, current_street, valid_actions)
+        if status_table:
+            print(status_table)
         
         # 6. Ações disponíveis com prefixos [f], [c], [r] numa única linha
         # Passa round_state e player_uuid para calcular valor adicional de call corretamente
@@ -565,15 +552,7 @@ class ConsolePlayer(BasePokerPlayer):
         self.pot_line_printed = False
         """Mostra divisor de round e inicializa novo round."""
         
-        # IMPORTANTE: Atualiza UUID fixo baseado no nome do jogador nos seats
-        if seats and hasattr(self, 'uuid') and self.uuid:
-            for seat in seats:
-                if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
-                    player_name = seat.get('name', '')
-                    if player_name:
-                        self._update_fixed_uuid_from_name(player_name)
-                    break
-        
+        # UUID é sempre fixo, não precisa de atualização
         # Mostra divisor de round de forma destacada
         print("\n" + self.formatter.format_round_divider(round_count))
         print()
@@ -587,15 +566,13 @@ class ConsolePlayer(BasePokerPlayer):
         # Limpa registro de cartas do round anterior
         clear_registry()
         # Armazena cartas do jogador em cache e no registro global
-        # IMPORTANTE: Usa UUID fixo
+        # UUID é sempre fixo
         if hole_card:
             hole_cards = normalize_hole_cards(hole_card)
             self.my_hole_cards = hole_cards
-            # Usa UUID fixo se disponível, senão usa UUID do PyPokerEngine
-            uuid_to_store = self._fixed_uuid if self._fixed_uuid else (self.uuid if hasattr(self, 'uuid') and self.uuid else None)
-            if uuid_to_store:
-                self.players_hole_cards[uuid_to_store] = hole_cards
-                store_player_cards(uuid_to_store, hole_cards, self._player_name)
+            if hasattr(self, 'uuid') and self.uuid:
+                self.players_hole_cards[self.uuid] = hole_cards
+                store_player_cards(self.uuid, hole_cards, self._player_name)
         # Tenta obter cartas dos outros jogadores dos seats se disponíveis
         # Nota: PyPokerEngine geralmente não fornece cartas dos oponentes aqui,
         # mas tentamos capturar se estiverem disponíveis
@@ -851,6 +828,8 @@ class ConsolePlayer(BasePokerPlayer):
             print(f"[DEBUG]   UUID não mapeado (mantendo original): {seat_uuid_pypoker}")
         return seat_uuid_pypoker
     
+
+
     def _get_player_cards(self, fixed_uuid, seat, all_cards, winners_with_cards, hand_info_dict, hand_info, seats, name, debug_mode=False):
         """
         Obtém cartas de um jogador usando múltiplas fontes em ordem de prioridade.
@@ -878,6 +857,17 @@ class ConsolePlayer(BasePokerPlayer):
             if debug_mode:
                 print(f"[DEBUG]   Cartas encontradas no registry: {fixed_uuid}")
             return normalize_hole_cards(hole_cards)
+        
+        # 1.5. Do registry global usando UUID do seat (engine UUID)
+        # Bots atualizam seu UUID para o do engine e armazenam cartas com ele
+        if seat and isinstance(seat, dict):
+            seat_uuid = seat.get('uuid')
+            if seat_uuid and seat_uuid != fixed_uuid:
+                hole_cards = all_cards.get(seat_uuid)
+                if hole_cards:
+                    if debug_mode:
+                        print(f"[DEBUG]   Cartas encontradas no registry (seat uuid): {seat_uuid}")
+                    return normalize_hole_cards(hole_cards)
         
         # 2. Dos winners se este jogador é vencedor
         if fixed_uuid in winners_with_cards:
@@ -1162,6 +1152,21 @@ class ConsolePlayer(BasePokerPlayer):
     def receive_round_result_message(self, winners, hand_info, round_state):
         """Mostra resultado final humanizado sem JSON bruto."""
         try:
+            debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+            
+            if debug_mode:
+                print(f"[DEBUG] ========== receive_round_result_message CALLED ==========")
+                print(f"[DEBUG] Player UUID: {self.uuid}")
+                print(f"[DEBUG] Player Name: {self.name}")
+            
+            # Evita mostrar showdown duplicado (quando chamado manualmente após fold)
+            round_id = f"{round_state.get('round_count', 0)}_{round_state.get('street', '')}"
+            if hasattr(self, '_last_showdown_displayed') and self._last_showdown_displayed == round_id:
+                if debug_mode:
+                    print(f"[DEBUG] Showdown already displayed for round {round_id}, skipping")
+                return
+            self._last_showdown_displayed = round_id
+            
             pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
             seats = round_state.get('seats', [])
             community_cards = get_community_cards(round_state)
@@ -1199,12 +1204,59 @@ class ConsolePlayer(BasePokerPlayer):
             
             # Processa winners e hand_info usando métodos auxiliares
             winner_uuids, winners_with_cards = self._process_winners(winners, seats)
+            
+            # DEBUG: Mostra conteúdo bruto do hand_info
+            if debug_mode:
+                print(f"[DEBUG] ========== RAW hand_info ==========")
+                print(f"[DEBUG] Type: {type(hand_info)}")
+                print(f"[DEBUG] Content: {hand_info}")
+                print(f"[DEBUG] ====================================")
+            
             hand_info_dict = self._process_hand_info(hand_info, seats, debug_mode)
+            
+            # IMPORTANTE: Extrai e armazena cartas dos bots do hand_info no registry global
+            # Isso garante que as cartas estejam disponíveis no showdown
+            if hand_info_dict:
+                for fixed_uuid, info in hand_info_dict.items():
+                    if isinstance(info, dict):
+                        # Tenta obter cartas de múltiplos formatos possíveis
+                        bot_hole_cards = (
+                            info.get('hole_card') or 
+                            info.get('hole_cards') or
+                            (info.get('hand', {}).get('hole_card') if isinstance(info.get('hand'), dict) else None)
+                        )
+                        if bot_hole_cards:
+                            try:
+                                normalized_cards = normalize_hole_cards(bot_hole_cards)
+                                if normalized_cards:
+                                    # Obtém nome do jogador para o registro
+                                    player_name = info.get('name', '')
+                                    if not player_name:
+                                        # Tenta encontrar nome nos seats
+                                        for seat in seats:
+                                            if isinstance(seat, dict):
+                                                seat_uuid = seat.get('uuid', '')
+                                                seat_fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                                                if seat_uuid == fixed_uuid or seat_fixed_uuid == fixed_uuid:
+                                                    player_name = seat.get('name', '')
+                                                    break
+                                    
+                                    store_player_cards(fixed_uuid, normalized_cards, player_name)
+                                    if debug_mode:
+                                        print(f"[DEBUG] Cartas armazenadas do hand_info: {fixed_uuid} ({player_name}) -> {normalized_cards}")
+                            except Exception as e:
+                                if debug_mode:
+                                    print(f"[DEBUG] Erro ao armazenar cartas do hand_info: {e}")
             
             if debug_mode:
                 print(f"[DEBUG] Registry tem {len(get_all_cards())} jogadores")
                 print(f"[DEBUG] hand_info_dict tem {len(hand_info_dict)} jogadores")
                 print(f"[DEBUG] winner_uuids: {winner_uuids}")
+                print(f"[DEBUG] ========== REGISTRY CONTENT ==========")
+                all_cards_debug = get_all_cards()
+                for uuid, cards in all_cards_debug.items():
+                    print(f"[DEBUG]   {uuid}: {cards}")
+                print(f"[DEBUG] ========================================")
             
             if winner_uuids or seats:
                 # Mostra última street e community cards antes do resultado
@@ -1219,7 +1271,7 @@ class ConsolePlayer(BasePokerPlayer):
                     community_display = self.formatter.format_cards_display_with_color(community_cards)
                     print(f"Community cards: {community_display}")
                 
-                print("\n–––– ROUND RESULT ––––")
+                print("\n–– SHOWDOWN ––")
                 
                 # Mostra community cards novamente no resultado
                 if community_cards:
@@ -1239,6 +1291,10 @@ class ConsolePlayer(BasePokerPlayer):
                         name = self.formatter.clean_player_name(seat.get('name', ''))
                         state = seat.get('state', '')
                         seat_stack = seat.get('stack', 0)
+                        
+                        # Obtém posição do jogador
+                        position = self.formatter.get_player_position(seat, round_state)
+                        position_indicator = f" ({position})" if position else ""
                         
                         # Mapeia UUID e determina flags
                         fixed_uuid = self._get_fixed_uuid_from_seat(seat, debug_mode)
@@ -1271,17 +1327,17 @@ class ConsolePlayer(BasePokerPlayer):
                             # Verifica se é porque não tem fichas suficientes para os blinds
                             if seat_stack > 0:
                                 # Tem fichas mas não participou (pode ser porque não consegue pagar blinds)
-                                full_line = f"  {name}: (Out of chips - cannot pay blinds)"
+                                full_line = f"  {name}{position_indicator}: (Out of chips - cannot pay blinds)"
                             else:
                                 # Sem fichas
-                                full_line = f"  {name}: (Out of chips)"
+                                full_line = f"  {name}{position_indicator}: (Out of chips)"
                             dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                             print(dim_line)
                             continue
                         
                         # Se jogador deu fold e não é o jogador humano, mostra apenas "folded"
                         if is_folded and not is_player:
-                            full_line = f"  {name}: folded"
+                            full_line = f"  {name}{position_indicator}: folded"
                             dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                             print(dim_line)
                             continue
@@ -1299,22 +1355,24 @@ class ConsolePlayer(BasePokerPlayer):
                         if hole_cards and len(hole_cards) >= 2:
                             cards_display = self.formatter.format_cards_display_with_color(hole_cards)
                             hand_desc = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
-                            folded_indicator = " (folded)" if is_folded and is_player else ""
+                            
+                            # Determina indicadores
+                            folded_indicator = " (Folded)" if is_folded else ""
                             all_in_indicator = " (all-in)" if is_eliminated and not is_folded else ""
                             
                             if is_folded:
-                                # Jogador que deu fold - mostra esmaecido
+                                # Jogador que deu fold - mostra cartas com indicador (Folded)
                                 cards_display_no_color = re.sub(r'\033\[[0-9;]*m', '', cards_display)
-                                full_line = f"  {name}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
+                                full_line = f"  {name}{position_indicator}: {cards_display_no_color} | {hand_desc}{folded_indicator}"
                                 dim_line = f"{self.formatter.DIM}{full_line}{self.formatter.RESET}"
                                 print(dim_line)
                             else:
                                 # Jogador que chegou ao showdown (com ou sem all-in) - mostra normalmente
                                 # Se fez all-in, mostra indicador, mas não esmaece
-                                print(f"  {name}: {cards_display} | {hand_desc}{all_in_indicator}")
+                                print(f"  {name}{position_indicator}: {cards_display} | {hand_desc}{all_in_indicator}")
                         else:
                             # Mensagem de erro mais informativa
-                            error_msg = f"  {name}: [erro: cartas não encontradas"
+                            error_msg = f"  {name}{position_indicator}: [erro: cartas não encontradas"
                             if debug_mode:
                                 error_msg += f" (UUID: {seat_uuid}, fixed: {fixed_uuid})"
                             error_msg += "]"
@@ -1367,7 +1425,9 @@ class ConsolePlayer(BasePokerPlayer):
                                             )
                                         
                                         if hand_desc:
-                                            winner_names.append(f"{name} ({hand_desc})")
+                                            # Bold the hand name for emphasis
+                                            hand_desc_bold = self.formatter.format_hand_name_bold(hand_desc)
+                                            winner_names.append(f"{name} ({hand_desc_bold})")
                                         else:
                                             winner_names.append(name)
                                         break

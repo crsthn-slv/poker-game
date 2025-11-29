@@ -12,6 +12,7 @@ from utils.memory_manager import UnifiedMemoryManager
 from utils.action_analyzer import analyze_current_round_actions, analyze_possible_bluff
 from utils.action_dataclasses import CurrentActions, BluffAnalysis
 from utils.bet_sizing import BetSizingCalculator
+from utils.win_probability_calculator import calculate_win_probability_for_player
 from .bot_config import BotConfig
 
 # Seed global opcional para debugging (MELHORIA #3)
@@ -96,11 +97,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
         # Inicializa calculadora de sizing (MELHORIA #11)
         self.sizing_calculator = BetSizingCalculator(config)
         
-        # Gera UUID fixo baseado na classe imediatamente
+        # Gera UUID fixo baseado na classe - sempre determinístico
         from utils.uuid_utils import get_bot_class_uuid
-        self._fixed_uuid = get_bot_class_uuid(self)
-        # Define UUID fixo imediatamente (PyPokerEngine pode não chamar set_uuid)
-        self.uuid = self._fixed_uuid
+        self.uuid = get_bot_class_uuid(self)
         
         # Aplica seed se configurado (MELHORIA #3)
         if _RANDOM_SEED is not None:
@@ -108,14 +107,15 @@ class PokerBotBase(BasePokerPlayer, ABC):
     
     def set_uuid(self, uuid):
         """
-        Define UUID do bot conforme atribuído pelo PyPokerEngine.
-        
-        Mantemos o _fixed_uuid para persistência de memória, mas usamos
-        o uuid do engine para identificar o bot no estado do jogo.
+        PyPokerEngine tenta atribuir UUID variável, mas sempre sobrescrevemos com UUID fixo.
+        Isso garante que o mesmo tipo de bot sempre tenha o mesmo UUID.
         """
+        from utils.uuid_utils import get_bot_class_uuid
+        fixed_uuid = get_bot_class_uuid(self)
         if self._is_debug_mode():
-            print(f"[DEBUG] set_uuid called for {self.config.name}: {uuid}")
-        self.uuid = uuid
+            print(f"[DEBUG] set_uuid called for {self.config.name}: PyPokerEngine={uuid} -> Fixed={fixed_uuid}")
+        # SEMPRE usa UUID fixo, ignorando o UUID do engine
+        self.uuid = fixed_uuid
     
     def _load_parameters_from_memory(self):
         """Carrega parâmetros globais da memória."""
@@ -174,67 +174,116 @@ class PokerBotBase(BasePokerPlayer, ABC):
         - BTN (Button - Dealer)
         """
         try:
-            my_uuid = self.uuid
             dealer_btn = round_state['dealer_btn']
             seats = round_state['seats']
+            
+            # CORREÇÃO: Primeiro encontra o bot por NOME (mais confiável que UUID)
+            my_seat = None
+            my_name = self.config.name
+            
+            for seat in seats:
+                if seat.get('name') == my_name:
+                    my_seat = seat
+                    # Atualiza UUID se necessário (corrige mismatch)
+                    seat_uuid = seat.get('uuid')
+                    if seat_uuid and self.uuid != seat_uuid:
+                        if self.debug_mode:
+                            self._log_debug(f"UUID updated from {self.uuid} to {seat_uuid}")
+                        self.uuid = seat_uuid
+                    break
+            
+            if not my_seat:
+                # Fallback: tenta por UUID
+                for seat in seats:
+                    if seat.get('uuid') == self.uuid:
+                        my_seat = seat
+                        break
+            
+            if not my_seat:
+                if self.debug_mode:
+                    self._log_debug(f"Could not find seat for {my_name} (UUID: {self.uuid})")
+                return "Unknown"
+            
+            # Filtra apenas jogadores ativos para calcular posições relativas
             active_players = [s for s in seats if s['state'] == 'participating']
-            num_players = len(active_players)
+            num_active = len(active_players)
             
-            # Encontra índice do dealer e do bot na lista de ativos
-            # Nota: seats é a lista completa, precisamos filtrar apenas os ativos para determinar ordem relativa
+            if num_active == 0:
+                return "Unknown"
             
-            # Mapeia uuid para índice na lista de ativos
+            # CORREÇÃO: Encontra índices na lista de ATIVOS (não na lista completa)
             my_index = -1
             dealer_index = -1
             
+            # O dealer é sempre seats[dealer_btn], mesmo se fez fold
+            dealer_seat = seats[dealer_btn]
+            dealer_uuid = dealer_seat.get('uuid')
+            
             for i, player in enumerate(active_players):
-                if player['uuid'] == my_uuid:
+                player_uuid = player.get('uuid')
+                
+                # Encontra meu índice
+                if player_uuid == self.uuid or player.get('name') == my_name:
                     my_index = i
                 
-                # O dealer_btn é o índice na lista COMPLETA de seats
-                # Precisamos achar quem é o dealer na lista de ATIVOS
-                # O dealer real é seats[dealer_btn]
-                dealer_uuid = seats[dealer_btn]['uuid']
-                if player['uuid'] == dealer_uuid:
+                # Encontra índice do dealer (se ainda estiver ativo)
+                if player_uuid == dealer_uuid:
                     dealer_index = i
             
-            # Fallback: se não achou por UUID, tenta por nome
-            if my_index == -1:
-                my_name = self.config.name
-                for i, player in enumerate(active_players):
-                    if player['name'] == my_name:
-                        my_index = i
-                        # Atualiza UUID se encontrou por nome
-                        if self.uuid != player['uuid']:
-                            self._log_debug(f"UUID Mismatch fixed by Name: {self.uuid} -> {player['uuid']}")
-                            self.uuid = player['uuid']
-                        break
-
-            if my_index == -1 or dealer_index == -1:
-                if self.debug_mode:
-                    active_uuids = [p['uuid'] for p in active_players]
-                    active_names = [p['name'] for p in active_players]
-                    dealer_uuid = seats[dealer_btn]['uuid']
-                    self._log_debug(f"Position Unknown Debug:")
-                    self._log_debug(f"  My UUID: {my_uuid} | My Name: {self.config.name}")
-                    self._log_debug(f"  Dealer UUID: {dealer_uuid} (Index {dealer_btn})")
-                    self._log_debug(f"  Active UUIDs: {active_uuids}")
-                    self._log_debug(f"  Active Names: {active_names}")
-                    self._log_debug(f"  My Index: {my_index}, Dealer Index: {dealer_index}")
-                return "Unknown"
+            # Se o dealer fez fold, precisa calcular a posição de forma diferente
+            # Nesse caso, usamos a lista completa de seats para determinar a ordem
+            if dealer_index == -1:
+                # Dealer fez fold - calcula posição baseado na ordem dos seats
+                # Encontra índice do dealer na lista completa
+                dealer_seat_index = dealer_btn
+                my_seat_index = -1
                 
-            # Calcula distância do dealer (sentido horário)
-            # 0 = Dealer (BTN)
-            # 1 = SB
-            # 2 = BB
-            # 3 = UTG
-            # ...
-            distance_from_dealer = (my_index - dealer_index) % num_players
+                for i, seat in enumerate(seats):
+                    if seat.get('uuid') == self.uuid or seat.get('name') == my_name:
+                        my_seat_index = i
+                        break
+                
+                if my_seat_index == -1:
+                    return "Unknown"
+                
+                # Calcula distância do dealer na lista completa
+                total_seats = len(seats)
+                distance = (my_seat_index - dealer_seat_index) % total_seats
+                
+                # Mapeia para posição baseado no número de jogadores ATIVOS
+                if num_active == 2:
+                    # Heads-up
+                    if distance == 0:
+                        return "SB"
+                    return "BB"
+                
+                # Mapeia distância para posição
+                if distance == 0:
+                    return "BTN"
+                elif distance == 1:
+                    return "SB"
+                elif distance == 2:
+                    return "BB"
+                elif distance == 3:
+                    return "UTG"
+                elif distance >= total_seats - 1:
+                    return "CO"
+                else:
+                    return "MP"
             
-            if num_players == 2:
+            # Dealer ainda está ativo - usa cálculo normal
+            if my_index == -1:
+                if self.debug_mode:
+                    self._log_debug(f"Could not find my index in active players")
+                return "Unknown"
+            
+            # Calcula distância do dealer (sentido horário)
+            distance_from_dealer = (my_index - dealer_index) % num_active
+            
+            if num_active == 2:
                 # Heads-up: Dealer é SB (age primeiro pré-flop), Outro é BB
                 if distance_from_dealer == 0:
-                    return "SB" # Dealer age como SB no HU
+                    return "SB"
                 return "BB"
             
             if distance_from_dealer == 0:
@@ -245,24 +294,13 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 return "BB"
             elif distance_from_dealer == 3:
                 return "UTG"
-            elif distance_from_dealer == num_players - 1:
-                return "CO" # Cutoff (antes do botão)
+            elif distance_from_dealer == num_active - 1:
+                return "CO"
             else:
-                return "MP" # Middle Position
+                return "MP"
                 
         except Exception as e:
             self._log_debug(f"Error determining position: {e}")
-            return "Unknown"
-        
-        if my_index == -1 or dealer_index == -1:
-            if self.debug_mode:
-                active_uuids = [p['uuid'] for p in active_players]
-                dealer_uuid = seats[dealer_btn]['uuid']
-                self._log_debug(f"Position Unknown Debug:")
-                self._log_debug(f"  My UUID: {my_uuid}")
-                self._log_debug(f"  Dealer UUID: {dealer_uuid} (Index {dealer_btn})")
-                self._log_debug(f"  Active UUIDs: {active_uuids}")
-                self._log_debug(f"  My Index: {my_index}, Dealer Index: {dealer_index}")
             return "Unknown"
     
     def declare_action(self, valid_actions, hole_card, round_state):
@@ -276,6 +314,14 @@ class PokerBotBase(BasePokerPlayer, ABC):
         
         # 1.1 Determina Posição
         self.position = self._determine_position(round_state)
+        
+        # 1.2 CORREÇÃO: Armazena cartas do bot no registry para showdown
+        if hole_card and len(hole_card) >= 2:
+            from utils.cards_registry import store_player_cards
+            from utils.hand_utils import normalize_hole_cards
+            normalized_cards = normalize_hole_cards(hole_card)
+            if normalized_cards:
+                store_player_cards(self.uuid, normalized_cards, self.config.name)
         
         # 2. Coleta métricas e contexto
         metrics = self._collect_decision_metrics(hole_card, round_state)
@@ -301,14 +347,34 @@ class PokerBotBase(BasePokerPlayer, ABC):
     
     def _ensure_uuid_and_identify_opponents(self, round_state):
         """MELHORIA #5: Garante UUID e identifica oponentes."""
-        # NOTA: Removemos a sobrescrita de self.uuid com self._fixed_uuid
-        # O self.uuid deve ser o fornecido pelo engine (via set_uuid)
-        # para que o bot possa ser encontrado na lista de seats.
-        
+        # UUID é sempre fixo, não precisa de mapeamento
         # Identifica oponentes
         if hasattr(self, 'uuid') and self.uuid:
             self.memory_manager.identify_opponents(round_state, self.uuid)
     
+    def _calculate_equity(self, hole_card, round_state) -> float:
+        """
+        Calcula a equidade (probabilidade de vitória) usando simulação Monte Carlo.
+        Retorna float entre 0.0 e 1.0.
+        """
+        # Limita simulações para performance (500 é suficiente para decisão rápida)
+        # O humano usa ~2000, mas bots precisam ser mais rápidos
+        NUM_SIMULATIONS = 500
+        
+        try:
+            # UUID é sempre fixo, usa diretamente
+            equity = calculate_win_probability_for_player(
+                player_uuid=self.uuid,
+                round_state=round_state,
+                num_simulations=NUM_SIMULATIONS,
+                return_confidence=False
+            )
+            return equity if equity is not None else 0.0
+        except Exception as e:
+            if self.debug_mode:
+                print(f"[BOT DEBUG] Error calculating equity: {e}")
+            return 0.0
+
     def _collect_decision_metrics(self, hole_card, round_state):
         """MELHORIA #5: Coleta métricas e contexto para decisão."""
         # Analisa contexto
@@ -329,6 +395,18 @@ class PokerBotBase(BasePokerPlayer, ABC):
         # Atualiza valores da memória (usa parâmetros globais)
         self._load_parameters_from_memory()
         
+        # Calcula Equity (Win Probability)
+        equity = 0.0
+        # Só calcula equity se tiver cartas comunitárias (pós-flop) ou se for preflop (já tem tabela)
+        if round_state['street'] != 'preflop':
+             equity = self._calculate_equity(hole_card, round_state)
+        else:
+             # Preflop: hand_strength já é equity (0-100), converte para 0-1
+             equity = hand_strength / 100.0
+        
+        # Armazena equity atual para uso em bluff check
+        self.current_equity = equity
+        
         if self.debug_mode:
             hole_card_str = str(hole_card) if hole_card else "None"
             
@@ -337,10 +415,12 @@ class PokerBotBase(BasePokerPlayer, ABC):
             hand_str = f"{hand_strength:.1f}" if hand_strength is not None else "N/A"
             spr_str = f"{self.current_spr:.2f}" if self.current_spr is not None else "N/A"
             self._log_debug(f"Hand Strength: {hand_str} | SPR: {spr_str}")
+            print(f"[BOT DEBUG] {self.config.name} - Strength: {hand_strength}, Equity: {equity:.2f}")
 
         return {
             'current_actions': current_actions,
             'hand_strength': hand_strength,
+            'equity': equity,
             'bluff_analysis': bluff_analysis,
             'hole_card': hole_card
         }
@@ -403,6 +483,8 @@ class PokerBotBase(BasePokerPlayer, ABC):
         - Contexto atual (raises, agressão)
         - Histórico recente (não blefar muito seguido)
         - Street atual (blefes mais efetivos em streets específicas)
+        - Board texture (blefes menos efetivos em boards pareados)
+        - Equity mínima (nunca blefar com equity muito baixa)
         """
         # Não blefa se muita agressão
         if current_actions and current_actions.has_raises:
@@ -446,16 +528,61 @@ class PokerBotBase(BasePokerPlayer, ABC):
         
         adjusted_prob = self.bluff_probability * street_multiplier
         
-        # NOVO: Ajuste baseado em posição
+        # NOVO: Ajuste baseado em board texture (pós-flop)
+        board_texture_adjustment = 0.0
+        if round_state and street != 'preflop':
+            from utils.hand_utils import get_community_cards, analyze_board_texture
+            community_cards = get_community_cards(round_state)
+            
+            if community_cards and len(community_cards) >= 3:
+                board_texture = analyze_board_texture(community_cards)
+                
+                # Board pareado: blefes são MENOS efetivos
+                # Todos têm pelo menos um par, então é mais difícil fazer fold
+                if board_texture['has_trips']:
+                    # Trips no board: reduz MUITO a probabilidade de blefe
+                    board_texture_adjustment = -0.15  # -15%
+                    if self.debug_mode:
+                        self._log_debug(f"Board Texture: Trips detected ({board_texture['trips_rank']}) -> Bluff -15%")
+                        
+                elif board_texture['has_pair']:
+                    # Par no board: reduz probabilidade de blefe
+                    board_texture_adjustment = -0.10  # -10%
+                    if self.debug_mode:
+                        self._log_debug(f"Board Texture: Pair detected ({board_texture['pair_rank']}) -> Bluff -10%")
+                
+                # Board com muitas cartas altas: blefes são menos efetivos
+                # (oponentes provavelmente conectaram)
+                elif board_texture['num_high_cards'] >= 3:
+                    board_texture_adjustment = -0.05  # -5%
+                    if self.debug_mode:
+                        self._log_debug(f"Board Texture: Many high cards ({board_texture['num_high_cards']}) -> Bluff -5%")
+        
+        adjusted_prob += board_texture_adjustment
+        
+        # NOVO: Ajuste baseado em posição (REDUZIDO para ser menos agressivo)
         position_bluff_adjustment = 0.0
         if self.position in ["BTN", "CO"]:
-            # Posição tardia: aumenta probabilidade de blefe
-            position_bluff_adjustment = self.config.position_bluff_late_bonus
+            # Posição tardia: aumenta probabilidade de blefe (REDUZIDO de 0.20 para 0.10)
+            position_bluff_adjustment = 0.10  # Antes era self.config.position_bluff_late_bonus (0.20)
         elif self.position in ["UTG", "MP"]:
             # Posição inicial: reduz probabilidade de blefe
             position_bluff_adjustment = -self.config.position_bluff_early_penalty
         
         adjusted_prob += position_bluff_adjustment
+        
+        # NOVO: Ajuste baseado em número de jogadores ativos
+        # Quanto mais jogadores, menos efetivo é o blefe
+        if round_state:
+            active_players = len([
+                s for s in round_state.get('seats', []) 
+                if s.get('state') == 'participating'
+            ])
+            if active_players >= 4:
+                # 4+ jogadores: reduz blefe em 5%
+                adjusted_prob -= 0.05
+                if self.debug_mode:
+                    self._log_debug(f"Many players ({active_players}) -> Bluff -5%")
         
         # Limita entre 0 e 1
         adjusted_prob = min(1.0, max(0.0, adjusted_prob))
@@ -463,10 +590,26 @@ class PokerBotBase(BasePokerPlayer, ABC):
         roll = random.random()
         success = roll < adjusted_prob
         
-        if position_bluff_adjustment != 0 and self.debug_mode:
-            self._log_debug(f"Bluff Check: Base={self.bluff_probability:.2f} StreetMult={street_multiplier:.1f} PosAdj={position_bluff_adjustment:+.2f} FinalProb={adjusted_prob:.2f} Roll={roll:.2f} -> {success}")
-        else:
-            self._log_debug(f"Bluff Check: Base={self.bluff_probability:.2f} StreetMult={street_multiplier:.1f} FinalProb={adjusted_prob:.2f} Roll={roll:.2f} -> {success}")
+        # CRÍTICO: NUNCA blefar com equity muito baixa (<15%)
+        # Isso evita blefes suicidas em situações sem chance de vitória
+        if success and hasattr(self, 'current_equity'):
+            if self.current_equity is not None and self.current_equity < 0.15:
+                if self.debug_mode:
+                    self._log_debug(f"Bluff REJECTED: Equity too low ({self.current_equity:.2f} < 0.15)")
+                return False
+        
+        # Log detalhado
+        if self.debug_mode:
+            log_parts = [f"Base={self.bluff_probability:.2f}"]
+            log_parts.append(f"StreetMult={street_multiplier:.1f}")
+            if board_texture_adjustment != 0:
+                log_parts.append(f"BoardAdj={board_texture_adjustment:+.2f}")
+            if position_bluff_adjustment != 0:
+                log_parts.append(f"PosAdj={position_bluff_adjustment:+.2f}")
+            log_parts.append(f"FinalProb={adjusted_prob:.2f}")
+            log_parts.append(f"Roll={roll:.2f} -> {success}")
+            self._log_debug(f"Bluff Check: {' '.join(log_parts)}")
+        
         return success
     
     def _bluff_action(self, valid_actions, round_state):
@@ -497,6 +640,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
             my_stack = self._get_my_stack(round_state)
             self.current_stack = my_stack
             
+            # TOURNAMENT STAGE LOGIC
+            stage = self._get_tournament_stage(round_state)
+            
             # Usa módulo de sizing dedicado (MELHORIA #11)
             # Blefes usam sizing "small" (mão fraca = hand_strength=0)
             round_count = getattr(self, 'current_round_count', 0)
@@ -508,6 +654,24 @@ class PokerBotBase(BasePokerPlayer, ABC):
                 raise_threshold=self.config.raise_threshold,
                 round_count=round_count
             )
+            
+            # SAFETY CAP: In DEEP stage, never go All-In on a bluff
+            # unless the pot is already huge (SPR < 1)
+            if stage == "DEEP":
+                pot_size = context['pot_size']
+                if amount >= my_stack and self.current_spr > 1.0:
+                    # Cap raise to Pot Size or 1.5x Pot, but keep it valid
+                    safe_amount = int(pot_size * 1.5)
+                    amount = max(min_amount, min(safe_amount, max_amount))
+                    # If safe amount is still all-in (short stack logic applied to deep?), clamp it
+                    if amount >= my_stack:
+                         # If we can't make a safe raise, just call
+                         call_action = valid_actions[1]
+                         self._log_debug(f"Bluff Raise rejected (DEEP STAGE SAFETY): {amount} is All-In")
+                         return call_action['action'], call_action['amount']
+                    
+                    self._log_debug(f"Bluff Raise Capped (DEEP STAGE): {amount}")
+            
             return raise_action['action'], amount
         else:
             call_action = valid_actions[1]
@@ -565,7 +729,9 @@ class PokerBotBase(BasePokerPlayer, ABC):
                     self._log_debug(f"Potential Bonus: -{potential_bonus} (Draw) -> Effective Score: {hand_strength}")
         
         # Ajustes por Raises (Apenas Preflop por enquanto para simplificar, ou inverte lógica para postflop)
+        raise_count = 0
         if current_actions:
+            raise_count = current_actions.raise_count
             if current_actions.has_raises:
                 adjustment = (
                     self.config.raise_threshold_adjustment_base +
@@ -591,8 +757,65 @@ class PokerBotBase(BasePokerPlayer, ABC):
         
         if is_preflop and active_players >= 6:
             fold_threshold_preflop += (active_players - 5) * 2
+
+        # 4. Ajuste por Custo do Call (Pot Odds Implícito) - PREFLOP
+        # Se o call for caro (muitos BBs), precisamos de uma mão muito melhor
+        cost_penalty = 0.0
+        if is_preflop:
+            call_action = valid_actions[1] if len(valid_actions) > 1 else {'amount': 0}
+            call_amount = call_action.get('amount', 0)
+            bb = round_state['small_blind_amount'] * 2
+            
+            if bb > 0 and call_amount > 0:
+                call_cost_bb = call_amount / bb
+                
+                # Se custar mais que 1 BB (ou seja, houve raise)
+                if call_cost_bb > 1.0:
+                    # Penalidade: 5 pontos de threshold por BB extra
+                    # Ex: Raise para 3BB (custo 3) -> (3-1)*5 = +10 no threshold
+                    # Ex: Raise para 5BB (custo 5) -> (5-1)*5 = +20 no threshold
+                    cost_penalty = (call_cost_bb - 1.0) * 5.0
+                    
+                    # Cap na penalidade para não quebrar o jogo (max +40)
+                    cost_penalty = min(40.0, cost_penalty)
+                    
+                    fold_threshold_preflop += cost_penalty
+                    
+                    if self.debug_mode:
+                        self._log_debug(f"High Call Cost ({call_cost_bb:.1f} BB) -> Threshold +{cost_penalty:.1f}")
+        
+        # NOVO: Ajuste por Board Texture (Pós-flop)
+        # Quando o board tem pares/trips, TODOS os jogadores têm pelo menos essa mão
+        # Portanto, precisamos de uma mão MELHOR para continuar
+        board_texture_threshold_adjustment = 0
+        if not is_preflop:
+            from utils.hand_utils import get_community_cards, analyze_board_texture
+            community_cards = get_community_cards(round_state)
+            
+            if community_cards and len(community_cards) >= 3:
+                board_texture = analyze_board_texture(community_cards)
+                
+                # Board com trips: TODOS têm trips, só kickers importam
+                # Precisamos de mão MUITO melhor (score MENOR)
+                if board_texture['has_trips']:
+                    # Reduz threshold em 1500 pontos (exige mão ~1 rank melhor)
+                    board_texture_threshold_adjustment = -1500
+                    if self.debug_mode:
+                        self._log_debug(f"Board Texture: Trips ({board_texture['trips_rank']}) -> Threshold -1500 (need better hand)")
+                
+                # Board com par: TODOS têm pelo menos um par
+                # Precisamos de mão melhor (score MENOR)
+                elif board_texture['has_pair']:
+                    # Reduz threshold em 800 pontos
+                    board_texture_threshold_adjustment = -800
+                    if self.debug_mode:
+                        self._log_debug(f"Board Texture: Pair ({board_texture['pair_rank']}) -> Threshold -800 (need better hand)")
+                
+                # Aplica ajuste ao threshold pós-flop
+                fold_threshold_postflop += board_texture_threshold_adjustment
         
         # 4. Ajuste por Posição
+
         position_adjustment = self._get_position_adjustment()
         if is_preflop:
             fold_threshold_preflop += position_adjustment
@@ -610,78 +833,111 @@ class PokerBotBase(BasePokerPlayer, ABC):
 
         # 5. Pot Odds (Pós-flop)
         pot_size = round_state.get('pot', {}).get('main', {}).get('amount', 0)
-        call_amount = valid_actions[1]['amount'] if len(valid_actions) > 1 else 0
+        call_action_data = valid_actions[1] if len(valid_actions) > 1 else {'action': 'call', 'amount': 0}
+        call_amount = call_action_data['amount']
         
+        pot_odds = 0.0
         if not is_preflop and call_amount > 0:
-            pot_odds_ratio = pot_size / call_amount
-            if pot_odds_ratio > 5.0:
-                # Aceita mão pior (aumenta threshold score)
+            if call_amount > 0:
+                pot_odds = pot_size / call_amount
+            
+            if pot_odds > 5.0:
+                # Boas odds: Aceita mão pior (aumenta threshold score)
                 fold_threshold_postflop += 500 
-                self._log_debug(f"Pot Odds (Ratio {pot_odds_ratio:.1f}): Relaxing threshold by +500")
+                self._log_debug(f"Good Pot Odds (Ratio {pot_odds:.1f}): Relaxing threshold by +500")
+            elif pot_odds < 2.0:
+                # Más odds: Exige mão melhor (diminui threshold score)
+                # Se tiver que pagar muito para ganhar pouco, só paga com mão feita
+                fold_threshold_postflop -= 500
+                self._log_debug(f"Bad Pot Odds (Ratio {pot_odds:.1f}): Tightening threshold by -500")
         
-        # 6. DECISÃO FINAL
+        # 6. DECISION LOGIC
+        # ============================================================
+        
+        # Extrai equity das métricas
+        equity = metrics.get('equity', 0.0)
         
         # 6.1 FOLD CHECK
         should_fold = False
+        fold_reason = ""
+        
         if is_preflop:
-            # MELHORIA: Ajuste dinâmico por custo do call (Universal Fix)
-            # Se call for barato (ou grátis), reduz threshold proporcionalmente.
-            # Call = 0 (Check) -> Factor 0 -> Threshold 0 -> Nunca folda (Check grátis)
-            # Call = SB -> Factor 0.5 -> Threshold 50% -> Joga mais solto
-            # Call >= BB -> Factor 1.0 -> Threshold 100% -> Jogo normal
+            # Preflop logic (unchanged for now, relies on hand_strength/equity table)
+            # Calculate effective threshold considering position
+            effective_threshold = fold_threshold_preflop + position_adjustment
             
-            call_amount = valid_actions[1]['amount'] if len(valid_actions) > 1 else 0
-            big_blind = round_state['small_blind_amount'] * 2
+            # Adjust for raises (tighten up if raised)
+            if raise_count > 0:
+                effective_threshold += (self.config.raise_threshold_adjustment_base + 
+                                      (raise_count - 1) * self.config.raise_threshold_adjustment_per_raise)
             
-            # Calcula custo REAL do call (subtraindo o que já colocou)
-            # PyPokerEngine: call_amount é o valor TOTAL para igualar a aposta
-            call_cost = call_amount
+            # Call amount relative to big blind (pot odds proxy)
+            bb = round_state['small_blind_amount'] * 2
+            call_cost_bb = call_amount / bb if bb > 0 else 0
             
-            if self.position == 'BB':
-                call_cost -= big_blind
-            elif self.position == 'SB':
-                call_cost -= round_state['small_blind_amount']
+            # If it's cheap to call (< 1 BB) and we have decent equity, loosen threshold
+            if call_cost_bb < 1.0:
+                effective_threshold *= 0.8
             
-            # Garante que não seja negativo (ex: se houve raise e já pagou mais? improvável no preflop inicial)
-            call_cost = max(0, call_cost)
-            
-            # Evita divisão por zero se BB for 0 (improvável, mas seguro)
-            if big_blind > 0:
-                call_cost_factor = min(1.0, call_cost / big_blind)
-            else:
-                call_cost_factor = 1.0
-                
-            effective_threshold = fold_threshold_preflop * call_cost_factor
-            
-            if self.debug_mode:
-                 self._log_debug(f"Preflop Calc: Base={fold_threshold_preflop} Cost={call_cost} (Amt={call_amount}) Factor={call_cost_factor:.2f} -> Eff={effective_threshold:.1f}")
-
-            # Preflop: Se força < threshold efetivo -> Fold
             if hand_strength < effective_threshold:
                 should_fold = True
-                reason = f"Preflop Strength {hand_strength:.1f} < {effective_threshold:.1f} (Base {fold_threshold_preflop})"
+                fold_reason = f"Preflop Strength {hand_strength:.1f} < {effective_threshold:.1f}"
+
         else:
-            # Postflop: Se score > threshold -> Fold (Score alto = mão ruim)
-            if hand_strength > fold_threshold_postflop:
-                should_fold = True
-                reason = f"Postflop Score {hand_strength:.0f} > {fold_threshold_postflop}"
-        
-        if should_fold:
-            self._log_debug(f"Action: FOLD ({reason})")
-            fold_action = valid_actions[0]
-            return fold_action['action'], fold_action['amount']
+            # Postflop: Score based (Lower is Better)
+            # But now with EQUITY OVERRIDE!
             
-        # 6.2 RAISE CHECK (Strong Hand)
+            # Base check: Score > Threshold -> Fold candidate
+            if call_amount > 0 and hand_strength > fold_threshold_postflop:
+                should_fold = True
+                fold_reason = f"Score {hand_strength} > {fold_threshold_postflop}"
+                
+                # EQUITY OVERRIDE: If we have good equity, DON'T FOLD!
+                # This handles Draws (Flush/Straight) and Live Cards
+                if equity >= self.config.min_equity_call:
+                    should_fold = False
+                    if self.debug_mode:
+                        print(f"[BOT STRATEGY] {self.config.name} SAVED by Equity! Score bad ({hand_strength}) but Equity {equity:.2f} >= {self.config.min_equity_call}")
+            
+            # Pot Odds Check (if we were going to fold)
+            if should_fold and pot_odds > 0:
+                # Basic pot odds: required equity = call / (pot + call)
+                required_equity = call_amount / (round_state['pot']['main']['amount'] + call_amount)
+                
+                # If our equity is better than pot odds, CALL
+                if equity > required_equity:
+                    should_fold = False
+                    fold_reason = ""
+                    if self.debug_mode:
+                        print(f"[BOT STRATEGY] {self.config.name} SAVED by Pot Odds! Equity {equity:.2f} > Required {required_equity:.2f}")
+
+        # Execute Fold if still true
+        if should_fold and call_amount > 0:
+            self._log_debug(f"Action: FOLD ({fold_reason})")
+            return 'fold', 0
+            
+        # 6.2 RAISE CHECK
         is_raise_available = self.sizing_calculator.is_raise_available(valid_actions)
         is_strong_hand = False
         
         if is_preflop:
-            if hand_strength >= self.config.strong_hand_threshold:
+            # Aplica penalidade de custo também para raise/strong thresholds
+            # Se custa caro ver o flop, a barra para "mão forte" sobe
+            adjusted_strong_threshold = self.config.strong_hand_threshold + cost_penalty
+            
+            if hand_strength >= adjusted_strong_threshold:
                 is_strong_hand = True
+                if self.debug_mode and cost_penalty > 0:
+                     self._log_debug(f"Strong Hand Check: {hand_strength} >= {adjusted_strong_threshold} (Adj +{cost_penalty:.1f})")
         else:
             # Postflop: Score < Strong Threshold (Score baixo = mão forte)
             if hand_strength <= self.config.strong_hand_threshold_score:
                 is_strong_hand = True
+            # EQUITY STRONG: If equity is massive (e.g. > 75%), it's a strong hand
+            elif equity >= (self.config.strong_equity_raise + 0.15):
+                is_strong_hand = True
+                if self.debug_mode:
+                    self._log_debug(f"Equity Strong Hand: {equity:.2f}")
                 
         if is_strong_hand and is_raise_available:
             self.aggressive_line_started = True
@@ -736,16 +992,29 @@ class PokerBotBase(BasePokerPlayer, ABC):
             return raise_action['action'], amount
 
         # 6.3 PANIC RULE (Muitos raises)
+                # 6.3 PANIC RULE (Muitos raises)
         panic_threshold = getattr(self.config, 'raise_count_panic_threshold', 3)
         if current_actions and current_actions.raise_count >= panic_threshold:
             # Só paga se estiver perto do strong
             is_near_strong = False
             if is_preflop:
-                if hand_strength >= (self.config.strong_hand_threshold - 10):
+                # REMOVIDO BUFFER: Antes era (strong - 10), agora é strong puro
+                # Ex: Precisa de 50+ (QQ+), não 40+ (88+)
+                if hand_strength >= self.config.strong_hand_threshold:
                     is_near_strong = True
+                    if self.debug_mode:
+                         self._log_debug(f"Panic Check Preflop: {hand_strength} >= {self.config.strong_hand_threshold} -> PASS")
+                elif self.debug_mode:
+                     self._log_debug(f"Panic Check Preflop: {hand_strength} < {self.config.strong_hand_threshold} -> FAIL")
             else:
-                if hand_strength <= (self.config.strong_hand_threshold_score + 1000):
+                # REMOVIDO BUFFER: Antes era (strong + 1000), agora é strong puro
+                # Ex: Precisa de Score <= 2800 (Two Pair+), não <= 3800 (One Pair)
+                if hand_strength <= self.config.strong_hand_threshold_score:
                     is_near_strong = True
+                    if self.debug_mode:
+                         self._log_debug(f"Panic Check Postflop: {hand_strength} <= {self.config.strong_hand_threshold_score} -> PASS")
+                elif self.debug_mode:
+                     self._log_debug(f"Panic Check Postflop: {hand_strength} > {self.config.strong_hand_threshold_score} -> FAIL")
             
             if is_near_strong:
                  call_action = valid_actions[1]
@@ -764,16 +1033,23 @@ class PokerBotBase(BasePokerPlayer, ABC):
         
         can_raise_value = False
         if is_preflop:
-            if hand_strength >= self.config.raise_threshold:
+            # Aplica penalidade de custo também para raise threshold
+            adjusted_raise_threshold = self.config.raise_threshold + cost_penalty
+            if hand_strength >= adjusted_raise_threshold:
                 can_raise_value = True
         else:
             if hand_strength <= self.config.raise_threshold_score:
                 can_raise_value = True
+            # EQUITY RAISE: If we have high equity, we can raise for value
+            elif equity >= self.config.strong_equity_raise:
+                can_raise_value = True
+                if self.debug_mode:
+                    self._log_debug(f"Equity Raise Triggered: {equity:.2f} >= {self.config.strong_equity_raise}")
         
         if can_raise_value and is_raise_available:
             adjusted_aggression = self.aggression_level
             if current_actions and current_actions.raise_count >= 1:
-                adjusted_aggression *= 0.5 # Reduz muito agressão se já houve raise
+                adjusted_aggression *= 0.8 # Reduz agressão se já houve raise
             
             if adjusted_aggression > self.config.default_aggression:
                  # Calcula Sizing (mesma lógica de proxy)
@@ -798,6 +1074,30 @@ class PokerBotBase(BasePokerPlayer, ABC):
                     raise_threshold=calc_raise_thresh,
                     round_count=round_count
                 )
+                
+                # SAFETY CAP (Normal Play): In DEEP stage, be careful with All-Ins
+                stage = self._get_tournament_stage(round_state)
+                if stage == "DEEP" and amount >= my_stack:
+                    # Only All-In if hand is PREMIUM (Score < 2000 or Equity > 80%)
+                    is_premium = False
+                    if is_preflop:
+                        if hand_strength >= 80: is_premium = True
+                    else:
+                        if hand_strength <= 2000: is_premium = True
+                        if metrics.get('equity', 0) > 0.80: is_premium = True
+                    
+                    if not is_premium:
+                        # Cap raise to 1.5x Pot
+                        pot_size = round_state['pot']['main']['amount']
+                        safe_amount = int(pot_size * 1.5)
+                        amount = max(min_amount, min(safe_amount, max_amount))
+                        if amount >= my_stack:
+                            # If still all-in, just call
+                            self._log_debug(f"Aggressive All-In rejected (DEEP STAGE): Hand not premium enough")
+                            call_action = valid_actions[1]
+                            return call_action['action'], call_action['amount']
+                        self._log_debug(f"Aggressive Raise Capped (DEEP STAGE): {amount}")
+
                 self._log_debug(f"Action: RAISE (Aggressive) Strength={hand_strength} Amount={amount}")
                 return raise_action['action'], amount
 
@@ -1060,6 +1360,31 @@ class PokerBotBase(BasePokerPlayer, ABC):
             'active_players': active_players,
             'street': street
         }
+
+    def _get_tournament_stage(self, round_state):
+        """
+        Determina o estágio do torneio baseado em Stack efetivo (BBs).
+        
+        Stages:
+        - DEEP (> 50 BB): Jogo profundo, early game. Evitar all-ins especulativos.
+        - NORMAL (20-50 BB): Jogo padrão.
+        - SHORT (< 20 BB): Jogo curto, push/fold começa a ser relevante.
+        - CRITICAL (< 10 BB): Modo sobrevivência/desespero.
+        """
+        my_stack = self._get_my_stack(round_state)
+        bb = round_state['small_blind_amount'] * 2
+        if bb == 0: return "NORMAL"
+        
+        bbs = my_stack / bb
+        
+        if bbs > 50:
+            return "DEEP"
+        elif bbs >= 20:
+            return "NORMAL"
+        elif bbs >= 10:
+            return "SHORT"
+        else:
+            return "CRITICAL"
     
     # ============================================================
     # Métodos receive_* (lógica compartilhada)
@@ -1068,9 +1393,7 @@ class PokerBotBase(BasePokerPlayer, ABC):
     def receive_game_start_message(self, game_info):
         """Inicializa stack"""
         # Garante que UUID fixo seja mantido (PyPokerEngine pode ter sobrescrito)
-        if hasattr(self, '_fixed_uuid') and self._fixed_uuid:
-            self.uuid = self._fixed_uuid
-        
+        # UUID é sempre fixo, não precisa de verificação
         seats = game_info.get('seats', [])
         if isinstance(seats, list):
             for player in seats:
@@ -1099,8 +1422,8 @@ class PokerBotBase(BasePokerPlayer, ABC):
                     for seat in seats:
                         if isinstance(seat, dict):
                             seat_uuid = seat.get('uuid', '')
-                            # Verifica se o UUID do seat corresponde ao nosso UUID fixo
-                            if seat_uuid == self.uuid or seat_uuid == getattr(self, '_fixed_uuid', None):
+                            # UUID é sempre fixo, comparação direta
+                            if seat_uuid == self.uuid:
                                 seat_name = seat.get('name', '')
                                 if seat_name:
                                     bot_name = seat_name
