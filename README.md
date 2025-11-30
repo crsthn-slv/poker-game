@@ -1,273 +1,60 @@
-# 🎰 Poker Game - PyPokerEngine
+# Poker Bot Experiment
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.1.2-green.svg)](https://flask.palletsprojects.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Code Style](https://img.shields.io/badge/code%20style-PEP%208-orange.svg)](https://www.python.org/dev/peps/pep-0008/)
+This repository is just a personal test project.
 
-Jogo de Poker Texas Hold'em com interface web moderna e múltiplos bots com aprendizado adaptativo usando PyPokerEngine.
+I do not have a background in coding; I am simply running some tests to see how this works. Please treat this as a sandbox/hobby project.
 
-## ✨ Características
+## Prerequisites
 
-- 🎮 **Interface Web Moderna** - UI responsiva com dark mode
-- 🤖 **9 Bots Diferentes** - Cada um com estratégia única e aprendizado adaptativo
-- 🧠 **Sistema de Memória Persistente** - Bots aprendem e evoluem entre partidas
-- 🎯 **Visualização Completa** - Cartas, pot, stacks e histórico de ações
-- 🔄 **Sistema de Rounds** - 10 rounds por partida com estatísticas detalhadas
-- 🐛 **Debug Mode** - Logs detalhados para troubleshooting
+To run this project, you need:
 
-## 📋 Pré-requisitos
+*   **Python 3.11+**
+*   **Make** (usually available on Linux/Mac)
 
-- Python 3.8 ou superior
-- pip (gerenciador de pacotes Python)
+## Installation
 
-## 🚀 Instalação
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/crsthn-slv/poker-game.git
+    cd poker-game
+    ```
 
-1. **Clone o repositório:**
-```bash
-git clone https://github.com/crsthn-slv/poker-game.git
-cd poker-game
-```
+2.  Install dependencies:
+    ```bash
+    make install
+    ```
 
-2. **Instale as dependências:**
-```bash
-make install
-```
+## Makefile Commands
 
-Ou manualmente:
-```bash
-pip install -r requirements.txt
-```
+This project uses a `Makefile` to simplify commands. Here are the most important ones:
 
-**Nota:** O projeto detecta automaticamente o Python correto (com pokerkit instalado). Não é necessário usar ambiente virtual.
+*   `make install`: Installs all necessary dependencies.
+*   `make run-console`: Runs the game in the terminal (console mode).
+*   `make clean`: Cleans up temporary files.
 
-## 🛠️ Comandos Makefile
+## How to Play (Terminal)
 
-O projeto inclui um Makefile que facilita a execução de comandos comuns:
+To start a game in your terminal against the bots, simply run:
 
 ```bash
-# Ver todos os comandos disponíveis
-make help
-
-# Instalar dependências
-make install
-
-# Executar jogo console interativo
 make run-console
-
-# Executar servidor web
-make run-server
-
-# Executar testes
-make test
 ```
 
-**Nota importante:** O Makefile detecta automaticamente o Python correto (com pokerkit instalado). Não é necessário usar ambiente virtual - o projeto funciona diretamente com o Python do sistema.
+Follow the on-screen instructions to play. You will be able to see your cards and make decisions (Fold, Call, Raise) when it's your turn.
 
-## 🎮 Como Jogar
+## Contributing
 
-### Modo Web (Recomendado)
+As this is a personal test project, I am not actively looking for contributions. However, feel free to fork it and play around if you are interested.
 
-1. **Inicie o servidor:**
-```bash
-make run-server
-```
+## License
 
-Ou manualmente:
-```bash
-cd web && python3 server.py
-```
+This project is open for personal use.
 
-2. **Abra o navegador:**
-   - Acesse: `http://localhost:5002`
-   - Configure seu nome na página de configuração
-   - Comece a jogar!
+## Known Issues
 
-3. **Configurações opcionais:**
-```bash
-# Porta personalizada
-export PORT=8080
+*   This is a work in progress and may contain bugs.
+*   Bot behavior is experimental.
 
-# Modo debug
-export FLASK_DEBUG=true
-```
+## Contact
 
-### Modo Terminal
-
-**Usando Makefile (Recomendado):**
-```bash
-# Jogo console interativo (você vs AIs)
-make run-console
-
-# Jogo básico AI vs AI
-make run-game
-
-# Jogo avançado com todas as IAs
-make run-game-advanced
-```
-
-**Ou manualmente:**
-```bash
-# Jogo básico AI vs AI
-python3 -m game.game
-
-# Jogo avançado com todas as IAs
-python3 -m game.game_advanced
-
-# Jogar contra AIs (terminal interativo)
-python3 -m game.play_console
-```
-
-**Nota:** O Makefile detecta automaticamente o Python correto (com pokerkit instalado) e mostra informações úteis ao iniciar.
-
-## 🤖 Bots Disponíveis
-
-| Bot | Estratégia | Bluff Base | Aprendizado |
-|-----|-----------|------------|-------------|
-| **Tight** | Conservador | 8% | Ajusta quando perde muito |
-| **Aggressive** | Agressivo | 35% | Ajusta rapidamente |
-| **Random** | Aleatório | 25% | Probabilidades adaptativas |
-| **Smart** | Inteligente | 15% | Bluff dinâmico |
-| **Balanced** | Equilibrado | 20% | Combina estratégias |
-| **Adaptive** | Adaptativo | Variável | Exploração vs Exploração |
-| **ConservativeAggressive** | Conservador→Agressivo | 10-30% | Transição baseada em resultados |
-| **Opportunistic** | Oportunista | 18% | Identifica oportunidades |
-| **Hybrid** | Híbrido | Variável | Alterna entre todas estratégias |
-
-Todos os bots têm **memória persistente** e evoluem entre partidas!
-
-## 📁 Estrutura do Projeto
-
-```
-poker-game/
-├── players/              # Bots com diferentes estratégias
-│   ├── tight_player.py
-│   ├── aggressive_player.py
-│   ├── smart_player.py
-│   └── ...
-├── game/                 # Scripts de jogo
-│   ├── game.py
-│   ├── game_advanced.py
-│   └── play_console.py
-├── web/                  # Interface web
-│   ├── server.py         # Servidor Flask
-│   ├── templates/        # Templates HTML
-│   ├── css/              # Estilos
-│   └── js/               # JavaScript
-├── images/               # Imagens de cartas
-├── data/                 # Dados persistentes
-│   └── memory/           # Memórias dos bots
-├── docs/                 # Documentação
-├── tests/                # Testes
-└── requirements.txt      # Dependências
-```
-
-## 📚 Documentação
-
-- **[Documentação Completa](docs/DOCUMENTACAO_COMPLETA.md)** - Documentação técnica detalhada
-- **[Guia de Debugging](docs/DEBUGGING.md)** - Como resolver problemas comuns
-- **[Investigação de Bugs](docs/INVESTIGACAO_PROXIMO_ROUND.md)** - Análise de problemas conhecidos
-
-## 🧪 Testes
-
-```bash
-# Executar todos os testes
-make test
-
-# Teste com cobertura
-make test-cov
-
-# Ou manualmente
-python3 -m pytest tests/
-```
-
-## 🛠️ Desenvolvimento
-
-### Comandos Disponíveis
-
-```bash
-# Ver todos os comandos disponíveis
-make help
-
-# Instalar dependências
-make install
-
-# Instalar dependências de desenvolvimento
-make install-dev
-
-# Executar testes
-make test
-
-# Verificar estilo de código
-make lint
-
-# Formatar código automaticamente
-make format
-
-# Limpar arquivos gerados
-make clean
-```
-
-### Instalação Manual
-
-Se preferir não usar o Makefile:
-
-```bash
-# Instalar dependências
-pip install -r requirements.txt
-
-# Instalar dependências de desenvolvimento
-pip install -r requirements-dev.txt
-```
-
-**Nota:** O projeto não requer ambiente virtual. O Makefile detecta automaticamente o Python correto.
-
-### Debug Mode
-
-Ative o modo debug no console do navegador:
-```javascript
-DEBUG_MODE = true
-```
-
-Ou no servidor:
-```bash
-export FLASK_DEBUG=true
-export DEBUG_MODE=true
-```
-
-## 🤝 Contribuindo
-
-Contribuições são bem-vindas! Por favor, leia o [CONTRIBUTING.md](CONTRIBUTING.md) para detalhes sobre nosso código de conduta e processo de submissão de pull requests.
-
-## 📝 Licença
-
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## 🙏 Agradecimentos
-
-- [PyPokerEngine](https://github.com/ishikota/PyPokerEngine) - Motor de poker usado como base
-- Comunidade open source
-
-## 📊 Status do Projeto
-
-- ✅ Interface web funcional
-- ✅ Sistema de bots com aprendizado
-- ✅ Memória persistente
-- ✅ Sistema de rounds
-- ✅ Debug e logging
-- 🔄 Melhorias contínuas
-
-## 🐛 Problemas Conhecidos
-
-- Alguns bots podem demorar para salvar memória (otimização em andamento)
-- PyPokerEngine pode não iniciar próximo round automaticamente (workaround implementado)
-
-Veja [docs/INVESTIGACAO_PROXIMO_ROUND.md](docs/INVESTIGACAO_PROXIMO_ROUND.md) para mais detalhes.
-
-## 📧 Contato
-
-Para questões, sugestões ou problemas, abra uma [issue](https://github.com/crsthn-slv/poker-game/issues).
-
----
-
-⭐ Se este projeto foi útil para você, considere dar uma estrela!
+If you have any questions, please reach out to me directly.
