@@ -124,7 +124,7 @@ tests/
 !tests/__init__.py
 
 # Versão web
-web/
+# web/
 
 # Dados de histórico e resultados de testes
 data/history/

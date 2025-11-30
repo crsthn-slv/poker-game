@@ -1,0 +1,355 @@
+:root {
+    --bg-color: #121212;
+    --card-bg: #1e1e1e;
+    --text-color: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --accent-color: #bb86fc;
+    /* Light Purple for accent in dark mode */
+    --accent-hover: #9965f4;
+    --border-color: #333333;
+    --success-color: #03dac6;
+    --danger-color: #cf6679;
+    --warning-color: #ffb74d;
+
+    --font-main: 'Roboto Mono', monospace;
+    --font-pixel: 'Press Start 2P', cursive;
+
+    --radius-md: 4px;
+    /* Sharper corners for retro feel */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-main);
+    line-height: 1.5;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    width: 100%;
+    max-width: 1000px;
+    padding: 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Screen Management */
+.screen {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto;
+    justify-content: center;
+}
+
+.screen.active {
+    display: flex;
+}
+
+/* Typography */
+h1,
+h2,
+h3 {
+    color: var(--text-color);
+    margin-bottom: 1.5rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+h1 {
+    font-size: 2.5rem;
+}
+
+h3 {
+    font-size: 1.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+/* Cards & Containers */
+.card {
+    background-color: var(--card-bg);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    padding: 2rem;
+    border: 1px solid var(--border-color);
+}
+
+/* Forms */
+.form-group {
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+}
+
+input[type="text"],
+input[type="number"] {
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    width: 100%;
+    transition: border-color 0.2s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.checkbox-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+}
+
+/* Buttons */
+button {
+    cursor: pointer;
+    font-family: var(--font-pixel);
+    font-size: 0.8rem;
+    /* Pixel font is usually large */
+    text-transform: uppercase;
+    transition: all 0.1s;
+    /* Faster transition for retro feel */
+    border-width: 2px;
+}
+
+.primary-btn {
+    background-color: var(--accent-color);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    width: 100%;
+}
+
+.primary-btn:hover {
+    background-color: var(--accent-hover);
+}
+
+.primary-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* Game Screen Layout */
+#game-screen {
+    max-width: 900px;
+    justify-content: flex-start;
+    padding-top: 2rem;
+}
+
+.header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    background-color: var(--card-bg);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.game-log {
+    flex: 1;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    overflow-y: auto;
+    font-family: 'Courier New', Courier, monospace;
+    /* Keep monospace for logs */
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+    min-height: 300px;
+}
+
+.line {
+    margin-bottom: 0.25rem;
+}
+
+.line.system {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.line.error {
+    color: var(--danger-color);
+    font-weight: bold;
+}
+
+.line.success {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+.line.action {
+    color: var(--text-color);
+}
+
+/* Controls Area */
+.controls-area {
+    background-color: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-color);
+}
+
+.controls-area.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.hand-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cards-display {
+    display: flex;
+    gap: 1rem;
+}
+
+.playing-card,
+.card-placeholder {
+    width: 60px;
+    height: 84px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    font-weight: bold;
+    background-color: white;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+    font-family: var(--font-pixel);
+    /* Pixel font for cards */
+    color: black;
+    /* Ensure black cards have black text on white bg */
+}
+
+.card-placeholder {
+    background-color: #f1f5f9;
+    color: #94a3b8;
+    border: 2px dashed #cbd5e1;
+}
+
+.playing-card.red {
+    color: var(--danger-color);
+}
+
+.stats-display {
+    text-align: right;
+    font-size: 0.9rem;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    flex: 1;
+    padding: 1rem 0.5rem;
+    border: 2px solid var(--border-color);
+    background-color: var(--card-bg);
+    border-radius: var(--radius-md);
+    color: var(--text-color);
+    font-family: var(--font-pixel);
+    font-size: 0.7rem;
+    line-height: 1.5;
+}
+
+.action-btn:hover {
+    background-color: #f8fafc;
+    border-color: var(--accent-color);
+}
+
+.action-btn.danger {
+    color: var(--danger-color);
+    border-color: #fecaca;
+    background-color: #fef2f2;
+}
+
+.action-btn.danger:hover {
+    background-color: #fee2e2;
+    border-color: var(--danger-color);
+}
+
+/* Raise Controls */
+.raise-controls {
+    margin-top: 1rem;
+    padding: 1rem;
+    background-color: #f8fafc;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.raise-input-group {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.raise-input-group button {
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    border: none;
+    font-size: 0.875rem;
+}
+
+#btn-confirm-raise {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+#btn-cancel-raise {
+    background-color: #e2e8f0;
+    color: var(--text-color);
+}
+
+.hidden {
+    display: none !important;
+}

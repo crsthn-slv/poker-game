@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Game - Play</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Game Screen -->
+        <div id="game-screen" class="screen active">
+            <div class="header-bar">
+                <div class="header-left">
+                    <a href="/" class="btn-back"
+                        style="text-decoration: none; color: var(--text-color); border: 2px solid var(--border-color); padding: 5px 10px; border-radius: 4px; font-family: var(--font-pixel); font-size: 0.6rem;">&lt;
+                        Back</a>
+                    <span id="player-info" style="margin-left: 10px;">Player: <span
+                            id="display-nick">Unknown</span></span>
+                </div>
+                <span id="game-status" style="color: var(--success-color);">Status: Connected</span>
+            </div>
+
+            <div class="game-log" id="terminal-output">
+                <div class="line system">Initializing Poker System...</div>
+                <div class="line system">Waiting for game start...</div>
+            </div>
+
+            <div id="controls-area" class="controls-area disabled">
+                <div class="hand-info">
+                    <div class="cards-display" id="my-cards">
+                        <!-- Cards will be injected here -->
+                        <div class="card-placeholder">?</div>
+                        <div class="card-placeholder">?</div>
+                    </div>
+                    <div class="stats-display">
+                        <div>Stack: <span id="my-stack">0</span></div>
+                        <div id="prob-display" class="hidden">Win: <span id="win-prob">0%</span></div>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="action-btn" data-action="fold" id="btn-fold">Fold (F)</button>
+                    <button class="action-btn" data-action="call" id="btn-call">Call (C)</button>
+                    <button class="action-btn" data-action="raise" id="btn-raise">Raise (R)</button>
+                    <button class="action-btn danger" data-action="allin" id="btn-allin">All In (A)</button>
+                </div>
+
+                <div id="raise-controls" class="raise-controls hidden">
+                    <input type="range" id="raise-slider" min="0" max="100" value="0"
+                        style="width: 100%; margin-bottom: 10px;">
+                    <div class="raise-input-group">
+                        <input type="number" id="raise-amount" value="0">
+                        <button id="btn-confirm-raise">Confirm</button>
+                        <button id="btn-cancel-raise">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/game.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Game</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Login / Config Screen -->
+        <div id="login-screen" class="screen active">
+            <h1>Poker Game</h1>
+
+            <div class="card">
+                <div class="form-group">
+                    <label for="nickname">Nickname</label>
+                    <input type="text" id="nickname" placeholder="Enter your nickname" maxlength="12">
+                </div>
+
+                <div class="config-section">
+                    <h3>Configuration</h3>
+
+                    <div class="form-group">
+                        <label for="initial-stack">Initial Stack</label>
+                        <input type="number" id="initial-stack" value="1000" min="100" max="10000">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="num-bots">Opponents (Bots)</label>
+                        <input type="number" id="num-bots" value="5" min="2" max="9">
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="show-prob">
+                        <label for="show-prob">Show Win Probability</label>
+                    </div>
+                </div>
+
+                <button id="start-btn" class="primary-btn">Start Game</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="/static/config.js"></script>
+</body>
+
+</html>
