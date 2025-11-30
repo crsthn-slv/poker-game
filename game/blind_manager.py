@@ -63,7 +63,7 @@ def get_denomination_index(value):
 
 def calculate_blinds_from_reference_stack(reference_stack):
     """
-    Calcula SB e BB baseado na stack de referência (5% para BB).
+    Calcula SB e BB baseado na stack de referência (1% para BB).
     
     Args:
         reference_stack: Stack de referência (maior stack na mesa)
@@ -71,8 +71,8 @@ def calculate_blinds_from_reference_stack(reference_stack):
     Returns:
         tuple: (small_blind, big_blind)
     """
-    # BB é 5% da stack de referência
-    bb_raw = reference_stack * 0.05
+    # BB é 1% da stack de referência
+    bb_raw = reference_stack * 0.01
     
     # Arredonda BB para valor válido
     big_blind = round_to_valid_denomination(bb_raw)
