@@ -319,9 +319,17 @@ class PokerBotBase(BasePokerPlayer, ABC):
         if hole_card and len(hole_card) >= 2:
             from utils.cards_registry import store_player_cards
             from utils.hand_utils import normalize_hole_cards
+            from utils.uuid_utils import get_bot_class_uuid
+            
             normalized_cards = normalize_hole_cards(hole_card)
             if normalized_cards:
+                # Registra com UUID atual (PyPokerEngine) para uso interno (win prob)
                 store_player_cards(self.uuid, normalized_cards, self.config.name)
+                
+                # Registra TAMBÉM com UUID fixo para o GameHistory
+                fixed_uuid = get_bot_class_uuid(self)
+                if fixed_uuid and fixed_uuid != self.uuid:
+                    store_player_cards(fixed_uuid, normalized_cards, self.config.name)
         
         # 2. Coleta métricas e contexto
         metrics = self._collect_decision_metrics(hole_card, round_state)

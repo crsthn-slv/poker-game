@@ -503,9 +503,12 @@ class ConsolePlayer(BasePokerPlayer):
         if action_line_parts:
             print(f"Available actions: {' | '.join(action_line_parts)}")
         
-        # Solicitar ação - passa round_state para permitir all-in
+        
+        # Solicitar ação - passa round_state E player_stack para permitir all-in correto
+        # IMPORTANTE: Passa o stack que foi calculado e exibido ao usuário para garantir consistência
         print()
-        action, amount = self.__receive_action_from_console(valid_actions, round_state)  # type: ignore[assignment]
+        action, amount = self.__receive_action_from_console(valid_actions, round_state, my_stack)  # type: ignore[assignment]
+
         
         # Marca se o jogador deu fold
         if action == 'fold':
@@ -531,11 +534,14 @@ class ConsolePlayer(BasePokerPlayer):
                 except (ValueError, AttributeError):
                     pass
             
+            # Sanitiza round_state para usar UUIDs fixos
+            sanitized_round_state = self._sanitize_round_state(round_state)
+            
             self.game_history.record_action(
                 player_uuid=self.uuid,
                 action=action,
                 amount=amount,
-                round_state=round_state,
+                round_state=sanitized_round_state,
                 my_hole_cards=hole_cards if hole_cards else None,
                 my_win_probability=win_prob
             )
@@ -599,7 +605,20 @@ class ConsolePlayer(BasePokerPlayer):
         if self.game_history and seats:
             # Tenta encontrar posição do botão (geralmente é o primeiro seat ou pode ser calculado)
             button_position = 0  # Default, pode ser ajustado se houver informação disponível
-            self.game_history.start_round(round_count, seats, button_position)
+            
+            # Sanitiza seats para usar UUIDs fixos no histórico
+            sanitized_seats = []
+            for seat in seats:
+                if isinstance(seat, dict):
+                    sanitized_seat = seat.copy()
+                    fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                    if fixed_uuid:
+                        sanitized_seat['uuid'] = fixed_uuid
+                    sanitized_seats.append(sanitized_seat)
+                else:
+                    sanitized_seats.append(seat)
+            
+            self.game_history.start_round(round_count, sanitized_seats, button_position)
         
         # Reseta flag de fold no início de cada round
         self.i_folded = False
@@ -654,7 +673,9 @@ class ConsolePlayer(BasePokerPlayer):
         
         # Registra início de nova street no histórico
         if self.game_history:
-            self.game_history.start_street(street, round_state)
+            # Sanitiza round_state para usar UUIDs fixos
+            sanitized_round_state = self._sanitize_round_state(round_state)
+            self.game_history.start_street(street, sanitized_round_state)
 
     def receive_game_update_message(self, new_action, round_state):
         """Exibe apenas quem agiu e a ação, de forma simplificada."""
@@ -754,25 +775,63 @@ class ConsolePlayer(BasePokerPlayer):
         
         # Registra ação no histórico (de outros jogadores)
         if self.game_history:
-            # Tenta obter UUID do jogador que fez a ação
-            player_uuid = None
+            import os
+            debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+            
+            # Obtém UUID do PyPokerEngine da ação
+            pypoker_uuid = new_action.get('player_uuid')
+            
+            if debug_mode:
+                print(f"[HISTORY DEBUG] pypoker_uuid from new_action: {pypoker_uuid[:8] if pypoker_uuid else 'None'}")
+            
+            # Encontra o seat correspondente e converte para UUID fixo
+            fixed_player_uuid = None
+            seat_name = 'Unknown'
             seats = round_state.get('seats', [])
-            for seat in seats:
-                if isinstance(seat, dict):
-                    seat_name = seat.get('name', '')
-                    if seat_name == player_name or self.formatter.clean_player_name(seat_name) == player_name:
-                        player_uuid = seat.get('uuid')
+            
+            if pypoker_uuid:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == pypoker_uuid:
+                        # Converte para UUID fixo
+                        fixed_player_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                        seat_name = seat.get('name', 'Unknown')
+                        if debug_mode:
+                            print(f"[HISTORY DEBUG] ✓ Found seat: name='{seat_name}', fixed_uuid={fixed_player_uuid[:8] if fixed_player_uuid else 'None'}")
                         break
             
-            if player_uuid:
+            if not fixed_player_uuid and debug_mode:
+                print(f"[HISTORY DEBUG] ❌ Could not find seat for pypoker_uuid: {pypoker_uuid[:8] if pypoker_uuid else 'None'}")
+                print(f"[HISTORY DEBUG] Available seats:")
+                for i, seat in enumerate(seats):
+                    if isinstance(seat, dict):
+                        print(f"[HISTORY DEBUG]   Seat {i}: uuid={seat.get('uuid', '')[:8] if seat.get('uuid') else 'None'}, name='{seat.get('name', '')}'")
+            
+            if fixed_player_uuid:
                 # Usa 'paid' para CALL, 'amount' para outras ações
                 action_amount = paid if action_type == 'CALL' and paid > 0 else amount
-                self.game_history.record_action(
-                    player_uuid=player_uuid,
-                    action=action_type,
-                    amount=action_amount,
-                    round_state=round_state
-                )
+                
+                # Evita duplicidade: se a ação for do próprio jogador (Hero), ignora
+                # pois já foi registrada em declare_action com mais detalhes (win_prob, etc)
+                if hasattr(self, 'uuid') and self.uuid and fixed_player_uuid == self.uuid:
+                    if debug_mode:
+                        print(f"[HISTORY] Skipping duplicate Hero action in update: {action_type} {action_amount}")
+                else:
+                    # Sanitiza round_state para usar UUIDs fixos
+                    sanitized_round_state = self._sanitize_round_state(round_state)
+                    
+                    self.game_history.record_action(
+                        player_uuid=fixed_player_uuid,
+                        action=action_type,
+                        amount=action_amount,
+                        round_state=sanitized_round_state
+                    )
+                    
+                    if debug_mode:
+                        print(f"[HISTORY] Recorded action: {seat_name} ({fixed_player_uuid[:8]}) {action_type} {action_amount}")
+            else:
+                # Se não conseguiu obter UUID, loga warning
+                if debug_mode:
+                    print(f"[HISTORY] WARNING: Could not resolve UUID for player {seat_name}, action not recorded")
                 
                 # Atualiza configurações de blinds se detectar SMALLBLIND ou BIGBLIND
                 # Melhorado: captura de qualquer jogador e atualiza se necessário
@@ -827,6 +886,32 @@ class ConsolePlayer(BasePokerPlayer):
         if debug_mode:
             print(f"[DEBUG]   UUID não mapeado (mantendo original): {seat_uuid_pypoker}")
         return seat_uuid_pypoker
+
+    def _sanitize_round_state(self, round_state):
+        """
+        Cria uma cópia do round_state com todos os UUIDs de seats convertidos para UUIDs fixos.
+        Isso garante consistência no histórico.
+        """
+        if not round_state or not isinstance(round_state, dict):
+            return round_state
+            
+        sanitized = round_state.copy()
+        seats = round_state.get('seats', [])
+        
+        if seats:
+            sanitized_seats = []
+            for seat in seats:
+                if isinstance(seat, dict):
+                    sanitized_seat = seat.copy()
+                    fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                    if fixed_uuid:
+                        sanitized_seat['uuid'] = fixed_uuid
+                    sanitized_seats.append(sanitized_seat)
+                else:
+                    sanitized_seats.append(seat)
+            sanitized['seats'] = sanitized_seats
+            
+        return sanitized
     
 
 
@@ -1167,28 +1252,48 @@ class ConsolePlayer(BasePokerPlayer):
                 return
             self._last_showdown_displayed = round_id
             
-            pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+            
+            # Calcula pot total incluindo side pots
+            pot = 0
+            pot_data = round_state.get('pot', {})
+            if isinstance(pot_data, dict):
+                # Adiciona pot principal
+                main_pot = pot_data.get('main', {})
+                if isinstance(main_pot, dict):
+                    pot += main_pot.get('amount', 0)
+                
+                # Adiciona side pots
+                side_pots = pot_data.get('side', [])
+                if isinstance(side_pots, list):
+                    for side_pot in side_pots:
+                        if isinstance(side_pot, dict):
+                            pot += side_pot.get('amount', 0)
+            
             seats = round_state.get('seats', [])
             community_cards = get_community_cards(round_state)
             current_street = round_state.get('street', 'river')
-            debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
+            debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
             
             # Garante que histórico está inicializado
             self._ensure_game_history_initialized(seats)
             
-            # Armazena cartas dos seats que chegaram ao showdown
+            # IMPORTANTE: Registra cartas de TODOS os jogadores no showdown, não apenas os que não foldaram
             if seats:
+                if debug_mode:
+                    print(f"[DEBUG] Processing {len(seats)} seats for card registration")
                 for seat in seats:
                     if isinstance(seat, dict):
                         seat_uuid = seat.get('uuid', '')
                         seat_name = seat.get('name', '')
-                        seat_state = seat.get('state', '')
-                        if seat_uuid and seat_state != 'folded':
+                        # Registra cartas se existirem, independente do estado
+                        if seat_uuid:
                             seat_hole_cards = (
                                 seat.get('hole_card') or 
                                 seat.get('hole_cards') or
                                 (getattr(seat, 'hole_card', None) if hasattr(seat, 'hole_card') else None)
                             )
+                            if debug_mode:
+                                print(f"[DEBUG] Seat {seat_name} ({seat_uuid[:8]}): hole_cards={seat_hole_cards}")
                             if seat_hole_cards:
                                 try:
                                     normalized_cards = normalize_hole_cards(seat_hole_cards)
@@ -1248,6 +1353,37 @@ class ConsolePlayer(BasePokerPlayer):
                                 if debug_mode:
                                     print(f"[DEBUG] Erro ao armazenar cartas do hand_info: {e}")
             
+            # === FIX: Ensure all participating players are in hand_info_dict for history ===
+            # Iterate through all seats to find players who reached showdown but might be missing from hand_info
+            all_cards = get_all_cards()
+            for seat in seats:
+                if isinstance(seat, dict):
+                    seat_uuid = seat.get('uuid', '')
+                    seat_state = seat.get('state', '')
+                    
+                    # Skip folded players (unless we want to show their cards if known, but usually not for history if folded)
+                    if seat_state == 'folded':
+                        continue
+                        
+                    fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                    uuid_to_use = fixed_uuid if fixed_uuid else seat_uuid
+                    
+                    # If not already in hand_info_dict, try to add it if we have cards
+                    if uuid_to_use and uuid_to_use not in hand_info_dict:
+                        # Check if we have cards in registry
+                        hole_cards = all_cards.get(uuid_to_use)
+                        if hole_cards:
+                            # Create a synthetic hand_info entry
+                            hand_info_dict[uuid_to_use] = {
+                                'uuid': uuid_to_use,
+                                'name': seat.get('name', ''),
+                                'hole_cards': hole_cards,
+                                # We might not have hand strength here, but GameHistory will try to calculate it
+                            }
+                            if debug_mode:
+                                print(f"[DEBUG] Added synthetic hand_info for {uuid_to_use} with cards {hole_cards}")
+            # ==============================================================================
+
             if debug_mode:
                 print(f"[DEBUG] Registry tem {len(get_all_cards())} jogadores")
                 print(f"[DEBUG] hand_info_dict tem {len(hand_info_dict)} jogadores")
@@ -1299,9 +1435,44 @@ class ConsolePlayer(BasePokerPlayer):
                         # Mapeia UUID e determina flags
                         fixed_uuid = self._get_fixed_uuid_from_seat(seat, debug_mode)
                         is_winner = fixed_uuid in winner_uuids if fixed_uuid else (seat_uuid in winner_uuids)
-                        is_folded = state == 'folded'
                         is_player = hasattr(self, 'uuid') and self.uuid and (seat_uuid == self.uuid or fixed_uuid == self.uuid)
                         is_eliminated = seat_stack == 0
+                        
+                        # IMPORTANTE: Verifica se realmente deu fold checando o histórico de ações
+                        # Não confiar apenas no state, pois all-in players podem ter state='folded' após perder
+                        is_folded = False
+                        did_all_in = False
+                        action_histories = round_state.get('action_histories', {})
+                        
+                        # Calcula o total apostado pelo jogador neste round
+                        total_bet_this_round = 0
+                        
+                        # Verifica todas as ações do jogador neste round
+                        for street_history in action_histories.values():
+                            if isinstance(street_history, list):
+                                for action in street_history:
+                                    if isinstance(action, dict):
+                                        action_uuid = action.get('uuid', '')
+                                        if action_uuid == seat_uuid or action_uuid == fixed_uuid:
+                                            action_type = action.get('action', '').lower()
+                                            action_amount = action.get('amount', 0)
+                                            
+                                            if action_type == 'fold':
+                                                is_folded = True
+                                                break
+                                            elif action_type in ['raise', 'call']:
+                                                total_bet_this_round += action_amount
+                                if is_folded:
+                                    break
+                        
+                        # Jogador fez all-in se:
+                        # 1. Ficou com 0 chips (is_eliminated), OU
+                        # 2. Apostou todo o seu stack inicial (total_bet >= stack inicial)
+                        # Para calcular stack inicial: stack_atual + total_apostado
+                        initial_stack = seat_stack + total_bet_this_round
+                        if not is_folded and (is_eliminated or (total_bet_this_round > 0 and total_bet_this_round >= initial_stack)):
+                            did_all_in = True
+                        
                         
                         # IMPORTANTE: Verifica se o jogador participou do round
                         # Um jogador participou se:
@@ -1358,7 +1529,7 @@ class ConsolePlayer(BasePokerPlayer):
                             
                             # Determina indicadores
                             folded_indicator = " (Folded)" if is_folded else ""
-                            all_in_indicator = " (all-in)" if is_eliminated and not is_folded else ""
+                            all_in_indicator = " (all-in)" if did_all_in or (is_eliminated and not is_folded) else ""
                             
                             if is_folded:
                                 # Jogador que deu fold - mostra cartas com indicador (Folded)
@@ -1489,7 +1660,46 @@ class ConsolePlayer(BasePokerPlayer):
                 # Registra resultado do round no histórico
                 if self.game_history:
                     try:
-                        self.game_history.record_round_result(winners, hand_info, round_state)
+                        # Sanitiza round_state para usar UUIDs fixos
+                        sanitized_round_state = self._sanitize_round_state(round_state)
+                        
+                        # Processa winners para usar UUIDs fixos
+                        fixed_winners = []
+                        for winner in winners:
+                            if isinstance(winner, dict):
+                                winner_copy = winner.copy()
+                                winner_name = winner.get('name', '')
+                                if winner_name:
+                                    fixed_uuid = None
+                                    from utils.uuid_utils import get_bot_class_uuid_from_name, get_player_uuid
+                                    fixed_uuid = get_bot_class_uuid_from_name(winner_name)
+                                    if not fixed_uuid:
+                                        fixed_uuid = get_player_uuid(winner_name)
+                                    
+                                    if fixed_uuid:
+                                        winner_copy['uuid'] = fixed_uuid
+                                fixed_winners.append(winner_copy)
+                            else:
+                                # Se for apenas UUID string, tenta encontrar o nome nos seats para converter
+                                fixed_uuid = winner
+                                for seat in seats:
+                                    if isinstance(seat, dict) and seat.get('uuid') == winner:
+                                        fixed = self._get_fixed_uuid_from_seat(seat, False)
+                                        if fixed:
+                                            fixed_uuid = fixed
+                                        break
+                                fixed_winners.append(fixed_uuid)
+
+                        # Sanitiza hand_info para usar UUIDs fixos
+                        sanitized_hand_info = {}
+                        if hand_info_dict:
+                            for fixed_uuid, info in hand_info_dict.items():
+                                if isinstance(info, dict):
+                                    info_copy = info.copy()
+                                    info_copy['uuid'] = fixed_uuid # Garante UUID fixo dentro do dict
+                                    sanitized_hand_info[fixed_uuid] = info_copy
+
+                        self.game_history.record_round_result(fixed_winners, sanitized_hand_info, sanitized_round_state)
                         
                         # Salva histórico ao final do jogo (não apenas no round 10)
                         round_number = 0
@@ -1552,29 +1762,109 @@ class ConsolePlayer(BasePokerPlayer):
     def __gen_raw_input_wrapper(self):
         return lambda msg: input(msg)
 
-    def __receive_action_from_console(self, valid_actions, round_state=None) -> Tuple[str, int]:
+    def _get_current_street_bet(self, round_state):
+        """Calcula o total apostado pelo jogador na street atual."""
+        if not round_state:
+            return 0
+            
+        street = round_state.get('street', '')
+        action_histories = round_state.get('action_histories', {})
+        
+        street_key = street.lower()
+        if street_key not in action_histories:
+            return 0
+            
+        street_actions = action_histories.get(street_key, [])
+        if not street_actions:
+            return 0
+            
+        # Procura pela última ação do jogador nesta street
+        my_uuid = getattr(self, 'uuid', None)
+        if not my_uuid:
+            return 0
+            
+        # Cria um mapa de UUID original -> UUID fixo usando os seats
+        uuid_map = {}
+        seats = round_state.get('seats', [])
+        for seat in seats:
+            if isinstance(seat, dict):
+                orig_uuid = seat.get('uuid')
+                if orig_uuid:
+                    # Usa o método existente que depende do nome no seat
+                    fixed = self._get_fixed_uuid_from_seat(seat, False)
+                    if fixed:
+                        uuid_map[orig_uuid] = fixed
+        
+        # Itera de trás para frente para encontrar a última ação válida
+        for i in range(len(street_actions) - 1, -1, -1):
+            action = street_actions[i]
+            if isinstance(action, dict):
+                action_uuid = action.get('uuid')
+                
+                # Tenta obter o UUID fixo do mapa
+                fixed_uuid = uuid_map.get(action_uuid, action_uuid)
+                
+                if action_uuid == my_uuid or fixed_uuid == my_uuid:
+                    action_type = action.get('action', '').lower()
+                    if action_type in ['call', 'raise']:
+                        return action.get('amount', 0)
+                    elif action_type == 'fold':
+                        return 0 
+                        
+        # Se não encontrou ações nesta street, verifica se é preflop e se pagou blind
+        if street_key == 'preflop':
+            for action in street_actions:
+                if isinstance(action, dict):
+                    action_uuid = action.get('uuid')
+                    fixed_uuid = uuid_map.get(action_uuid, action_uuid)
+                    
+                    if action_uuid == my_uuid or fixed_uuid == my_uuid:
+                        action_type = action.get('action', '').upper()
+                        if action_type in ['SMALLBLIND', 'BIGBLIND']:
+                            return action.get('amount', 0)
+                            
+        return 0
+                            
+        if debug_mode:
+            print(f"[DEBUG] _get_current_street_bet: No matching action found, returning 0")
+        return 0
+
+    def __receive_action_from_console(self, valid_actions, round_state=None, cached_player_stack=None) -> Tuple[str, int]:
         """Solicita ação do jogador de forma limpa.
         
         Args:
             valid_actions: Lista de ações válidas
             round_state: Estado do round (opcional, necessário para all-in)
+            cached_player_stack: Stack do jogador já calculado (opcional, evita recalcular)
         
         Returns:
             tuple[str, int]: Tupla com (action, amount)
         """
         def _get_player_stack(round_state):
             """Obtém stack do jogador usando múltiplas estratégias (mesma lógica de declare_action)."""
+            import os
+            debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+            
             if not round_state:
+                if debug_mode:
+                    print(f"[DEBUG] _get_player_stack: round_state is None, returning 0")
                 return 0
             
             seats = round_state.get('seats', [])
             player_seat = None
+            
+            if debug_mode:
+                print(f"[DEBUG] _get_player_stack: Searching for player stack...")
+                print(f"[DEBUG]   self.uuid: {getattr(self, 'uuid', 'NOT SET')}")
+                print(f"[DEBUG]   Number of seats: {len(seats)}")
             
             # 1. Tenta encontrar pelo UUID
             if hasattr(self, 'uuid') and self.uuid:
                 for seat in seats:
                     if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
                         player_seat = seat
+                        if debug_mode:
+                            print(f"[DEBUG]   ✓ Found by UUID: stack={seat.get('stack', 0)}")
                         break
             
             # 2. Se não encontrou, tenta pelo nome "You"
@@ -1585,14 +1875,46 @@ class ConsolePlayer(BasePokerPlayer):
                         # Atualiza self.uuid se não estava definido
                         if not hasattr(self, 'uuid') or not self.uuid:
                             self.uuid = seat.get('uuid')
+                            if debug_mode:
+                                print(f"[DEBUG]   ✓ Found by name 'You', updated UUID: {self.uuid}")
+                        if debug_mode:
+                            print(f"[DEBUG]   ✓ Found by name: stack={seat.get('stack', 0)}")
                         break
             
-            # 3. Fallback: usa o primeiro seat se houver apenas um
+            # 3. Se ainda não encontrou, tenta pelas cartas (fallback)
+            if not player_seat and hasattr(self, 'my_hole_cards') and self.my_hole_cards:
+                from utils.hand_utils import normalize_hole_cards
+                for seat in seats:
+                    if isinstance(seat, dict):
+                        seat_hole_card = seat.get('hole_card', None)
+                        if seat_hole_card:
+                            seat_hole_cards = normalize_hole_cards(seat_hole_card)
+                            if seat_hole_cards == self.my_hole_cards:
+                                player_seat = seat
+                                if not hasattr(self, 'uuid') or not self.uuid:
+                                    self.uuid = seat.get('uuid')
+                                if debug_mode:
+                                    print(f"[DEBUG]   ✓ Found by hole cards: stack={seat.get('stack', 0)}")
+                                break
+            
+            # 4. Fallback: usa o primeiro seat se houver apenas um
             if not player_seat and len(seats) == 1 and isinstance(seats[0], dict):
                 player_seat = seats[0]
+                if debug_mode:
+                    print(f"[DEBUG]   ⚠️  Using single seat fallback: stack={seats[0].get('stack', 0)}")
             
             if player_seat:
-                return player_seat.get('stack', 0)
+                stack = player_seat.get('stack', 0)
+                if debug_mode:
+                    print(f"[DEBUG]   Final stack: {stack}")
+                return stack
+            
+            if debug_mode:
+                print(f"[DEBUG]   ❌ ERROR: Could not find player seat! Returning 0")
+                print(f"[DEBUG]   Available seats:")
+                for i, seat in enumerate(seats):
+                    if isinstance(seat, dict):
+                        print(f"[DEBUG]     Seat {i}: name={seat.get('name')}, uuid={seat.get('uuid')}, stack={seat.get('stack')}")
             return 0
         
         try:
@@ -1603,8 +1925,15 @@ class ConsolePlayer(BasePokerPlayer):
             
             # Se escolheu All In ('a')
             if flg == 'a':
-                # Obtém stack do jogador usando lógica robusta
-                player_stack = _get_player_stack(round_state)
+                # Usa stack em cache se disponível, senão calcula
+                player_stack = cached_player_stack if cached_player_stack is not None else _get_player_stack(round_state)
+                current_bet = self._get_current_street_bet(round_state)
+                total_all_in = player_stack + current_bet
+                
+                import os
+                debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+                if debug_mode:
+                    print(f"[DEBUG] ALL-IN: player_stack={player_stack} (cached={cached_player_stack is not None}), current_bet={current_bet}, total={total_all_in}")
                 
                 if player_stack > 0:
                     # Verifica se há ação de raise válida disponível
@@ -1620,17 +1949,24 @@ class ConsolePlayer(BasePokerPlayer):
                         if isinstance(raise_amount, dict):
                             min_raise = raise_amount.get('min', 0)
                             max_raise = raise_amount.get('max', float('inf'))
+                            
+                            # Se max_raise for -1, considera como infinito (sem limite superior imposto pelo engine)
+                            effective_max = max_raise if max_raise != -1 else float('inf')
+                            # Se min_raise for -1, considera como 0 (sem limite inferior imposto pelo engine)
+                            effective_min = min_raise if min_raise != -1 else 0
+                            
                             # Garante que o all-in está dentro dos limites válidos
-                            all_in_amount = min(player_stack, max_raise) if max_raise != float('inf') else player_stack
+                            final_amount = min(total_all_in, effective_max) if effective_max != float('inf') else total_all_in
+                            
                             # Se o stack é menor que min_raise, ainda pode fazer all-in
-                            if all_in_amount >= min_raise or player_stack <= min_raise:
-                                return 'raise', all_in_amount
+                            if final_amount >= effective_min or total_all_in <= effective_min:
+                                return 'raise', final_amount
                             else:
-                                print(f"⚠️  Seu stack ({player_stack}) é menor que o raise mínimo ({min_raise}). Fazendo all-in...")
-                                return 'raise', player_stack
+                                print(f"⚠️  Seu stack total ({total_all_in}) é menor que o raise mínimo ({min_raise}). Fazendo all-in...")
+                                return 'raise', total_all_in
                         else:
                             # Formato simples, retorna o stack total
-                            return 'raise', player_stack
+                            return 'raise', total_all_in
                     else:
                         # Se não há raise disponível, tenta call como all-in
                         # (pode acontecer em situações especiais)
@@ -1678,34 +2014,55 @@ class ConsolePlayer(BasePokerPlayer):
                     
                     # IMPORTANTE: Verifica se o jogador tem stack suficiente para o call
                     # Se não tiver ou se o call vai usar todas as fichas, converte para all-in automaticamente
-                    player_stack = _get_player_stack(round_state)
+                    # Usa stack em cache se disponível (mais confiável que recalcular)
+                    player_stack = cached_player_stack if cached_player_stack is not None else _get_player_stack(round_state)
+                    
+                    # Debug logging para rastrear o problema
+                    import os
+                    debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+                    if debug_mode:
+                        print(f"[DEBUG] CALL Logic: player_stack={player_stack} (cached={cached_player_stack is not None}), call_amount={call_amount}")
+                        print(f"[DEBUG] Condition check: player_stack > 0? {player_stack > 0}")
+                        print(f"[DEBUG] Condition check: call_amount > 0? {call_amount > 0}")
+                        print(f"[DEBUG] Condition check: player_stack <= call_amount? {player_stack <= call_amount}")
                     
                     # Se o stack é menor ou igual ao call_amount, faz all-in
                     # (quando são iguais, o call usa todas as fichas, então é all-in)
                     if player_stack > 0 and call_amount > 0 and player_stack <= call_amount:
                         # Stack insuficiente ou exato - retorna all-in com o stack total
-                        return 'raise', player_stack
+                        # IMPORTANTE: O valor do raise deve ser o total apostado na street (aposta atual + stack restante)
+                        current_bet = self._get_current_street_bet(round_state)
+                        total_all_in = current_bet + player_stack
+                        
+                        if debug_mode:
+                            print(f"[DEBUG] Converting CALL to ALL-IN: returning ('raise', {total_all_in}) [Stack: {player_stack} + CurrentBet: {current_bet}]")
+                        return 'raise', total_all_in
                     else:
                         # Stack suficiente ou call_amount é 0 (check)
+                        if debug_mode:
+                            print(f"[DEBUG] Normal CALL: returning ('{action_data['action']}', {call_amount})")
                         return action_data['action'], call_amount
                 elif flg == 'r' and 'r' in action_map:
                     action_data = action_map['r']
                     valid_amounts = action_data['amount']
                     if isinstance(valid_amounts, dict):
-                        # Passa round_state para validação de stack
+                        # Passa round_state E cached_player_stack para validação de stack
                         raise_amount = self.__receive_raise_amount_from_console(
                             valid_amounts['min'], 
                             valid_amounts['max'],
-                            round_state
+                            round_state,
+                            cached_player_stack
                         )
                         
-                        # IMPORTANTE: Garante que o raise_amount não exceda o stack
+                        # IMPORTANTE: Garante que o raise_amount não exceda o stack total
                         # (validação adicional caso a função não tenha feito)
-                        player_stack = _get_player_stack(round_state)
+                        player_stack = cached_player_stack if cached_player_stack is not None else _get_player_stack(round_state)
+                        current_bet = self._get_current_street_bet(round_state)
+                        max_possible_bet = player_stack + current_bet
                         
-                        # Se o raise_amount exceder o stack, limita ao stack (all-in)
-                        if player_stack > 0 and raise_amount > player_stack:
-                            return 'raise', player_stack
+                        # Se o raise_amount exceder o stack total, limita ao stack total (all-in)
+                        if player_stack > 0 and raise_amount > max_possible_bet:
+                            return 'raise', max_possible_bet
                         
                         return action_data['action'], raise_amount
             
@@ -1737,9 +2094,12 @@ class ConsolePlayer(BasePokerPlayer):
                     flgs.append('r')
         return flgs
 
-    def __receive_raise_amount_from_console(self, min_amount, max_amount, round_state=None):
+    def __receive_raise_amount_from_console(self, min_amount, max_amount, round_state=None, cached_player_stack=None):
         def _get_player_stack(round_state):
             """Obtém stack do jogador usando múltiplas estratégias."""
+            import os
+            debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+            
             if not round_state:
                 return 0
             
@@ -1780,23 +2140,36 @@ class ConsolePlayer(BasePokerPlayer):
                 amount = int(raw_amount)
                 if min_amount <= amount and amount <= max_amount:
                     # IMPORTANTE: Verifica se o amount não excede o stack do jogador
-                    # Se exceder, limita ao stack (all-in)
-                    if round_state:
-                        player_stack = _get_player_stack(round_state)
+                    if round_state or cached_player_stack is not None:
+                        player_stack = cached_player_stack if cached_player_stack is not None else _get_player_stack(round_state)
                         
-                        # Se o amount exceder o stack, limita ao stack
-                        if player_stack > 0 and amount > player_stack:
-                            print(f"⚠️  Valor excede seu stack ({player_stack}). Será all-in por {player_stack}.")
-                            return player_stack
-                    
+                        # Calcula o total disponível para aposta (stack atual + o que já apostou na street)
+                        current_bet = self._get_current_street_bet(round_state) if round_state else 0
+                        max_possible_bet = player_stack + current_bet
+                        
+                        if player_stack > 0 and amount > max_possible_bet:
+                            print(f"⚠️  Valor excede seu stack total ({max_possible_bet}). Será all-in por {max_possible_bet}.")
+                            return max_possible_bet
+                            
                     return amount
                 else:
-                    print(f"Invalid amount. Use {min_amount}-{max_amount}")
-                    return self.__receive_raise_amount_from_console(min_amount, max_amount, round_state)
+                    print(f"Invalid amount. Please enter a value between {min_amount} and {max_amount}")
+                    return self.__receive_raise_amount_from_console(min_amount, max_amount, round_state, cached_player_stack)
             except ValueError:
-                print("Invalid input. Enter a number or 'q' to quit.")
-                return self.__receive_raise_amount_from_console(min_amount, max_amount, round_state)
+                print("Invalid input. Please enter a number.")
+                return self.__receive_raise_amount_from_console(min_amount, max_amount, round_state, cached_player_stack)
         except QuitGameException:
             # Re-raise para ser capturado no nível superior
             raise
 
+
+    def save_history(self):
+        """Salva o histórico do jogo manualmente."""
+        if self.game_history:
+            try:
+                history_file = self.game_history.save()
+                print(f"\n[Histórico salvo em: {history_file}]")
+                return history_file
+            except Exception as e:
+                print(f"\n[Erro ao salvar histórico: {e}]")
+        return None
