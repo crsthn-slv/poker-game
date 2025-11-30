@@ -107,6 +107,21 @@ class GameHistory:
             seats: Lista de seats com informações dos jogadores
             button_position: Posição do botão (índice no array de seats)
         """
+        # Verifica se o jogador foi eliminado (stack = 0)
+        # Se sim, não registra mais rounds
+        player_stack = 0
+        for seat in seats:
+            if isinstance(seat, dict) and seat.get('uuid') == self.player_uuid:
+                player_stack = seat.get('stack', 0)
+                break
+        
+        if player_stack == 0:
+            # Jogador eliminado, não registra mais rounds
+            import os
+            if os.environ.get('DEBUG_MODE', 'false').lower() == 'true':
+                print(f"[HISTORY] Player eliminated (stack=0), skipping round {round_count}")
+            return
+        
         # Finaliza round anterior se existir
         if self.current_round:
             self._finalize_current_round()
@@ -186,34 +201,42 @@ class GameHistory:
         if not self.current_street:
             return
         
-        # Obtém pot antes e depois
+        # Obtém pot antes da ação
         pot_before = 0
-        pot_after = 0
         if isinstance(round_state.get('pot'), dict):
             pot_before = round_state.get('pot', {}).get('main', {}).get('amount', 0)
-            pot_after = pot_before  # Será atualizado após a ação
         
-        # Obtém stack antes e depois
+        # Calcula pot depois da ação
+        # Para CALL e RAISE, o amount é adicionado ao pot
+        # Para FOLD e CHECK, o pot não muda
+        pot_after = pot_before
+        if action in ['SMALLBLIND', 'BIGBLIND', 'CALL', 'RAISE']:
+            pot_after = pot_before + amount
+        
+        # Obtém stack antes da ação do round_state
         stack_before = 0
         stack_after = 0
         seats = round_state.get('seats', [])
         for seat in seats:
             if isinstance(seat, dict) and seat.get('uuid') == player_uuid:
+                # Stack no round_state é o stack ANTES da ação
                 stack_before = seat.get('stack', 0)
-                # Estima stack depois (aproximado)
-                if action == 'FOLD':
-                    stack_after = stack_before
-                elif action in ['SMALLBLIND', 'BIGBLIND', 'CALL', 'RAISE']:
+                
+                # Calcula stack depois da ação
+                if action in ['SMALLBLIND', 'BIGBLIND', 'CALL', 'RAISE']:
+                    # Para ações que envolvem chips, subtrai o amount
                     stack_after = stack_before - amount
+                    # Garante que não fica negativo
+                    stack_after = max(0, stack_after)
                 else:
+                    # FOLD e CHECK não alteram o stack
                     stack_after = stack_before
                 break
         
-        # Calcula pot odds (se for ação do jogador humano)
+        # Calcula pot odds (se for ação do jogador humano e houver amount a pagar)
         pot_odds = None
-        if player_uuid == self.player_uuid and amount > 0:
+        if player_uuid == self.player_uuid and amount > 0 and action in ['CALL', 'RAISE']:
             # Pot odds = amount_to_call / (pot + amount_to_call)
-            pot_after = pot_before + amount
             if pot_after > 0:
                 pot_odds = amount / pot_after
         
@@ -294,6 +317,12 @@ class GameHistory:
         showdown_info = None
         if reached_showdown:
             showdown_info = self._process_hand_info(hand_info, round_state)
+
+        # Determine se o HERO chegou ao showdown
+        # O Hero chegou ao showdown se ele estiver no showdown_info (que contém quem não deu fold)
+        i_reached_showdown = False
+        if reached_showdown and showdown_info and self.player_uuid in showdown_info:
+            i_reached_showdown = True
         
         # Resultado do jogador humano
         my_result = None
@@ -313,36 +342,39 @@ class GameHistory:
                 "pot_won": pot_amount if my_won else 0,
                 "stack_change": stack_change,
                 "final_stack": final_stack,
-                "reached_showdown": reached_showdown
+                "reached_showdown": i_reached_showdown
             }
             
-            # Adiciona informações de mão se chegou ao showdown
+            # Adiciona informações de mão se o ROUND chegou ao showdown
             if reached_showdown and showdown_info:
-                my_showdown = showdown_info.get(self.player_uuid)
-                if my_showdown:
-                    # Só adiciona se a informação estiver disponível (não None)
-                    if my_showdown.get("hand") is not None:
-                        my_result["final_hand"] = my_showdown.get("hand")
-                    if my_showdown.get("hand_strength") is not None:
-                        my_result["final_hand_strength"] = my_showdown.get("hand_strength")
-                    if my_showdown.get("hole_cards"):
-                        my_result["my_hole_cards"] = my_showdown.get("hole_cards")
-                    
-                    # Obtém informações dos oponentes no showdown
-                    opponents_at_showdown = []
-                    for opp_uuid, opp_info in showdown_info.items():
-                        if opp_uuid != self.player_uuid:
-                            opp_data = {"uuid": opp_uuid}
-                            # Só adiciona campos se estiverem disponíveis (não None)
-                            if opp_info.get("hole_cards"):
-                                opp_data["hole_cards"] = opp_info.get("hole_cards")
-                            if opp_info.get("hand") is not None:
-                                opp_data["hand"] = opp_info.get("hand")
-                            if opp_info.get("hand_strength") is not None:
-                                opp_data["hand_strength"] = opp_info.get("hand_strength")
-                            opponents_at_showdown.append(opp_data)
-                    if opponents_at_showdown:
-                        my_result["opponents_at_showdown"] = opponents_at_showdown
+                # Informações do Hero (apenas se ele chegou ao showdown)
+                if i_reached_showdown:
+                    my_showdown = showdown_info.get(self.player_uuid)
+                    if my_showdown:
+                        # Só adiciona se a informação estiver disponível (não None)
+                        if my_showdown.get("hand") is not None:
+                            my_result["final_hand"] = my_showdown.get("hand")
+                        if my_showdown.get("hand_strength") is not None:
+                            my_result["final_hand_strength"] = my_showdown.get("hand_strength")
+                        if my_showdown.get("hole_cards"):
+                            my_result["my_hole_cards"] = my_showdown.get("hole_cards")
+                
+                # Obtém informações dos oponentes no showdown (SEMPRE que houver showdown)
+                opponents_at_showdown = []
+                for opp_uuid, opp_info in showdown_info.items():
+                    if opp_uuid != self.player_uuid:
+                        opp_data = {"uuid": opp_uuid}
+                        # Só adiciona campos se estiverem disponíveis (não None)
+                        if opp_info.get("hole_cards"):
+                            opp_data["hole_cards"] = opp_info.get("hole_cards")
+                        if opp_info.get("hand") is not None:
+                            opp_data["hand"] = opp_info.get("hand")
+                        if opp_info.get("hand_strength") is not None:
+                            opp_data["hand_strength"] = opp_info.get("hand_strength")
+                        opponents_at_showdown.append(opp_data)
+                
+                if opponents_at_showdown:
+                    my_result["opponents_at_showdown"] = opponents_at_showdown
         
         self.current_round["result"] = {
             "winners": winner_uuids,
@@ -359,8 +391,12 @@ class GameHistory:
         Returns:
             Dict com {uuid: {hole_cards, hand, hand_strength}}
         """
+        import os
+        debug_mode = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+        
         result = {}
         community_cards = get_community_cards(round_state)
+        seats = round_state.get('seats', [])
         
         # Importa HandEvaluator para calcular hand_strength quando necessário
         try:
@@ -388,6 +424,22 @@ class GameHistory:
                     # Se não encontrou cartas no hand_info, tenta obter do registry
                     if not hole_cards and player_uuid:
                         hole_cards = get_player_cards(player_uuid) or []
+                        if debug_mode and hole_cards:
+                            print(f"[HISTORY] Cards for {player_uuid[:8]} found in registry: {hole_cards}")
+                    
+                    # Se ainda não encontrou, tenta obter das seats do round_state
+                    if not hole_cards and player_uuid and seats:
+                        for seat in seats:
+                            if isinstance(seat, dict) and seat.get('uuid') == player_uuid:
+                                seat_hole_card = seat.get('hole_card')
+                                if seat_hole_card:
+                                    hole_cards = normalize_hole_cards(seat_hole_card)
+                                    if debug_mode and hole_cards:
+                                        print(f"[HISTORY] Cards for {player_uuid[:8]} found in round_state seats: {hole_cards}")
+                                break
+                    
+                    if debug_mode and not hole_cards:
+                        print(f"[HISTORY] WARNING: No cards found for player {player_uuid[:8]} at showdown")
                     
                     # Tenta obter hand_strength do hand_info (NÃO usa valores padrão)
                     hand_strength = None
@@ -402,7 +454,11 @@ class GameHistory:
                     if hand_strength is None and hand_evaluator and hole_cards and len(hole_cards) >= 2 and community_cards:
                         try:
                             hand_strength = hand_evaluator.evaluate(hole_cards, community_cards)
-                        except Exception:
+                            if debug_mode:
+                                print(f"[HISTORY] Calculated hand_strength for {player_uuid[:8]}: {hand_strength}")
+                        except Exception as e:
+                            if debug_mode:
+                                print(f"[HISTORY] Failed to calculate hand_strength for {player_uuid[:8]}: {e}")
                             hand_strength = None
                     
                     # Obtém nome da mão APENAS se hand_strength estiver disponível
@@ -435,6 +491,22 @@ class GameHistory:
                 # Se não encontrou cartas no hand_info, tenta obter do registry
                 if not hole_cards and player_uuid:
                     hole_cards = get_player_cards(player_uuid) or []
+                    if debug_mode and hole_cards:
+                        print(f"[HISTORY] Cards for {player_uuid[:8]} found in registry: {hole_cards}")
+                
+                # Se ainda não encontrou, tenta obter das seats do round_state
+                if not hole_cards and player_uuid and seats:
+                    for seat in seats:
+                        if isinstance(seat, dict) and seat.get('uuid') == player_uuid:
+                            seat_hole_card = seat.get('hole_card')
+                            if seat_hole_card:
+                                hole_cards = normalize_hole_cards(seat_hole_card)
+                                if debug_mode and hole_cards:
+                                    print(f"[HISTORY] Cards for {player_uuid[:8]} found in round_state seats: {hole_cards}")
+                            break
+                
+                if debug_mode and not hole_cards:
+                    print(f"[HISTORY] WARNING: No cards found for player {player_uuid[:8]} at showdown")
                 
                 # Tenta obter hand_strength do hand_info (NÃO usa valores padrão)
                 hand_strength = None
@@ -449,7 +521,11 @@ class GameHistory:
                 if hand_strength is None and hand_evaluator and hole_cards and len(hole_cards) >= 2 and community_cards:
                     try:
                         hand_strength = hand_evaluator.evaluate(hole_cards, community_cards)
-                    except Exception:
+                        if debug_mode:
+                            print(f"[HISTORY] Calculated hand_strength for {player_uuid[:8]}: {hand_strength}")
+                    except Exception as e:
+                        if debug_mode:
+                            print(f"[HISTORY] Failed to calculate hand_strength for {player_uuid[:8]}: {e}")
                         hand_strength = None
                 
                 # Obtém nome da mão APENAS se hand_strength estiver disponível

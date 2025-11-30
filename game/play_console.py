@@ -318,15 +318,18 @@ if __name__ == "__main__":
         # Configura o jogo com os blinds calculados automaticamente
         config = setup_config(max_round=10, initial_stack=initial_stack, small_blind_amount=small_blind)
         
+        # Instancia o jogador humano separadamente para ter referência
+        console_player = ConsolePlayer(
+            initial_stack=initial_stack,
+            small_blind=small_blind,
+            big_blind=big_blind,
+            show_win_probability=show_win_probability
+        )
+        
         # Registra o jogador humano com os blinds calculados
         config.register_player(
             name="You", 
-            algorithm=ConsolePlayer(
-                initial_stack=initial_stack,
-                small_blind=small_blind,
-                big_blind=big_blind,
-                show_win_probability=show_win_probability
-            )
+            algorithm=console_player
         )
         
         # Registra os bots selecionados aleatoriamente
@@ -375,10 +378,19 @@ if __name__ == "__main__":
         print("\n" + "=" * 60)
         print("End of Game")
         print("=" * 60)
+        
+        # Salva histórico ao final do jogo
+        console_player.save_history()
+        
     except QuitGameException:
         print("\n\n" + "=" * 60)
         print("Game ended by user")
         print("=" * 60)
+        
+        # Tenta salvar histórico se console_player foi instanciado
+        if 'console_player' in locals():
+            console_player.save_history()
+            
         print("\nThank you for playing! See you next time.")
         exit(0)
 
