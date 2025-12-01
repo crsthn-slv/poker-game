@@ -9,6 +9,7 @@ import psycopg2
 from psycopg2.extras import execute_values, Json
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+import uuid
 from dotenv import load_dotenv
 from contextlib import contextmanager
 
@@ -76,6 +77,79 @@ class SupabaseClient:
                 conn.commit()
                 return str(player_id)
     
+    def create_game(self, game_config: Dict[str, Any], nickname: str) -> Optional[str]:
+        """
+        Cria um novo registro de jogo.
+        
+        Args:
+            game_config: Configuração do jogo
+            nickname: Nickname do jogador
+            
+        Returns:
+            Game ID (UUID) ou None se falhar
+        """
+        try:
+            with self.get_connection() as conn:
+                # Garante que jogador existe
+                player_id = self.ensure_player(nickname)
+                
+                with conn.cursor() as cursor:
+                    game_id = str(uuid.uuid4())
+                    timestamp = datetime.now().isoformat()
+                    
+                    cursor.execute("""
+                        INSERT INTO games (
+                            id, player_id, timestamp, initial_stack, 
+                            small_blind, big_blind, num_players, total_rounds
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        game_id,
+                        player_id,
+                        timestamp,
+                        game_config.get('initial_stack', 0),
+                        game_config.get('small_blind', 0),
+                        game_config.get('big_blind', 0),
+                        game_config.get('num_bots', 0) + 1, # +1 for human
+                        game_config.get('max_rounds', 0)
+                    ))
+                    
+                    conn.commit()
+                    return game_id
+                    
+        except Exception as e:
+            print(f"[SUPABASE] Error creating game: {e}")
+            return None
+
+    def save_round(self, game_id: str, round_data: Dict[str, Any]) -> bool:
+        """
+        Salva um round individual e suas ações.
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    round_id = self._save_round(cursor, game_id, round_data)
+                    
+                    # Insere ações de cada street
+                    streets = round_data.get('streets', [])
+                    for street_data in streets:
+                        self._save_actions(cursor, round_id, street_data)
+                    
+                    conn.commit()
+                    return True
+        except Exception as e:
+            print(f"[SUPABASE] Error saving round: {e}")
+            return False
+
+    def update_game_result(self, game_id: str, result: Dict[str, Any]) -> bool:
+        """
+        Atualiza o resultado final do jogo (opcional, se tiver coluna para isso).
+        Por enquanto, apenas loga que terminou.
+        """
+        # Se tivermos uma coluna 'result' ou 'status' na tabela games, atualizaríamos aqui.
+        # Por enquanto, a existência dos rounds já é o histórico.
+        return True
+
     def save_game_history(self, history: Dict[str, Any], nickname: str) -> tuple[bool, str]:
         """
         Salva histórico de jogo em formato otimizado.

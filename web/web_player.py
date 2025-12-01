@@ -22,11 +22,13 @@ class WebPlayer(ConsolePlayer):
                  small_blind: int = 5, 
                  big_blind: int = 10, 
                  show_win_probability: bool = False,
-                 on_game_update: Optional[Callable[[str, Any], None]] = None):
+                 on_game_update: Optional[Callable[[str, Any], None]] = None,
+                 on_round_complete: Optional[Callable[[Dict[str, Any]], None]] = None):
         
         # Inicializa o buffer antes de chamar super, pois super pode usar printer
         self.output_buffer = io.StringIO()
         self.on_game_update = on_game_update
+        self.on_round_complete = on_round_complete
         self.input_queue = queue.Queue()
         self.game_id = None
         
@@ -94,7 +96,11 @@ class WebPlayer(ConsolePlayer):
                 # Filter out debug lines to reduce traffic
                 # Only keep lines that don't contain [DEBUG]
                 lines = clean_output.split('\n')
-                filtered_lines = [line for line in lines if '[DEBUG]' not in line]
+                filtered_lines = [
+                    line for line in lines 
+                    if '[DEBUG]' not in line 
+                    and not line.strip().startswith('Available actions:')
+                ]
                 final_output = '\n'.join(filtered_lines)
                 
                 if final_output.strip():
@@ -155,11 +161,24 @@ class WebPlayer(ConsolePlayer):
         # if hasattr(self, 'my_hole_cards') and self.my_hole_cards:
         #      self._send_update("round_start_data", {"hole_cards": self.my_hole_cards})
 
+        # Calculate hand strength for UI display
+        hand_strength_display = None
+        if hasattr(self, 'my_hole_cards') and self.my_hole_cards:
+            from utils.hand_utils import normalize_hole_cards
+            hole_cards = normalize_hole_cards(self.my_hole_cards)
+            community_cards = self._get_community_cards_from_state(round_state)
+            current_street = round_state.get('street', 'preflop') if round_state else 'preflop'
+            
+            strength = self.formatter.get_hand_strength_heuristic(hole_cards, community_cards, current_street)
+            level = self.formatter.get_hand_strength_level(hole_cards, community_cards)
+            hand_strength_display = f"{strength} [{level}]"
+
         action_request = {
             "valid_actions": valid_actions,
             "hole_cards": self.my_hole_cards if hasattr(self, 'my_hole_cards') else [],
             "round_state": sanitized_round_state,
-            "win_probability": win_prob
+            "win_probability": win_prob,
+            "hand_strength": hand_strength_display
         }
         
         # Cache state for reconnection
@@ -171,7 +190,7 @@ class WebPlayer(ConsolePlayer):
         
         # 2. Aguarda resposta da fila (bloqueante na thread do jogo, não no servidor)
         # O servidor roda o jogo em thread separada, então isso é seguro
-        self._print_to_buffer(f"[WEB] Waiting for user action...")
+        # self._print_to_buffer(f"[WEB] Waiting for user action...")
         action, amount = self.input_queue.get()
         
         self.waiting_for_action = False
@@ -290,6 +309,16 @@ class WebPlayer(ConsolePlayer):
         # Envia update final para garantir que o UI mostre tudo
         sanitized_round_state = self._sanitize_round_state(round_state)
         self._send_update("round_result_data", {"winners": winners, "round_state": sanitized_round_state})
+
+        # Trigger incremental save if callback is set
+        if self.on_round_complete and hasattr(self, 'game_history'):
+            # The super().receive_round_result_message updates self.game_history
+            # The round is still in current_round until the next round starts
+            try:
+                if self.game_history.current_round:
+                    self.on_round_complete(self.game_history.current_round)
+            except Exception as e:
+                print(f"[WEB PLAYER] Error triggering save callback: {e}")
 
     def receive_round_start_message(self, round_count, hole_card, seats):
         # Check if I am eliminated (stack is 0)

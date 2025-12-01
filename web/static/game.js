@@ -24,6 +24,8 @@ const potDisplay = document.getElementById('pot-display');
 const communityCardsDisplay = document.getElementById('community-cards');
 const winProbDisplay = document.getElementById('win-prob');
 const probDisplayContainer = document.getElementById('prob-display');
+const handStrengthDisplay = document.getElementById('hand-strength-display');
+const handStrengthContainer = document.getElementById('hand-strength-container');
 
 
 const btnNextRound = document.getElementById('btn-next-round');
@@ -373,6 +375,13 @@ function handleActionRequired(data) {
         if (!data.win_probability) {
             probDisplayContainer.classList.add('hidden');
         }
+    }
+
+    if (data.hand_strength) {
+        handStrengthContainer.classList.remove('hidden');
+        handStrengthDisplay.textContent = data.hand_strength;
+    } else {
+        handStrengthContainer.classList.add('hidden');
     }
 
     actionButtons.forEach(btn => {
