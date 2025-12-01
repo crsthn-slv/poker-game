@@ -21,6 +21,12 @@ const winProbDisplay = document.getElementById('win-prob');
 const probDisplayContainer = document.getElementById('prob-display');
 const displayNick = document.getElementById('display-nick');
 
+const btnNextRound = document.getElementById('btn-next-round');
+const btnQuitGame = document.getElementById('btn-quit-game');
+const endRoundControls = document.getElementById('end-round-controls');
+const btnHeaderQuit = document.getElementById('btn-header-quit');
+const actionButtonsContainer = document.querySelector('.action-buttons');
+
 // Initialize
 init();
 
@@ -49,6 +55,26 @@ document.getElementById('btn-fold').addEventListener('click', () => sendAction('
 document.getElementById('btn-call').addEventListener('click', () => sendAction('call', currentRoundState?.amount_to_call || 0));
 document.getElementById('btn-allin').addEventListener('click', () => sendAction('raise', -1));
 
+btnHeaderQuit.addEventListener('click', () => {
+    btnQuitGame.click(); // Reuse the same logic
+});
+
+btnNextRound.addEventListener('click', () => {
+    sendAction('next_round', 0);
+    endRoundControls.classList.add('hidden');
+    controlsArea.classList.add('disabled');
+});
+
+btnQuitGame.addEventListener('click', () => {
+    if (confirm('Are you sure you want to quit? Your history will be saved.')) {
+        sendAction('quit', 0);
+        // Give a small delay for server to process and save, then redirect
+        setTimeout(() => {
+            window.location.href = '/static/index.html';
+        }, 500);
+    }
+});
+
 document.getElementById('btn-raise').addEventListener('click', showRaiseControls);
 document.getElementById('btn-cancel-raise').addEventListener('click', hideRaiseControls);
 document.getElementById('btn-confirm-raise').addEventListener('click', () => {
@@ -63,6 +89,18 @@ raiseSlider.addEventListener('input', (e) => {
 
 // Keyboard Shortcuts
 document.addEventListener('keydown', (e) => {
+    // Allow 'n' for next round if visible
+    if (e.key.toLowerCase() === 'n' && !endRoundControls.classList.contains('hidden')) {
+        btnNextRound.click();
+        return;
+    }
+
+    // Allow 'q' for quit if visible
+    if (e.key.toLowerCase() === 'q' && !endRoundControls.classList.contains('hidden')) {
+        btnQuitGame.click();
+        return;
+    }
+
     if (controlsArea.classList.contains('disabled')) return;
 
     switch (e.key.toLowerCase()) {
@@ -138,6 +176,10 @@ function handleGameMessage(type, data) {
             hideRaiseControls();
             break;
 
+        case 'wait_for_next_round':
+            handleWaitForNextRound();
+            break;
+
         case 'game_over':
             controlsArea.classList.add('disabled');
             break;
@@ -152,10 +194,25 @@ function handleGameMessage(type, data) {
     }
 }
 
+function handleWaitForNextRound() {
+    controlsArea.classList.remove('disabled');
+
+    // Hide action buttons container
+    actionButtonsContainer.classList.add('hidden');
+
+    // Show End Round Controls
+    endRoundControls.classList.remove('hidden');
+    btnNextRound.focus();
+}
+
 function handleActionRequired(data) {
     currentRoundState = data.round_state;
 
     controlsArea.classList.remove('disabled');
+    endRoundControls.classList.add('hidden');
+
+    // Show action buttons container
+    actionButtonsContainer.classList.remove('hidden');
 
     // Update stats
     // We can try to find our stack from the seat info if needed, but terminal output usually shows it.
@@ -174,6 +231,8 @@ function handleActionRequired(data) {
 
     // Highlight valid actions
     actionButtons.forEach(btn => {
+        if (btn === btnNextRound) return; // Skip next round button
+
         const action = btn.dataset.action;
         const isValid = data.valid_actions.some(a => a.action === action);
         btn.disabled = !isValid;
@@ -193,13 +252,23 @@ function handleActionRequired(data) {
         raiseAmountInput.max = maxRaise;
     }
 
+    // Fix: Extract amount_to_call from valid_actions for the Call button
+    const callAction = data.valid_actions.find(a => a.action === 'call');
+    if (callAction) {
+        currentRoundState.amount_to_call = callAction.amount;
+    }
+
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
 }
 
 function sendAction(action, amount) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
-    controlsArea.classList.add('disabled');
+    // Don't disable controls immediately for next_round to allow animation/transition if needed
+    // But generally good practice to prevent double clicks
+    if (action !== 'next_round') {
+        controlsArea.classList.add('disabled');
+    }
 
     socket.send(JSON.stringify({
         type: 'action',
@@ -210,10 +279,50 @@ function sendAction(action, amount) {
     }));
 }
 
+// Function to convert ANSI codes to HTML
+function ansiToHtml(text) {
+    if (!text) return '';
+
+    // Basic ANSI color map
+    const colors = {
+        '30': 'black', '31': '#ff5555', '32': '#50fa7b', '33': '#f1fa8c',
+        '34': '#bd93f9', '35': '#ff79c6', '36': '#8be9fd', '37': '#f8f8f2',
+        '90': '#6272a4' // Bright black / Gray
+    };
+
+    // Replace color codes
+    let html = text.replace(/\x1B\[(\d+)m/g, (match, code) => {
+        if (code === '0') return '</span>'; // Reset
+        if (code === '1') return '<span style="font-weight:bold">'; // Bold
+        if (code === '2') return '<span style="opacity:0.6">'; // Faint
+        if (colors[code]) return `<span style="color:${colors[code]}">`; // Color
+        return '';
+    });
+
+    // Ensure all open spans are closed at the end of the string
+    // This is a simple approach and might not handle nested spans perfectly,
+    // but works for basic color/style changes.
+    while (html.includes('<span')) {
+        if (!html.includes('</span>')) {
+            html += '</span>';
+        } else {
+            break; // Assume balanced if a closing tag exists
+        }
+    }
+
+    return html;
+}
+
 function logToTerminal(text, type = 'action') {
     const div = document.createElement('div');
     div.className = `line ${type}`;
-    div.textContent = text;
+    if (type === 'raw') {
+        // For 'raw' type, assume text contains ANSI codes and render as HTML
+        div.innerHTML = ansiToHtml(text);
+    } else {
+        // For other types, treat as plain text
+        div.textContent = text;
+    }
     terminalOutput.appendChild(div);
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
 }

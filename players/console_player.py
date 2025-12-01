@@ -1726,7 +1726,7 @@ class ConsolePlayer(BasePokerPlayer):
                 
                 # Pausa para aguardar input antes de continuar
                 self.printer()
-                self.__wait_for_continue()
+                self.wait_for_continue()
                 
                 # Limpa todos os caches para próximo round
                 self._clear_all_caches()
@@ -1740,7 +1740,7 @@ class ConsolePlayer(BasePokerPlayer):
         except Exception as e:
             # Tratamento de erro geral para não quebrar o jogo
             debug_mode = os.environ.get('POKER_DEBUG', 'false').lower() == 'true'
-            self.printer(f"\n[Erro ao processar resultado do round: {type(e).__name__}]")
+            self.printer(f"\n[Erro ao processar resultado do round: {type(e).__name__}: {e}]")
             if debug_mode:
                 self.printer(f"[DEBUG] Detalhes: {e}")
                 import traceback
@@ -1752,7 +1752,7 @@ class ConsolePlayer(BasePokerPlayer):
         """Método não utilizado mais - mantido para compatibilidade."""
         pass
     
-    def __wait_for_continue(self):
+    def wait_for_continue(self):
         """Aguarda input do usuário antes de continuar."""
         try:
             user_input = input("Press Enter to continue (or 'q' to quit)... ")

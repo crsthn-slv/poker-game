@@ -74,9 +74,10 @@ class WebPlayer(ConsolePlayer):
         try:
             output = self.output_buffer.getvalue()
             if output:
-                # Remove ANSI escape codes
-                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                clean_output = ansi_escape.sub('', output)
+                # Remove ANSI escape codes - DISABLED to support colors in web terminal
+                # ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                # clean_output = ansi_escape.sub('', output)
+                clean_output = output
                 
                 # Filter out debug lines to reduce traffic
                 # Only keep lines that don't contain [DEBUG]
@@ -148,12 +149,44 @@ class WebPlayer(ConsolePlayer):
         
         # 3. Imprime a ação escolhida para ficar no histórico do terminal
         self._print_to_buffer(f">> {action} {amount if amount > 0 and action != 'fold' else ''}")
+        
+        # Garante que o amount do call seja o correto (do valid_actions)
+        # O frontend pode enviar 0 ou valor incorreto
+        if action == 'call':
+            for valid_action in valid_actions:
+                if valid_action['action'] == 'call':
+                    amount = valid_action['amount']
+                    break
             
         return action, amount
 
-    # Sobrescrevemos receive_round_result_message APENAS para enviar sinal de fim de round para UI
+    # Sobrescrevemos receive_round_result_message APENAS para garantir que o super seja chamado
     # A lógica de display é mantida pelo ConsolePlayer (que usa self.printer)
     def receive_round_result_message(self, winners, hand_info, round_state):
         super().receive_round_result_message(winners, hand_info, round_state)
-        # Envia sinal de fim de round para UI
+
+    def wait_for_continue(self):
+        """
+        Aguarda sinal do frontend para continuar para o próximo round.
+        Substitui o input() bloqueante do ConsolePlayer.
+        """
+        # 1. Envia sinal de fim de round e solicita confirmação
         self._send_update("round_result_data", {})
+        self._send_update("wait_for_next_round", {})
+        
+        self._print_to_buffer("[WEB] Waiting for next round...")
+        
+        # 2. Aguarda resposta da fila
+        # O frontend deve enviar uma action 'next_round' ou 'quit'
+        try:
+            action, amount = self.input_queue.get()
+            
+            if action == 'quit':
+                from players.console_player import QuitGameException
+                raise QuitGameException()
+                
+        except Exception as e:
+            # Se for QuitGameException, re-lança
+            if type(e).__name__ == 'QuitGameException':
+                raise e
+            print(f"[WEB PLAYER ERROR] Error waiting for next round: {e}")

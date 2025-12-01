@@ -18,9 +18,9 @@
         <div id="game-screen" class="screen active">
             <div class="header-bar">
                 <div class="header-left">
-                    <a href="/" class="btn-back"
-                        style="text-decoration: none; color: var(--text-color); border: 2px solid var(--border-color); padding: 5px 10px; border-radius: 4px; font-family: var(--font-pixel); font-size: 0.6rem;">&lt;
-                        Back</a>
+                    <button id="btn-header-quit" class="btn-back"
+                        style="background: none; border: 2px solid var(--danger-color); color: var(--danger-color); padding: 5px 10px; border-radius: 4px; font-family: var(--font-pixel); font-size: 0.6rem; cursor: pointer;">
+                        Quit</button>
                     <span id="player-info" style="margin-left: 10px;">Player: <span
                             id="display-nick">Unknown</span></span>
                 </div>
@@ -50,6 +50,11 @@
                     <button class="action-btn" data-action="call" id="btn-call">Call (C)</button>
                     <button class="action-btn" data-action="raise" id="btn-raise">Raise (R)</button>
                     <button class="action-btn danger" data-action="allin" id="btn-allin">All In (A)</button>
+                </div>
+
+                <div id="end-round-controls" class="end-round-controls hidden">
+                    <button id="btn-next-round" class="btn-next-round">Next Round</button>
+                    <button id="btn-quit-game" class="btn-quit-game">Quit</button>
                 </div>
 
                 <div id="raise-controls" class="raise-controls hidden">
