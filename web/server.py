@@ -10,12 +10,17 @@ import asyncio
 import threading
 import json
 from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Adiciona diretório raiz ao path para importar módulos do jogo
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -110,6 +115,46 @@ app.add_middleware(
 # Serve arquivos estáticos (frontend)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
+@app.get("/translations.json")
+async def get_translations():
+    if os.path.exists("translations.json"):
+        return FileResponse("translations.json")
+    return {"error": "File not found"}
+
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
+
+@app.get("/api/config")
+async def get_config():
+    return {
+        "supabase_url": os.getenv("SUPABASE_URL"),
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY")
+    }
+
+@app.get("/api/translations/{lang_code}")
+async def get_translations_api(lang_code: str):
+    """Retorna traduções do Supabase via backend."""
+    client = get_supabase_client()
+    translations = client.get_translations(lang_code)
+    
+    if not translations:
+        # Fallback to local file if DB fails or empty
+        if os.path.exists("translations.json"):
+            try:
+                with open("translations.json", "r") as f:
+                    data = json.load(f)
+                    # Convert {KEY: {lang: val}} to {KEY: val}
+                    local_trans = {}
+                    for key, langs in data.items():
+                        if lang_code in langs:
+                            local_trans[key] = langs[lang_code]
+                    return local_trans
+            except:
+                pass
+                
+    return translations
+
 @app.post("/api/game/new")
 async def create_game(config: GameConfig):
     """Cria uma nova sessão de jogo."""
@@ -177,12 +222,25 @@ def run_poker_game(session: GameSession):
         )
         
         # 3. Cria e registra WebPlayer (Humano)
+        
+        # Callback para salvar round incrementalmente
+        def handle_round_complete(round_data):
+            try:
+                # Se temos um game_id do Supabase (criado abaixo), salvamos o round
+                if hasattr(session, 'supabase_game_id') and session.supabase_game_id:
+                    print(f"[GAME] Saving round {round_data.get('round_number')} for {session.session_id}")
+                    supabase = get_supabase_client()
+                    supabase.save_round(session.supabase_game_id, round_data)
+            except Exception as e:
+                print(f"[GAME] Error saving round: {e}")
+
         web_player = WebPlayer(
             initial_stack=session.config.initial_stack,
             small_blind=small_blind,
             big_blind=big_blind,
             show_win_probability=session.config.show_probability,
-            on_game_update=session.send_update
+            on_game_update=session.send_update,
+            on_round_complete=handle_round_complete
         )
         web_player.set_game_id(session.session_id)
         web_player.set_player_name(session.config.nickname)
@@ -209,24 +267,49 @@ def run_poker_game(session: GameSession):
             
         # 5. Inicia o Jogo (Bloqueante)
         session.send_update("status", "Starting game...")
+        
+        # Cria jogo no Supabase antes de começar
+        try:
+            print(f"[GAME] Creating game record for {session.session_id}")
+            supabase = get_supabase_client()
+            # Prepara config dict
+            game_config_dict = {
+                'initial_stack': session.config.initial_stack,
+                'small_blind': small_blind,
+                'big_blind': big_blind,
+                'num_bots': session.config.num_bots,
+                'max_rounds': 10 # Hardcoded in setup_config above
+            }
+            session.supabase_game_id = supabase.create_game(game_config_dict, session.config.nickname)
+            if session.supabase_game_id:
+                print(f"[GAME] Game record created: {session.supabase_game_id}")
+            else:
+                print(f"[GAME] Failed to create game record")
+        except Exception as e:
+            print(f"[GAME] Error creating game record: {e}")
+        
         game_result = start_poker(config, verbose=0)
         
         # 6. Jogo terminou
         session.game_result = game_result
         session.send_update("game_over", {"result": "Game finished"})
         
-        # 7. Salva histórico no Supabase
-        print(f"[GAME] Saving history for {session.session_id}")
-        supabase = get_supabase_client()
-        if web_player.game_history:
-            # O ConsolePlayer/WebPlayer mantém o histórico em self.game_history (instância de GameHistory)
-            # Precisamos acessar o dict interno
-            history_data = web_player.game_history.history
-            success, error_msg = supabase.save_game_history(history_data, session.config.nickname)
-            if success:
-                session.send_update("notification", "Game history saved to Supabase!")
-            else:
-                session.send_update("error", f"Failed to save game history: {error_msg}")
+        # 7. Atualiza resultado final (opcional, já que salvamos rounds)
+        if hasattr(session, 'supabase_game_id') and session.supabase_game_id:
+             supabase = get_supabase_client()
+             supabase.update_game_result(session.supabase_game_id, {"status": "finished"})
+             session.send_update("notification", "Game history saved to Supabase!")
+        else:
+             # Fallback para salvar tudo se falhou no início (retrocompatibilidade)
+             print(f"[GAME] Saving full history (fallback) for {session.session_id}")
+             supabase = get_supabase_client()
+             if web_player.game_history:
+                 history_data = web_player.game_history.history
+                 success, error_msg = supabase.save_game_history(history_data, session.config.nickname)
+                 if success:
+                     session.send_update("notification", "Game history saved to Supabase!")
+                 else:
+                     session.send_update("error", f"Failed to save game history: {error_msg}")
                 
     except Exception as e:
         print(f"[GAME] Error in game loop: {e}")

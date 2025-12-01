@@ -9,6 +9,8 @@ let currentRoundState = null;
 let myHoleCards = [];
 let myNickname = 'Unknown';
 
+import { i18n } from '/static/localization.js';
+
 // DOM Elements
 const terminalOutput = document.getElementById('terminal-output');
 const controlsArea = document.getElementById('controls-area');
@@ -22,6 +24,8 @@ const potDisplay = document.getElementById('pot-display');
 const communityCardsDisplay = document.getElementById('community-cards');
 const winProbDisplay = document.getElementById('win-prob');
 const probDisplayContainer = document.getElementById('prob-display');
+const handStrengthDisplay = document.getElementById('hand-strength-display');
+const handStrengthContainer = document.getElementById('hand-strength-container');
 
 
 const btnNextRound = document.getElementById('btn-next-round');
@@ -39,6 +43,11 @@ const modalMessage = document.getElementById('modal-message');
 const btnModalCancel = document.getElementById('btn-modal-cancel');
 const btnModalConfirm = document.getElementById('btn-modal-confirm');
 
+// Elimination Modal Elements
+const btnElimNewGame = document.getElementById('btn-elim-new-game');
+const btnElimSimulate = document.getElementById('btn-simulate');
+const btnElimQuit = document.getElementById('btn-quit-game'); // Reusing the main quit button
+
 let onModalConfirm = null;
 
 // Initialize
@@ -50,7 +59,7 @@ function init() {
     sessionId = urlParams.get('session_id');
 
     if (!sessionId) {
-        alert('No session ID found. Redirecting to home.');
+        alert(i18n.get('MSG_NO_SESSION'));
         window.location.href = '/static/index.html';
         return;
     }
@@ -61,7 +70,17 @@ function init() {
         myNickname = storedNick;
     }
 
-    connectWebSocket(sessionId);
+    // Clear i18n cache to ensure new keys are loaded
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('i18n_')) {
+            localStorage.removeItem(key);
+        }
+    });
+
+    // Initialize i18n
+    i18n.init('pt-br').then(() => {
+        connectWebSocket(sessionId);
+    });
 }
 
 // Event Listeners
@@ -69,16 +88,12 @@ document.getElementById('btn-fold').addEventListener('click', () => sendAction('
 document.getElementById('btn-call').addEventListener('click', () => sendAction('call', currentRoundState?.amount_to_call || 0));
 document.getElementById('btn-allin').addEventListener('click', () => sendAction('raise', -1));
 
-
-
-
-
 btnHeaderQuit.addEventListener('click', () => {
     btnQuitGame.click(); // Reuse the same logic
 });
 
 btnHeaderNewGame.addEventListener('click', () => {
-    showModal('New Game', 'Are you sure you want to start a new game? Current progress will be lost.', () => {
+    showModal(i18n.get('MODAL_NEW_GAME_TITLE'), i18n.get('MODAL_NEW_GAME_MSG'), () => {
         startNewGame();
     });
 });
@@ -90,7 +105,7 @@ btnNextRound.addEventListener('click', () => {
 });
 
 btnQuitGame.addEventListener('click', () => {
-    showModal('Quit Game', 'Are you sure you want to quit? Your history will be saved.', () => {
+    showModal(i18n.get('MODAL_QUIT_TITLE'), i18n.get('MODAL_QUIT_MSG'), () => {
         sendAction('quit', 0);
         // Give a small delay for server to process and save, then redirect
         setTimeout(() => {
@@ -105,6 +120,24 @@ btnModalConfirm.addEventListener('click', () => {
     if (onModalConfirm) onModalConfirm();
     hideModal();
 });
+
+// Elimination Modal Listeners
+if (btnElimSimulate) {
+    btnElimSimulate.addEventListener('click', () => {
+        sendAction('simulate', 0);
+        // Hide simulate button after clicking to prevent multiple clicks
+        btnElimSimulate.classList.add('hidden');
+        logToTerminal(i18n.get('BTN_SIMULATE') + '...', 'system');
+    });
+}
+
+if (btnElimNewGame) {
+    btnElimNewGame.addEventListener('click', () => {
+        showModal(i18n.get('MODAL_NEW_GAME_TITLE'), i18n.get('MODAL_NEW_GAME_MSG'), () => {
+            startNewGame();
+        });
+    });
+}
 
 function showModal(title, message, onConfirm) {
     modalTitle.textContent = title;
@@ -125,8 +158,6 @@ document.getElementById('btn-confirm-raise').addEventListener('click', () => {
     sendAction('raise', amount);
     hideRaiseControls();
 });
-
-
 
 raiseAmountInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -169,9 +200,7 @@ function connectWebSocket(sid) {
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
-        logToTerminal('Connected to game server.', 'system');
-        // document.getElementById('game-status').textContent = 'STATUS: ONLINE';
-        // document.getElementById('game-status').style.color = 'var(--success-color)';
+        logToTerminal(i18n.get('MSG_CONNECTED'), 'system');
     };
 
     socket.onmessage = (event) => {
@@ -180,15 +209,13 @@ function connectWebSocket(sid) {
     };
 
     socket.onclose = () => {
-        logToTerminal('Connection lost.', 'error');
-        // document.getElementById('game-status').textContent = 'STATUS: OFFLINE';
-        // document.getElementById('game-status').style.color = 'var(--danger-color)';
+        logToTerminal(i18n.get('MSG_CONN_LOST'), 'error');
         controlsArea.classList.add('disabled');
     };
 
     socket.onerror = (error) => {
         console.error('WebSocket error:', error);
-        logToTerminal('Connection error.', 'error');
+        logToTerminal(i18n.get('MSG_CONN_ERROR'), 'error');
     };
 }
 
@@ -202,7 +229,6 @@ function handleGameMessage(type, data) {
 
         case 'terminal_output':
             logToTerminal(data, 'raw');
-            // Fallback: Parse community cards from terminal output if structured event is missing
             parseCommunityCardsFromLog(data);
             break;
 
@@ -216,7 +242,6 @@ function handleGameMessage(type, data) {
             break;
 
         case 'street_start':
-            console.log('Received street_start:', data); // Debug log
             handleStreetStart(data);
             break;
 
@@ -229,8 +254,11 @@ function handleGameMessage(type, data) {
             break;
 
         case 'round_result_data':
-            controlsArea.classList.add('disabled');
-            hideRaiseControls();
+            // Only disable controls if we are NOT in the elimination/end-round state
+            if (endRoundControls.classList.contains('hidden')) {
+                controlsArea.classList.add('disabled');
+                hideRaiseControls();
+            }
             break;
 
         case 'wait_for_next_round':
@@ -238,7 +266,7 @@ function handleGameMessage(type, data) {
             break;
 
         case 'game_over':
-            controlsArea.classList.add('disabled');
+            handleGameOver(data);
             break;
 
         case 'notification':
@@ -248,17 +276,88 @@ function handleGameMessage(type, data) {
         case 'error':
             logToTerminal(data, 'error');
             break;
+
+        case 'player_eliminated':
+            handlePlayerEliminated(data);
+            break;
     }
+}
+
+function handleGameOver(data) {
+    controlsArea.classList.remove('disabled'); // Enable controls so buttons can be clicked
+    actionButtonsContainer.classList.add('hidden'); // Hide fold/call/raise
+    endRoundControls.classList.remove('hidden'); // Show end round controls
+    endRoundControls.style.display = 'flex';
+
+    // Hide Next Round and Simulate
+    btnNextRound.classList.add('hidden');
+    btnNextRound.style.display = 'none';
+    if (btnElimSimulate) {
+        btnElimSimulate.classList.add('hidden');
+        btnElimSimulate.style.display = 'none';
+    }
+
+    // Show New Game and Quit
+    if (btnElimNewGame) {
+        btnElimNewGame.classList.remove('hidden');
+        btnElimNewGame.style.display = 'inline-block';
+    }
+    btnQuitGame.classList.remove('hidden');
+    btnQuitGame.style.display = 'inline-block';
+
+    logToTerminal(i18n.get('MSG_GAME_OVER') || 'Game Over', 'system');
+}
+
+function handlePlayerEliminated(data) {
+    console.log('Player Eliminated Data:', data);
+    controlsArea.classList.remove('disabled'); // Enable controls to allow interaction with buttons
+    hideRaiseControls();
+
+    // Hide Next Round button
+    btnNextRound.classList.add('hidden');
+    btnNextRound.style.display = 'none'; // Force hide
+
+    // Show Simulate and New Game buttons
+    if (btnElimSimulate) {
+        btnElimSimulate.classList.remove('hidden');
+        btnElimSimulate.style.display = 'inline-block'; // Force show
+    }
+    if (btnElimNewGame) {
+        btnElimNewGame.classList.remove('hidden');
+        btnElimNewGame.style.display = 'inline-block'; // Force show
+    }
+
+    // Ensure controls area is visible
+    actionButtonsContainer.classList.add('hidden');
+    endRoundControls.classList.remove('hidden');
+    endRoundControls.style.display = 'flex'; // Ensure container is flex
+
+    // Log elimination to terminal
+    logToTerminal(i18n.get('MODAL_ELIMINATED_MSG') || 'You have been eliminated.', 'error');
+
+    // Clear player cards and stack
+    renderCards([]);
+    if (myStackDisplay) myStackDisplay.textContent = '0';
 }
 
 function handleWaitForNextRound() {
     controlsArea.classList.remove('disabled');
-
-    // Hide action buttons container
     actionButtonsContainer.classList.add('hidden');
-
-    // Show End Round Controls
     endRoundControls.classList.remove('hidden');
+
+    // Reset buttons to normal state (Next Round visible, others hidden)
+    btnNextRound.classList.remove('hidden');
+    btnNextRound.style.display = ''; // Reset inline style
+
+    if (btnElimSimulate) {
+        btnElimSimulate.classList.add('hidden');
+        btnElimSimulate.style.display = ''; // Reset inline style
+    }
+    if (btnElimNewGame) {
+        btnElimNewGame.classList.add('hidden');
+        btnElimNewGame.style.display = ''; // Reset inline style
+    }
+
     btnNextRound.focus();
 }
 
@@ -267,28 +366,26 @@ function handleActionRequired(data) {
 
     controlsArea.classList.remove('disabled');
     endRoundControls.classList.add('hidden');
-
-    // Show action buttons container
     actionButtonsContainer.classList.remove('hidden');
-
-    // Update stats
-    // We can try to find our stack from the seat info if needed, but terminal output usually shows it.
-    // Let's try to update it if we can match the session/uuid.
-    // Since we don't have our UUID easily here without server sending it, we might skip or rely on name.
 
     if (data.win_probability) {
         probDisplayContainer.classList.remove('hidden');
         winProbDisplay.textContent = (data.win_probability * 100).toFixed(1) + '%';
     } else {
-        // If user disabled it in config, backend won't send it or sends null
         if (!data.win_probability) {
             probDisplayContainer.classList.add('hidden');
         }
     }
 
-    // Highlight valid actions
+    if (data.hand_strength) {
+        handStrengthContainer.classList.remove('hidden');
+        handStrengthDisplay.textContent = data.hand_strength;
+    } else {
+        handStrengthContainer.classList.add('hidden');
+    }
+
     actionButtons.forEach(btn => {
-        if (btn === btnNextRound) return; // Skip next round button
+        if (btn === btnNextRound) return;
 
         const action = btn.dataset.action;
         let checkAction = action;
@@ -298,12 +395,9 @@ function handleActionRequired(data) {
         btn.disabled = !isValid;
     });
 
-    // Update Stack and Bet
     updateMyStackDisplay(currentRoundState);
-
     updateMyBetDisplay(currentRoundState);
 
-    // Setup raise limits
     const raiseAction = data.valid_actions.find(a => a.action === 'raise');
     if (raiseAction) {
         const minRaise = raiseAction.amount.min;
@@ -314,23 +408,19 @@ function handleActionRequired(data) {
         raiseAmountInput.max = maxRaise;
     }
 
-    // Fix: Extract amount_to_call from valid_actions for the Call button
-    // Fix: Extract amount_to_call from valid_actions for the Call button
     const callAction = data.valid_actions.find(a => a.action === 'call');
     const btnCall = document.getElementById('btn-call');
     if (callAction) {
         currentRoundState.amount_to_call = callAction.amount;
         if (callAction.amount === 0) {
-            btnCall.textContent = 'Check (C)';
+            btnCall.textContent = i18n.get('BTN_CHECK');
         } else {
-            btnCall.textContent = `Call {${callAction.amount}} (C)`;
+            btnCall.textContent = `${i18n.get('BTN_CALL').replace('(C)', '')} {${callAction.amount}} (C)`;
         }
     } else {
-        // Fallback if call is not valid (though disabled logic handles visibility)
-        btnCall.textContent = 'Call';
+        btnCall.textContent = i18n.get('BTN_CALL');
     }
 
-    // Update Community Cards and Pot
     if (currentRoundState.community_card) {
         renderCommunityCards(currentRoundState.community_card);
     }
@@ -345,8 +435,6 @@ function handleActionRequired(data) {
 function sendAction(action, amount) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
-    // Don't disable controls immediately for next_round to allow animation/transition if needed
-    // But generally good practice to prevent double clicks
     if (action !== 'next_round') {
         controlsArea.classList.add('disabled');
     }
@@ -360,34 +448,28 @@ function sendAction(action, amount) {
     }));
 }
 
-// Function to convert ANSI codes to HTML
 function ansiToHtml(text) {
     if (!text) return '';
 
-    // Basic ANSI color map
     const colors = {
         '30': 'black', '31': '#ff5555', '32': '#50fa7b', '33': '#f1fa8c',
         '34': '#bd93f9', '35': '#ff79c6', '36': '#8be9fd', '37': '#f8f8f2',
-        '90': '#6272a4' // Bright black / Gray
+        '90': '#6272a4'
     };
 
-    // Replace color codes
     let html = text.replace(/\x1B\[(\d+)m/g, (match, code) => {
-        if (code === '0') return '</span>'; // Reset
-        if (code === '1') return '<span style="font-weight:bold">'; // Bold
-        if (code === '2') return '<span style="opacity:0.6">'; // Faint
-        if (colors[code]) return `<span style="color:${colors[code]}">`; // Color
+        if (code === '0') return '</span>';
+        if (code === '1') return '<span style="font-weight:bold">';
+        if (code === '2') return '<span style="opacity:0.6">';
+        if (colors[code]) return `<span style="color:${colors[code]}">`;
         return '';
     });
 
-    // Ensure all open spans are closed at the end of the string
-    // This is a simple approach and might not handle nested spans perfectly,
-    // but works for basic color/style changes.
     while (html.includes('<span')) {
         if (!html.includes('</span>')) {
             html += '</span>';
         } else {
-            break; // Assume balanced if a closing tag exists
+            break;
         }
     }
 
@@ -398,10 +480,8 @@ function logToTerminal(text, type = 'action') {
     const div = document.createElement('div');
     div.className = `line ${type}`;
     if (type === 'raw') {
-        // For 'raw' type, assume text contains ANSI codes and render as HTML
         div.innerHTML = ansiToHtml(text);
     } else {
-        // For other types, treat as plain text
         div.textContent = text;
     }
     terminalOutput.appendChild(div);
@@ -497,79 +577,9 @@ function updateMyBetDisplay(roundState) {
     }
 
     let totalBet = 0;
-    const street = roundState.street;
 
-    // Calculate total bet for the current street only? Or total for the round?
-    // Usually "Bet" in HUD means current street bet or total contribution to pot.
-    // Let's show total contribution to the pot in the current round (all streets)
-    // or just the current street. 
-    // "quanto de fichas já apostei no round" implies total for the round (hand).
-
-    // Iterate over all streets in action history
-    Object.values(roundState.action_histories).forEach(streetActions => {
-        streetActions.forEach(action => {
-            // Check if action is from me (by name or uuid if we had it)
-            // We use name for now as we have myNickname
-            // Note: action_histories usually have uuid, not name directly in some versions,
-            // but let's check what we have.
-            // If we don't have name in action, we need to match uuid.
-
-            // We need to find my UUID from seats if not known
-            let myUuid = null;
-            if (roundState.seats) {
-                const mySeat = roundState.seats.find(s => s.name === myNickname);
-                if (mySeat) myUuid = mySeat.uuid;
-            }
-
-            if (action.uuid === myUuid) {
-                if (action.action === 'CALL') {
-                    totalBet += action.paid || action.amount;
-                } else if (action.action === 'RAISE') {
-                    totalBet += action.amount; // Raise amount is usually the total bet for the street? 
-                    // In PyPokerEngine, RAISE amount is the target total amount for the street.
-                    // But we are summing up. 
-                    // Wait, if I raise to 20, I added 20 to the pot (minus what I already bet).
-                    // PyPokerEngine history is a bit tricky.
-                    // Let's look at 'paid' if available, or 'amount'.
-                    // Actually, simpler way: 
-                    // Total bet = Initial Stack - Current Stack
-                    // But this includes previous rounds if we don't track initial stack of the round.
-
-                    // Let's try to use the 'paid' field if available, which represents chips put in pot.
-                    // If 'paid' is not there, we might need to rely on logic.
-                    // For RAISE, 'amount' is usually the total amount matched.
-                    // Let's assume 'paid' is reliable if present (it was added in our backend logic).
-                } else if (action.action === 'SMALLBLIND' || action.action === 'BIGBLIND') {
-                    totalBet += action.amount;
-                }
-
-                // If we use the 'paid' field from our backend enhancement, it's safer.
-                // In receive_game_update_message we saw: paid = new_action.get('paid', 0)
-                // But action_histories might be raw from PyPokerEngine.
-                // Let's check if we can calculate simply:
-                // Total Bet = (Start Stack of Round) - (Current Stack)
-                // But we don't easily have Start Stack of Round unless we tracked it.
-            }
-        });
-    });
-
-    // Alternative: Calculate from stack difference if we knew initial stack of the round.
-    // Since we don't, let's try to sum up 'amount' or 'paid' from history carefully.
-
-    // Re-calculating using a safer approach for PyPokerEngine action history:
-    // Iterate streets, find my actions.
-    // For each street, my contribution is the max 'amount' I committed?
-    // No, because I might have called then raised.
-
-    // Let's use a simplified approach:
-    // Iterate all actions. If it's me:
-    // If action is SB/BB/ANTE: add amount.
-    // If action is CALL: add amount (or paid).
-    // If action is RAISE: This is tricky. RAISE 50 means "make my total bet for this street 50".
-    // So for a street, my contribution is the final amount I raised/called to.
-
-    let myTotalBetInHand = 0;
-
+    // Simplified logic: sum all my contributions in the round
+    // This is an approximation as PyPokerEngine history is complex
     ['preflop', 'flop', 'turn', 'river'].forEach(streetName => {
         const actions = roundState.action_histories[streetName];
         if (actions) {
@@ -585,22 +595,6 @@ function updateMyBetDisplay(roundState) {
                     if (['SMALLBLIND', 'BIGBLIND'].includes(action.action)) {
                         myStreetBet += action.amount;
                     } else if (action.action === 'CALL') {
-                        // In PyPokerEngine, CALL amount is the target amount to match?
-                        // Or the amount added?
-                        // Usually 'amount' in CALL is the target. 'paid' is what was added.
-                        // If we don't have 'paid', we have to track previous bet.
-                        // Let's assume we use the logic:
-                        // My bet for the street = max(action.amount) for my actions?
-                        // Yes, for CALL and RAISE, the 'amount' is the total chips in front of player for that street.
-                        // So we just need the LAST 'amount' I committed in this street.
-                        // Exception: SB/BB are forced bets, usually counted towards the street bet.
-
-                        // Let's try: For each street, find the last action I did.
-                        // The 'amount' of that action is my total contribution for that street.
-                        // Wait, SB/BB are separate actions.
-                        // If I SB (5), then CALL (10), my total for street is 10.
-                        // If I RAISE (20), my total is 20.
-                        // So, for each street, find the max 'amount' associated with my CALL/RAISE/SB/BB actions.
                         if (action.amount > myStreetBet) {
                             myStreetBet = action.amount;
                         }
@@ -611,11 +605,11 @@ function updateMyBetDisplay(roundState) {
                     }
                 }
             });
-            myTotalBetInHand += myStreetBet;
+            totalBet += myStreetBet;
         }
     });
 
-    myBetDisplay.textContent = myTotalBetInHand;
+    myBetDisplay.textContent = totalBet;
 }
 
 function updateMyStackDisplay(roundState) {
@@ -628,11 +622,9 @@ function updateMyStackDisplay(roundState) {
 }
 
 async function startNewGame() {
-    // Confirmation handled by modal before calling this
-
     const storedConfig = localStorage.getItem('poker_config');
     if (!storedConfig) {
-        alert('No configuration found. Please start from the home page.');
+        alert(i18n.get('MSG_NO_CONFIG'));
         window.location.href = '/static/index.html';
         return;
     }
@@ -640,11 +632,9 @@ async function startNewGame() {
     try {
         const config = JSON.parse(storedConfig);
 
-        // Disable button to prevent double click
         btnHeaderNewGame.disabled = true;
         btnHeaderNewGame.textContent = '...';
 
-        // Create Game Session
         const response = await fetch('/api/game/new', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -656,7 +646,6 @@ async function startNewGame() {
         const data = await response.json();
         const newSessionId = data.session_id;
 
-        // Redirect to new session
         window.location.href = `/static/game.html?session_id=${newSessionId}`;
 
     } catch (error) {
@@ -670,14 +659,9 @@ async function startNewGame() {
 function parseCommunityCardsFromLog(text) {
     if (!text) return;
 
-    // Strip ANSI codes
     const cleanText = text.replace(/\x1B\[[0-9;]*[mK]/g, '');
-
-    // Split into lines to handle history blobs
     const lines = cleanText.split('\n');
 
-    // Find the LAST line that contains "Community cards:"
-    // This ensures we show the most recent state
     let lastCardLine = null;
     for (let i = lines.length - 1; i >= 0; i--) {
         if (lines[i].includes('Community cards:')) {
@@ -690,26 +674,16 @@ function parseCommunityCardsFromLog(text) {
         const parts = lastCardLine.split('Community cards:');
         if (parts.length > 1) {
             const cardsPart = parts[1].trim();
-            // Split by whitespace to get individual cards
-            // Filter out empty strings and ensure it looks like a card 
-            // Valid card: 2-3 chars (e.g. "Ah", "10s", "K♦")
-            // Avoid parsing "Pot", "->", numbers like "100" as cards unless they look like cards
             const potentialCards = cardsPart.split(/\s+/);
-
-            const validSuits = ['S', 'H', 'D', 'C', '♠', '♥', '♦', '♣'];
-            const validRanks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'T', 'J', 'Q', 'K', 'A'];
 
             const cards = potentialCards.filter(c => {
                 if (c.length < 2 || c.length > 3) return false;
-                // Check if it ends with a valid suit or starts with a valid rank?
-                // Or just simple length check + exclusion of known non-card words
                 if (['Pot', '->'].includes(c)) return false;
-                if (!isNaN(c)) return false; // Exclude pure numbers
+                if (!isNaN(c)) return false;
                 return true;
             });
 
             if (cards.length > 0) {
-                console.log('Parsed community cards from log:', cards);
                 renderCommunityCards(cards);
             }
         }

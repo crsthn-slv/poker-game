@@ -18,17 +18,17 @@
         <div id="game-screen" class="screen active">
             <div class="header-bar">
                 <div class="header-left">
-                    <button id="btn-header-quit" class="btn-header">Quit</button>
+                    <button id="btn-header-quit" class="btn-header" data-i18n="BTN_QUIT">Quit</button>
                 </div>
-                <h2 class="header-title">Console Poker</h2>
+                <h2 class="header-title" data-i18n="GAME_TITLE">Console Poker</h2>
                 <div class="header-right">
-                    <button id="btn-header-new-game" class="btn-header">New Game</button>
+                    <button id="btn-header-new-game" class="btn-header" data-i18n="BTN_NEW_GAME">New Game</button>
                 </div>
             </div>
 
             <div class="game-log" id="terminal-output">
-                <div class="line system">Initializing Poker System...</div>
-                <div class="line system">Waiting for game start...</div>
+                <div class="line system" data-i18n="SYSTEM_INIT">Initializing Poker System...</div>
+                <div class="line system" data-i18n="SYSTEM_WAITING">Waiting for game start...</div>
             </div>
 
             <div id="controls-area" class="controls-area disabled">
@@ -45,35 +45,45 @@
                         </div>
                     </div>
                     <div class="stats-display">
-                        <div>Stack: <span id="my-stack">0</span></div>
-                        <div>Bet: <span id="my-bet">0</span></div>
-                        <div>Pot: <span id="pot-display">0</span></div>
-                        <div id="prob-display" class="hidden">Win: <span id="win-prob">0%</span></div>
+                        <div><span data-i18n="LABEL_STACK">Stack:</span> <span id="my-stack">0</span></div>
+                        <div><span data-i18n="LABEL_BET">Bet:</span> <span id="my-bet">0</span></div>
+                        <div><span data-i18n="LABEL_POT">Pot:</span> <span id="pot-display">0</span></div>
+                        <div id="prob-display" class="hidden"><span data-i18n="LABEL_WIN_PROB">Win:</span> <span
+                                id="win-prob">0%</span></div>
+                        <div id="hand-strength-container" class="hidden"><span data-i18n="LABEL_HAND">Hand:</span> <span
+                                id="hand-strength-display"></span></div>
                     </div>
                 </div>
 
                 <div class="action-buttons">
-                    <button class="action-btn" data-action="fold" id="btn-fold">Fold (F)</button>
-                    <button class="action-btn" data-action="call" id="btn-call">Call (C)</button>
+                    <button class="action-btn" data-action="fold" id="btn-fold" data-i18n="BTN_FOLD">Fold (F)</button>
+                    <button class="action-btn" data-action="call" id="btn-call" data-i18n="BTN_CALL">Call (C)</button>
 
                     <div class="raise-wrapper">
-                        <button class="action-btn" data-action="raise" id="btn-raise">Raise (R)</button>
+                        <button class="action-btn" data-action="raise" id="btn-raise" data-i18n="BTN_RAISE">Raise
+                            (R)</button>
                         <div id="raise-controls" class="raise-popup hidden">
-                            <div class="raise-popup-header">Raise Amount</div>
+                            <div class="raise-popup-header" data-i18n="HEADER_RAISE_AMOUNT">Raise Amount</div>
                             <input type="number" id="raise-amount" value="0">
                             <div class="raise-popup-actions">
-                                <button id="btn-cancel-raise" class="popup-btn cancel">Cancel</button>
-                                <button id="btn-confirm-raise" class="popup-btn confirm">Save</button>
+                                <button id="btn-cancel-raise" class="popup-btn cancel"
+                                    data-i18n="BTN_CANCEL">Cancel</button>
+                                <button id="btn-confirm-raise" class="popup-btn confirm"
+                                    data-i18n="BTN_SAVE">Save</button>
                             </div>
                         </div>
                     </div>
 
-                    <button class="action-btn danger" data-action="allin" id="btn-allin">All In (A)</button>
+                    <button class="action-btn danger" data-action="allin" id="btn-allin" data-i18n="BTN_ALLIN">All In
+                        (A)</button>
                 </div>
 
                 <div id="end-round-controls" class="end-round-controls hidden">
-                    <button id="btn-next-round" class="btn-next-round">Next Round</button>
-                    <button id="btn-quit-game" class="btn-quit-game">Quit</button>
+                    <button id="btn-next-round" class="btn-next-round" data-i18n="BTN_NEXT_ROUND">Next Round</button>
+                    <button id="btn-simulate" class="btn-next-round hidden" data-i18n="BTN_SIMULATE">Simulate</button>
+                    <button id="btn-elim-new-game" class="btn-next-round hidden" data-i18n="BTN_NEW_GAME">New
+                        Game</button>
+                    <button id="btn-quit-game" class="btn-quit-game" data-i18n="BTN_QUIT">Quit</button>
                 </div>
             </div>
         </div>
@@ -85,13 +95,15 @@
             <h3 id="modal-title">Confirm Action</h3>
             <p id="modal-message">Are you sure?</p>
             <div class="modal-actions">
-                <button id="btn-modal-cancel" class="modal-btn cancel">Cancel</button>
-                <button id="btn-modal-confirm" class="modal-btn confirm">Confirm</button>
+                <button id="btn-modal-cancel" class="modal-btn cancel" data-i18n="BTN_CANCEL">Cancel</button>
+                <button id="btn-modal-confirm" class="modal-btn confirm" data-i18n="BTN_CONFIRM">Confirm</button>
             </div>
         </div>
     </div>
 
-    <script src="/static/game.js"></script>
+
+
+    <script type="module" src="/static/game.js"></script>
 </body>
 
 </html>
