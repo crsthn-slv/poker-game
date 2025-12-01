@@ -179,6 +179,19 @@ class WebPlayer(ConsolePlayer):
                 if valid_action['action'] == 'call':
                     amount = valid_action['amount']
                     break
+        
+        # Handle All-in (raise with amount -1)
+        if action == 'raise' and amount == -1:
+            for valid_action in valid_actions:
+                if valid_action['action'] == 'raise':
+                    amount_info = valid_action['amount']
+                    if isinstance(amount_info, dict):
+                        amount = amount_info['max']
+                    else:
+                        # Fallback if amount is not a dict (should be dict for raise)
+                        amount = amount_info
+                    self._print_to_buffer(f"[WEB] All-in detected! Raising to {amount}")
+                    break
             
         return action, amount
 

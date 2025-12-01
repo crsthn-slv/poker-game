@@ -55,7 +55,19 @@
                 <div class="action-buttons">
                     <button class="action-btn" data-action="fold" id="btn-fold">Fold (F)</button>
                     <button class="action-btn" data-action="call" id="btn-call">Call (C)</button>
-                    <button class="action-btn" data-action="raise" id="btn-raise">Raise (R)</button>
+
+                    <div class="raise-wrapper">
+                        <button class="action-btn" data-action="raise" id="btn-raise">Raise (R)</button>
+                        <div id="raise-controls" class="raise-popup hidden">
+                            <div class="raise-popup-header">Raise Amount</div>
+                            <input type="number" id="raise-amount" value="0">
+                            <div class="raise-popup-actions">
+                                <button id="btn-cancel-raise" class="popup-btn cancel">Cancel</button>
+                                <button id="btn-confirm-raise" class="popup-btn confirm">Save</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <button class="action-btn danger" data-action="allin" id="btn-allin">All In (A)</button>
                 </div>
 
@@ -63,16 +75,18 @@
                     <button id="btn-next-round" class="btn-next-round">Next Round</button>
                     <button id="btn-quit-game" class="btn-quit-game">Quit</button>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <div id="raise-controls" class="raise-controls hidden">
-                    <input type="range" id="raise-slider" min="0" max="100" value="0"
-                        style="width: 100%; margin-bottom: 10px;">
-                    <div class="raise-input-group">
-                        <input type="number" id="raise-amount" value="0">
-                        <button id="btn-confirm-raise">Confirm</button>
-                        <button id="btn-cancel-raise">Cancel</button>
-                    </div>
-                </div>
+    <!-- Custom Modal -->
+    <div id="custom-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 id="modal-title">Confirm Action</h3>
+            <p id="modal-message">Are you sure?</p>
+            <div class="modal-actions">
+                <button id="btn-modal-cancel" class="modal-btn cancel">Cancel</button>
+                <button id="btn-modal-confirm" class="modal-btn confirm">Confirm</button>
             </div>
         </div>
     </div>

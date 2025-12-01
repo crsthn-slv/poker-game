@@ -14,7 +14,6 @@ const terminalOutput = document.getElementById('terminal-output');
 const controlsArea = document.getElementById('controls-area');
 const actionButtons = document.querySelectorAll('.action-btn');
 const raiseControls = document.getElementById('raise-controls');
-const raiseSlider = document.getElementById('raise-slider');
 const raiseAmountInput = document.getElementById('raise-amount');
 const myCardsDisplay = document.getElementById('my-cards');
 const myStackDisplay = document.getElementById('my-stack');
@@ -32,6 +31,15 @@ const btnHeaderNewGame = document.getElementById('btn-header-new-game');
 const endRoundControls = document.getElementById('end-round-controls');
 
 const actionButtonsContainer = document.querySelector('.action-buttons');
+
+// Modal Elements
+const customModal = document.getElementById('custom-modal');
+const modalTitle = document.getElementById('modal-title');
+const modalMessage = document.getElementById('modal-message');
+const btnModalCancel = document.getElementById('btn-modal-cancel');
+const btnModalConfirm = document.getElementById('btn-modal-confirm');
+
+let onModalConfirm = null;
 
 // Initialize
 init();
@@ -63,13 +71,17 @@ document.getElementById('btn-allin').addEventListener('click', () => sendAction(
 
 
 
-document.getElementById('btn-allin').addEventListener('click', () => sendAction('raise', -1));
+
 
 btnHeaderQuit.addEventListener('click', () => {
     btnQuitGame.click(); // Reuse the same logic
 });
 
-btnHeaderNewGame.addEventListener('click', startNewGame);
+btnHeaderNewGame.addEventListener('click', () => {
+    showModal('New Game', 'Are you sure you want to start a new game? Current progress will be lost.', () => {
+        startNewGame();
+    });
+});
 
 btnNextRound.addEventListener('click', () => {
     sendAction('next_round', 0);
@@ -78,14 +90,33 @@ btnNextRound.addEventListener('click', () => {
 });
 
 btnQuitGame.addEventListener('click', () => {
-    if (confirm('Are you sure you want to quit? Your history will be saved.')) {
+    showModal('Quit Game', 'Are you sure you want to quit? Your history will be saved.', () => {
         sendAction('quit', 0);
         // Give a small delay for server to process and save, then redirect
         setTimeout(() => {
             window.location.href = '/static/index.html';
         }, 500);
-    }
+    });
 });
+
+// Modal Event Listeners
+btnModalCancel.addEventListener('click', hideModal);
+btnModalConfirm.addEventListener('click', () => {
+    if (onModalConfirm) onModalConfirm();
+    hideModal();
+});
+
+function showModal(title, message, onConfirm) {
+    modalTitle.textContent = title;
+    modalMessage.textContent = message;
+    onModalConfirm = onConfirm;
+    customModal.classList.remove('hidden');
+}
+
+function hideModal() {
+    customModal.classList.add('hidden');
+    onModalConfirm = null;
+}
 
 document.getElementById('btn-raise').addEventListener('click', showRaiseControls);
 document.getElementById('btn-cancel-raise').addEventListener('click', hideRaiseControls);
@@ -95,12 +126,20 @@ document.getElementById('btn-confirm-raise').addEventListener('click', () => {
     hideRaiseControls();
 });
 
-raiseSlider.addEventListener('input', (e) => {
-    raiseAmountInput.value = e.target.value;
+
+
+raiseAmountInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        document.getElementById('btn-confirm-raise').click();
+    }
+    e.stopPropagation(); // Prevent global shortcuts
 });
 
 // Keyboard Shortcuts
 document.addEventListener('keydown', (e) => {
+    // Ignore shortcuts if typing in an input
+    if (document.activeElement.tagName === 'INPUT') return;
+
     // Allow 'n' for next round if visible
     if (e.key.toLowerCase() === 'n' && !endRoundControls.classList.contains('hidden')) {
         btnNextRound.click();
@@ -252,17 +291,15 @@ function handleActionRequired(data) {
         if (btn === btnNextRound) return; // Skip next round button
 
         const action = btn.dataset.action;
-        const isValid = data.valid_actions.some(a => a.action === action);
+        let checkAction = action;
+        if (action === 'allin') checkAction = 'raise';
+
+        const isValid = data.valid_actions.some(a => a.action === checkAction);
         btn.disabled = !isValid;
     });
 
     // Update Stack and Bet
-    if (currentRoundState.seats) {
-        const mySeat = currentRoundState.seats.find(seat => seat.name === myNickname);
-        if (mySeat) {
-            myStackDisplay.textContent = mySeat.stack;
-        }
-    }
+    updateMyStackDisplay(currentRoundState);
 
     updateMyBetDisplay(currentRoundState);
 
@@ -272,9 +309,6 @@ function handleActionRequired(data) {
         const minRaise = raiseAction.amount.min;
         const maxRaise = raiseAction.amount.max;
 
-        raiseSlider.min = minRaise;
-        raiseSlider.max = maxRaise;
-        raiseSlider.value = minRaise;
         raiseAmountInput.value = minRaise;
         raiseAmountInput.min = minRaise;
         raiseAmountInput.max = maxRaise;
@@ -397,6 +431,7 @@ function getCardSymbol(cardStr) {
 
 function showRaiseControls() {
     raiseControls.classList.remove('hidden');
+    raiseAmountInput.focus();
 }
 
 function hideRaiseControls() {
@@ -413,6 +448,7 @@ function handleStreetStart(data) {
             updatePotDisplay(currentRoundState.pot);
         }
         updateMyBetDisplay(currentRoundState);
+        updateMyStackDisplay(currentRoundState);
     }
 }
 
@@ -426,6 +462,7 @@ function handleGameUpdate(data) {
             updatePotDisplay(currentRoundState.pot);
         }
         updateMyBetDisplay(currentRoundState);
+        updateMyStackDisplay(currentRoundState);
     }
 }
 
@@ -581,10 +618,17 @@ function updateMyBetDisplay(roundState) {
     myBetDisplay.textContent = myTotalBetInHand;
 }
 
-async function startNewGame() {
-    if (!confirm('Are you sure you want to start a new game? Current progress will be lost.')) {
-        return;
+function updateMyStackDisplay(roundState) {
+    if (roundState && roundState.seats) {
+        const mySeat = roundState.seats.find(seat => seat.name === myNickname);
+        if (mySeat) {
+            myStackDisplay.textContent = mySeat.stack;
+        }
     }
+}
+
+async function startNewGame() {
+    // Confirmation handled by modal before calling this
 
     const storedConfig = localStorage.getItem('poker_config');
     if (!storedConfig) {
