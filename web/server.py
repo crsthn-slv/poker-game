@@ -131,8 +131,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await session.connect(websocket)
 
     try:
-        # Inicia o jogo em uma thread separada
-        start_game_thread(session)
+        # Check if game is already running
+        if session.game_thread and session.game_thread.is_alive():
+            print(f"[SERVER] Game already running for {session_id}. Reconnecting...")
+            if session.web_player:
+                session.web_player.resend_state()
+        else:
+            # Inicia o jogo em uma thread separada
+            start_game_thread(session)
 
         # Loop de recebimento de mensagens
         while True:

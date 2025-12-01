@@ -18,13 +18,12 @@
         <div id="game-screen" class="screen active">
             <div class="header-bar">
                 <div class="header-left">
-                    <button id="btn-header-quit" class="btn-back"
-                        style="background: none; border: 2px solid var(--danger-color); color: var(--danger-color); padding: 5px 10px; border-radius: 4px; font-family: var(--font-pixel); font-size: 0.6rem; cursor: pointer;">
-                        Quit</button>
-                    <span id="player-info" style="margin-left: 10px;">Player: <span
-                            id="display-nick">Unknown</span></span>
+                    <button id="btn-header-quit" class="btn-header">Quit</button>
                 </div>
-                <span id="game-status" style="color: var(--success-color);">Status: Connected</span>
+                <h2 class="header-title">Console Poker</h2>
+                <div class="header-right">
+                    <button id="btn-header-new-game" class="btn-header">New Game</button>
+                </div>
             </div>
 
             <div class="game-log" id="terminal-output">
@@ -34,13 +33,21 @@
 
             <div id="controls-area" class="controls-area disabled">
                 <div class="hand-info">
-                    <div class="cards-display" id="my-cards">
-                        <!-- Cards will be injected here -->
-                        <div class="card-placeholder">?</div>
-                        <div class="card-placeholder">?</div>
+                    <div class="cards-section">
+                        <div class="cards-display" id="my-cards">
+                            <!-- Cards will be injected here -->
+                            <div class="card-placeholder">?</div>
+                            <div class="card-placeholder">?</div>
+                        </div>
+                        <div class="cards-divider"></div>
+                        <div class="cards-display" id="community-cards">
+                            <!-- Community cards will be injected here -->
+                        </div>
                     </div>
                     <div class="stats-display">
                         <div>Stack: <span id="my-stack">0</span></div>
+                        <div>Bet: <span id="my-bet">0</span></div>
+                        <div>Pot: <span id="pot-display">0</span></div>
                         <div id="prob-display" class="hidden">Win: <span id="win-prob">0%</span></div>
                     </div>
                 </div>

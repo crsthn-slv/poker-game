@@ -892,13 +892,16 @@ class ConsolePlayer(BasePokerPlayer):
     def _sanitize_round_state(self, round_state):
         """
         Cria uma cópia do round_state com todos os UUIDs de seats convertidos para UUIDs fixos.
-        Isso garante consistência no histórico.
+        Isso garante consistência no histórico e no frontend.
         """
         if not round_state or not isinstance(round_state, dict):
             return round_state
             
         sanitized = round_state.copy()
         seats = round_state.get('seats', [])
+        
+        # Mapa de UUID original -> UUID fixo para usar no histórico de ações
+        uuid_map = {}
         
         if seats:
             sanitized_seats = []
@@ -908,10 +911,36 @@ class ConsolePlayer(BasePokerPlayer):
                     fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
                     if fixed_uuid:
                         sanitized_seat['uuid'] = fixed_uuid
+                        # Guarda mapeamento se tiver UUID original
+                        original_uuid = seat.get('uuid')
+                        if original_uuid:
+                            uuid_map[original_uuid] = fixed_uuid
                     sanitized_seats.append(sanitized_seat)
                 else:
                     sanitized_seats.append(seat)
             sanitized['seats'] = sanitized_seats
+            
+        # Sanitiza action_histories também
+        action_histories = round_state.get('action_histories', {})
+        if action_histories:
+            sanitized_histories = {}
+            for street, actions in action_histories.items():
+                if isinstance(actions, list):
+                    sanitized_actions = []
+                    for action in actions:
+                        if isinstance(action, dict):
+                            sanitized_action = action.copy()
+                            action_uuid = action.get('uuid')
+                            # Se temos um mapeamento para este UUID, usa o fixo
+                            if action_uuid and action_uuid in uuid_map:
+                                sanitized_action['uuid'] = uuid_map[action_uuid]
+                            sanitized_actions.append(sanitized_action)
+                        else:
+                            sanitized_actions.append(action)
+                    sanitized_histories[street] = sanitized_actions
+                else:
+                    sanitized_histories[street] = actions
+            sanitized['action_histories'] = sanitized_histories
             
         return sanitized
     

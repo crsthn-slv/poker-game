@@ -31,6 +31,8 @@ async function initializeGame() {
         show_probability: document.getElementById('show-prob').checked
     };
 
+    localStorage.setItem('poker_config', JSON.stringify(config));
+
     try {
         startBtn.disabled = true;
         startBtn.textContent = 'CONNECTING...';

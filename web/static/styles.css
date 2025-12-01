@@ -187,6 +187,45 @@ button {
     box-shadow: var(--shadow-sm);
     margin-bottom: 1rem;
     font-weight: 500;
+    position: relative;
+}
+
+.header-title {
+    margin: 0;
+    font-family: var(--font-pixel);
+    font-size: 1.5rem;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.header-left,
+.header-right {
+    z-index: 1;
+    /* Ensure buttons are clickable above title if overlap */
+}
+
+.btn-header {
+    background: none;
+    border: 2px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-family: var(--font-pixel);
+    font-size: 0.6rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-header:hover {
+    border-color: var(--accent-color);
+    color: var(--text-color);
+}
+
+#btn-header-quit:hover {
+    border-color: var(--danger-color);
+    color: var(--danger-color);
 }
 
 .game-log {
@@ -419,4 +458,23 @@ button {
 
 .btn-quit-game:hover {
     background-color: #b91c1c;
+}
+
+/* New styles for cards layout */
+.cards-section {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.cards-divider {
+    width: 2px;
+    height: 50px;
+    background-color: var(--border-color);
+}
+
+/* Ensure community cards have same style as player cards */
+#community-cards {
+    min-width: 100px;
+    /* Reserve space */
 }

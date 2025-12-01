@@ -39,6 +39,14 @@ class WebPlayer(ConsolePlayer):
             printer=self._print_to_buffer # Injeta nosso método de impressão
         )
         
+        # State tracking for reconnection
+        self.waiting_for_action = False
+        self.last_valid_actions = []
+        self.last_round_state = None
+        self.last_street = None
+        self.last_round_count = 0
+        self.history_log = [] # Store last N lines of output
+        
     def set_game_id(self, game_id: str):
         self.game_id = game_id
 
@@ -111,6 +119,12 @@ class WebPlayer(ConsolePlayer):
         text = sep.join(map(str, args)) + end
         self.output_buffer.write(text)
         
+        # Store in history log (keep last 100 lines)
+        if text.strip():
+            self.history_log.append(text)
+            if len(self.history_log) > 100:
+                self.history_log.pop(0)
+        
         # Only send if newline is present or flush is requested
         if '\n' in text or flush:
             self._capture_and_send_output()
@@ -131,8 +145,8 @@ class WebPlayer(ConsolePlayer):
         sanitized_round_state = self._sanitize_round_state(round_state) if round_state else {}
         
         # Envia dados extras para a UI (cartas do jogador) se disponíveis
-        if hasattr(self, 'my_hole_cards') and self.my_hole_cards:
-             self._send_update("round_start_data", {"hole_cards": self.my_hole_cards})
+        # if hasattr(self, 'my_hole_cards') and self.my_hole_cards:
+        #      self._send_update("round_start_data", {"hole_cards": self.my_hole_cards})
 
         action_request = {
             "valid_actions": valid_actions,
@@ -140,12 +154,20 @@ class WebPlayer(ConsolePlayer):
             "round_state": sanitized_round_state,
             "win_probability": win_prob
         }
+        
+        # Cache state for reconnection
+        self.waiting_for_action = True
+        self.last_valid_actions = valid_actions
+        self.last_round_state = round_state
+        
         self._send_update("action_required", action_request)
         
         # 2. Aguarda resposta da fila (bloqueante na thread do jogo, não no servidor)
         # O servidor roda o jogo em thread separada, então isso é seguro
         self._print_to_buffer(f"[WEB] Waiting for user action...")
         action, amount = self.input_queue.get()
+        
+        self.waiting_for_action = False
         
         # 3. Imprime a ação escolhida para ficar no histórico do terminal
         self._print_to_buffer(f">> {action} {amount if amount > 0 and action != 'fold' else ''}")
@@ -164,12 +186,62 @@ class WebPlayer(ConsolePlayer):
     # A lógica de display é mantida pelo ConsolePlayer (que usa self.printer)
     def receive_round_result_message(self, winners, hand_info, round_state):
         super().receive_round_result_message(winners, hand_info, round_state)
+        # Envia update final para garantir que o UI mostre tudo
+        sanitized_round_state = self._sanitize_round_state(round_state)
+        self._send_update("round_result_data", {"winners": winners, "round_state": sanitized_round_state})
+
+    def receive_round_start_message(self, round_count, hole_card, seats):
+        super().receive_round_start_message(round_count, hole_card, seats)
+        # Envia dados do início do round
+        self._send_update("round_start_data", {
+            "hole_cards": self.my_hole_cards,
+            "round_count": round_count
+        })
+        self.last_round_count = round_count
+        self.last_street = 'preflop'
+
+    def receive_street_start_message(self, street, round_state):
+        super().receive_street_start_message(street, round_state)
+        # Envia dados da nova street (com cartas comunitárias)
+        sanitized_round_state = self._sanitize_round_state(round_state)
+        self._send_update("street_start", {
+            "street": street, 
+            "round_state": sanitized_round_state
+        })
+        self.last_street = street
+        self.last_round_state = round_state
+
+    def receive_game_update_message(self, new_action, round_state):
+        super().receive_game_update_message(new_action, round_state)
+        # Envia atualização do jogo (pot, ações)
+        sanitized_round_state = self._sanitize_round_state(round_state)
+        self._send_update("game_update", {
+            "action": new_action, 
+            "round_state": sanitized_round_state
+        })
+        self.last_round_state = round_state
 
     def wait_for_continue(self):
         """
         Aguarda sinal do frontend para continuar para o próximo round.
         Substitui o input() bloqueante do ConsolePlayer.
         """
+        # Verifica se o jogador foi eliminado (stack == 0)
+        # Se sim, avança automaticamente após breve delay
+        my_stack = 0
+        if self.last_round_state and hasattr(self, 'uuid') and self.uuid:
+            seats = self.last_round_state.get('seats', [])
+            for seat in seats:
+                if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                    my_stack = seat.get('stack', 0)
+                    break
+        
+        if my_stack == 0:
+            self._print_to_buffer("\n[WEB] You are eliminated. Auto-advancing to next round...")
+            import time
+            time.sleep(2) # Pequeno delay para ver o resultado
+            return # Retorna sem esperar input
+            
         # 1. Envia sinal de fim de round e solicita confirmação
         self._send_update("round_result_data", {})
         self._send_update("wait_for_next_round", {})
@@ -190,3 +262,58 @@ class WebPlayer(ConsolePlayer):
             if type(e).__name__ == 'QuitGameException':
                 raise e
             print(f"[WEB PLAYER ERROR] Error waiting for next round: {e}")
+
+    def resend_state(self):
+        """Resends the current game state to the frontend (for reconnection)."""
+        self._print_to_buffer(f"[WEB] Resending state to reconnected client...")
+        
+        # 1. Send Round Start Data (cards)
+        if hasattr(self, 'my_hole_cards') and self.my_hole_cards:
+            self._send_update("round_start_data", {
+                "hole_cards": self.my_hole_cards,
+                "round_count": self.last_round_count
+            })
+            
+        # 2. Send latest street info (community cards)
+        if self.last_round_state:
+            sanitized_round_state = self._sanitize_round_state(self.last_round_state)
+            
+            # Send street start to ensure community cards are rendered
+            if self.last_street:
+                self._send_update("street_start", {
+                    "street": self.last_street,
+                    "round_state": sanitized_round_state
+                })
+                
+            # Send latest game update to ensure pot/bets are correct
+            self._send_update("game_update", {
+                "action": {}, # No specific action, just state update
+                "round_state": sanitized_round_state
+            })
+
+        # 3. If we were waiting for action, resend the request
+        if self.waiting_for_action and self.last_valid_actions:
+            # Re-calculate win prob if needed, or use cached
+            win_prob = None
+            if self.show_win_probability and hasattr(self, 'win_probability_cache') and self.last_cache_key:
+                 if self.last_cache_key in self.win_probability_cache:
+                     win_prob = self.win_probability_cache[self.last_cache_key].get('prob_pct')
+
+            sanitized_round_state = self._sanitize_round_state(self.last_round_state) if self.last_round_state else {}
+            
+            action_request = {
+                "valid_actions": self.last_valid_actions,
+                "hole_cards": self.my_hole_cards if hasattr(self, 'my_hole_cards') else [],
+                "round_state": sanitized_round_state,
+                "win_probability": win_prob
+            }
+            self._send_update("action_required", action_request)
+            
+        # 4. Resend terminal output history
+        self._send_update("terminal_output", "\n[SYSTEM] Restoring chat history...\n")
+        if self.history_log:
+            full_history = "".join(self.history_log)
+            self._send_update("terminal_output", full_history)
+            
+        self._send_update("terminal_output", "\n[SYSTEM] Reconnected to game session.\n")
+
