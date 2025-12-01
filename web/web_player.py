@@ -46,6 +46,8 @@ class WebPlayer(ConsolePlayer):
         self.last_street = None
         self.last_round_count = 0
         self.history_log = [] # Store last N lines of output
+        self.auto_advance = False
+
         
     def set_game_id(self, game_id: str):
         self.game_id = game_id
@@ -299,8 +301,8 @@ class WebPlayer(ConsolePlayer):
                         is_eliminated = True
                     break
         
-        # If eliminated, suppress hole cards
-        if is_eliminated:
+        # If eliminated or simulating, suppress hole cards
+        if is_eliminated or self.auto_advance:
             hole_card = [] 
 
         super().receive_round_start_message(round_count, hole_card, seats)

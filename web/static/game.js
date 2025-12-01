@@ -252,8 +252,11 @@ function handleGameMessage(type, data) {
             break;
 
         case 'round_result_data':
-            controlsArea.classList.add('disabled');
-            hideRaiseControls();
+            // Only disable controls if we are NOT in the elimination/end-round state
+            if (endRoundControls.classList.contains('hidden')) {
+                controlsArea.classList.add('disabled');
+                hideRaiseControls();
+            }
             break;
 
         case 'wait_for_next_round':
@@ -261,7 +264,7 @@ function handleGameMessage(type, data) {
             break;
 
         case 'game_over':
-            controlsArea.classList.add('disabled');
+            handleGameOver(data);
             break;
 
         case 'notification':
@@ -276,6 +279,31 @@ function handleGameMessage(type, data) {
             handlePlayerEliminated(data);
             break;
     }
+}
+
+function handleGameOver(data) {
+    controlsArea.classList.remove('disabled'); // Enable controls so buttons can be clicked
+    actionButtonsContainer.classList.add('hidden'); // Hide fold/call/raise
+    endRoundControls.classList.remove('hidden'); // Show end round controls
+    endRoundControls.style.display = 'flex';
+
+    // Hide Next Round and Simulate
+    btnNextRound.classList.add('hidden');
+    btnNextRound.style.display = 'none';
+    if (btnElimSimulate) {
+        btnElimSimulate.classList.add('hidden');
+        btnElimSimulate.style.display = 'none';
+    }
+
+    // Show New Game and Quit
+    if (btnElimNewGame) {
+        btnElimNewGame.classList.remove('hidden');
+        btnElimNewGame.style.display = 'inline-block';
+    }
+    btnQuitGame.classList.remove('hidden');
+    btnQuitGame.style.display = 'inline-block';
+
+    logToTerminal(i18n.get('MSG_GAME_OVER') || 'Game Over', 'system');
 }
 
 function handlePlayerEliminated(data) {
@@ -304,6 +332,10 @@ function handlePlayerEliminated(data) {
 
     // Log elimination to terminal
     logToTerminal(i18n.get('MODAL_ELIMINATED_MSG') || 'You have been eliminated.', 'error');
+
+    // Clear player cards and stack
+    renderCards([]);
+    if (myStackDisplay) myStackDisplay.textContent = '0';
 }
 
 function handleWaitForNextRound() {
