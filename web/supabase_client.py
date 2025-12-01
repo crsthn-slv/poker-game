@@ -248,6 +248,34 @@ class SupabaseClient:
         finally:
             cursor.close()
 
+    def get_translations(self, lang_code: str) -> Dict[str, str]:
+        """
+        Obtém todas as traduções para um idioma específico.
+        
+        Args:
+            lang_code: Código do idioma (ex: 'pt-br')
+            
+        Returns:
+            Dict {key: content}
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT key, content 
+                FROM localizations 
+                WHERE lang_code = %s
+            """, (lang_code,))
+            
+            rows = cursor.fetchall()
+            return {row[0]: row[1] for row in rows}
+        except Exception as e:
+            print(f"[SUPABASE] Error fetching translations: {e}")
+            return {}
+        finally:
+            cursor.close()
+
 
 # Instância global (singleton pattern)
 _supabase_client = None

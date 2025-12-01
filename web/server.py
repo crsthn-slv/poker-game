@@ -10,12 +10,17 @@ import asyncio
 import threading
 import json
 from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Adiciona diretório raiz ao path para importar módulos do jogo
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -109,6 +114,46 @@ app.add_middleware(
 
 # Serve arquivos estáticos (frontend)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
+
+@app.get("/translations.json")
+async def get_translations():
+    if os.path.exists("translations.json"):
+        return FileResponse("translations.json")
+    return {"error": "File not found"}
+
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
+
+@app.get("/api/config")
+async def get_config():
+    return {
+        "supabase_url": os.getenv("SUPABASE_URL"),
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY")
+    }
+
+@app.get("/api/translations/{lang_code}")
+async def get_translations_api(lang_code: str):
+    """Retorna traduções do Supabase via backend."""
+    client = get_supabase_client()
+    translations = client.get_translations(lang_code)
+    
+    if not translations:
+        # Fallback to local file if DB fails or empty
+        if os.path.exists("translations.json"):
+            try:
+                with open("translations.json", "r") as f:
+                    data = json.load(f)
+                    # Convert {KEY: {lang: val}} to {KEY: val}
+                    local_trans = {}
+                    for key, langs in data.items():
+                        if lang_code in langs:
+                            local_trans[key] = langs[lang_code]
+                    return local_trans
+            except:
+                pass
+                
+    return translations
 
 @app.post("/api/game/new")
 async def create_game(config: GameConfig):
