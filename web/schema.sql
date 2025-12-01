@@ -1,53 +1,50 @@
--- Schema para o Poker Game Web
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Tabela de Jogadores
+-- Players table
 CREATE TABLE IF NOT EXISTS players (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  nickname VARCHAR(50) UNIQUE NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    nickname TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Tabela de Jogos
+-- Games table
 CREATE TABLE IF NOT EXISTS games (
-  id UUID PRIMARY KEY,
-  player_id UUID REFERENCES players(id),
-  timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-  initial_stack INTEGER NOT NULL,
-  small_blind INTEGER NOT NULL,
-  big_blind INTEGER NOT NULL,
-  num_players INTEGER NOT NULL,
-  total_rounds INTEGER NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id TEXT PRIMARY KEY, -- Using TEXT because it's a UUIDv5 string from python
+    player_id UUID REFERENCES players(id),
+    timestamp TIMESTAMP WITH TIME ZONE,
+    initial_stack INTEGER,
+    small_blind INTEGER,
+    big_blind INTEGER,
+    num_players INTEGER,
+    total_rounds INTEGER
 );
 
--- Tabela de Rounds
+-- Rounds table
 CREATE TABLE IF NOT EXISTS rounds (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  game_id UUID REFERENCES games(id) ON DELETE CASCADE,
-  round_number INTEGER NOT NULL,
-  button_position INTEGER NOT NULL,
-  result JSONB NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    game_id TEXT REFERENCES games(id),
+    round_number INTEGER,
+    button_position INTEGER,
+    result JSONB
 );
 
--- Tabela de Ações (Actions)
+-- Actions table
 CREATE TABLE IF NOT EXISTS actions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  round_id UUID REFERENCES rounds(id) ON DELETE CASCADE,
-  street VARCHAR(10) NOT NULL,
-  player_uuid UUID NOT NULL,
-  action VARCHAR(20) NOT NULL,
-  amount INTEGER NOT NULL,
-  pot_before INTEGER NOT NULL,
-  stack_before INTEGER NOT NULL,
-  sequence_number INTEGER NOT NULL,
-  metadata JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    round_id UUID REFERENCES rounds(id),
+    street TEXT,
+    player_uuid TEXT, -- Can be bot UUID or player UUID
+    action TEXT,
+    amount INTEGER,
+    pot_before INTEGER,
+    stack_before INTEGER,
+    sequence_number INTEGER,
+    metadata JSONB
 );
 
--- Índices para performance
+-- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_games_player_id ON games(player_id);
 CREATE INDEX IF NOT EXISTS idx_rounds_game_id ON rounds(game_id);
 CREATE INDEX IF NOT EXISTS idx_actions_round_id ON actions(round_id);
-CREATE INDEX IF NOT EXISTS idx_players_nickname ON players(nickname);

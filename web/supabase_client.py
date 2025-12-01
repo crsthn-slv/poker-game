@@ -77,7 +77,7 @@ class SupabaseClient:
         finally:
             cursor.close()
     
-    def save_game_history(self, history: Dict[str, Any], nickname: str) -> bool:
+    def save_game_history(self, history: Dict[str, Any], nickname: str) -> tuple[bool, str]:
         """
         Salva histórico de jogo em formato otimizado.
         
@@ -86,7 +86,7 @@ class SupabaseClient:
             nickname: Nickname do jogador
             
         Returns:
-            True se salvou com sucesso
+            Tuple (success, error_message)
         """
         conn = self.connect()
         cursor = conn.cursor()
@@ -130,12 +130,13 @@ class SupabaseClient:
                     self._save_actions(cursor, round_id, street_data)
             
             conn.commit()
-            return True
+            return True, ""
             
         except Exception as e:
             conn.rollback()
-            print(f"[SUPABASE] Error saving game history: {e}")
-            return False
+            error_msg = str(e)
+            print(f"[SUPABASE] Error saving game history: {error_msg}")
+            return False, error_msg
         finally:
             cursor.close()
     

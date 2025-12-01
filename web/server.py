@@ -222,11 +222,11 @@ def run_poker_game(session: GameSession):
             # O ConsolePlayer/WebPlayer mantém o histórico em self.game_history (instância de GameHistory)
             # Precisamos acessar o dict interno
             history_data = web_player.game_history.history
-            success = supabase.save_game_history(history_data, session.config.nickname)
+            success, error_msg = supabase.save_game_history(history_data, session.config.nickname)
             if success:
                 session.send_update("notification", "Game history saved to Supabase!")
             else:
-                session.send_update("error", "Failed to save game history.")
+                session.send_update("error", f"Failed to save game history: {error_msg}")
                 
     except Exception as e:
         print(f"[GAME] Error in game loop: {e}")
