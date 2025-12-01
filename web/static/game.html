@@ -45,13 +45,11 @@
                         </div>
                     </div>
                     <div class="stats-display">
-                        <div class="stats-display">
-                            <div><span data-i18n="LABEL_STACK">Stack:</span> <span id="my-stack">0</span></div>
-                            <div><span data-i18n="LABEL_BET">Bet:</span> <span id="my-bet">0</span></div>
-                            <div><span data-i18n="LABEL_POT">Pot:</span> <span id="pot-display">0</span></div>
-                            <div id="prob-display" class="hidden"><span data-i18n="LABEL_WIN_PROB">Win:</span> <span
-                                    id="win-prob">0%</span></div>
-                        </div>
+                        <div><span data-i18n="LABEL_STACK">Stack:</span> <span id="my-stack">0</span></div>
+                        <div><span data-i18n="LABEL_BET">Bet:</span> <span id="my-bet">0</span></div>
+                        <div><span data-i18n="LABEL_POT">Pot:</span> <span id="pot-display">0</span></div>
+                        <div id="prob-display" class="hidden"><span data-i18n="LABEL_WIN_PROB">Win:</span> <span
+                                id="win-prob">0%</span></div>
                     </div>
                 </div>
 
@@ -79,11 +77,11 @@
                 </div>
 
                 <div id="end-round-controls" class="end-round-controls hidden">
-                    <div id="end-round-controls" class="end-round-controls hidden">
-                        <button id="btn-next-round" class="btn-next-round" data-i18n="BTN_NEXT_ROUND">Next
-                            Round</button>
-                        <button id="btn-quit-game" class="btn-quit-game" data-i18n="BTN_QUIT">Quit</button>
-                    </div>
+                    <button id="btn-next-round" class="btn-next-round" data-i18n="BTN_NEXT_ROUND">Next Round</button>
+                    <button id="btn-simulate" class="btn-next-round hidden" data-i18n="BTN_SIMULATE">Simulate</button>
+                    <button id="btn-elim-new-game" class="btn-next-round hidden" data-i18n="BTN_NEW_GAME">New
+                        Game</button>
+                    <button id="btn-quit-game" class="btn-quit-game" data-i18n="BTN_QUIT">Quit</button>
                 </div>
             </div>
         </div>
@@ -100,6 +98,8 @@
             </div>
         </div>
     </div>
+
+
 
     <script type="module" src="/static/game.js"></script>
 </body>

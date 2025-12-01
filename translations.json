@@ -1,0 +1,162 @@
+{
+    "GAME_TITLE": {
+        "en": "Poker Game",
+        "pt-br": "Poker Game"
+    },
+    "LABEL_NICKNAME": {
+        "en": "Nickname",
+        "pt-br": "Apelido"
+    },
+    "PLACEHOLDER_NICKNAME": {
+        "en": "Enter your nickname",
+        "pt-br": "Digite seu apelido"
+    },
+    "LABEL_INITIAL_STACK": {
+        "en": "Initial Stack",
+        "pt-br": "Stack Inicial"
+    },
+    "LABEL_OPPONENTS": {
+        "en": "Opponents (Bots)",
+        "pt-br": "Oponentes (Bots)"
+    },
+    "LABEL_SHOW_PROB": {
+        "en": "Show Win Probability",
+        "pt-br": "Mostrar Probabilidade de Vitória"
+    },
+    "BTN_START_GAME": {
+        "en": "Start Game",
+        "pt-br": "Iniciar Jogo"
+    },
+    "BTN_QUIT": {
+        "en": "Quit",
+        "pt-br": "Sair"
+    },
+    "BTN_NEW_GAME": {
+        "en": "New Game",
+        "pt-br": "Novo Jogo"
+    },
+    "BTN_FOLD": {
+        "en": "Fold (F)",
+        "pt-br": "Correr (F)"
+    },
+    "BTN_CALL": {
+        "en": "Call (C)",
+        "pt-br": "Pagar (C)"
+    },
+    "BTN_CHECK": {
+        "en": "Check (C)",
+        "pt-br": "Mesa (C)"
+    },
+    "BTN_RAISE": {
+        "en": "Raise (R)",
+        "pt-br": "Aumentar (R)"
+    },
+    "BTN_ALLIN": {
+        "en": "All In (A)",
+        "pt-br": "All In (A)"
+    },
+    "BTN_NEXT_ROUND": {
+        "en": "Next Round",
+        "pt-br": "Próxima Rodada"
+    },
+    "BTN_CONFIRM": {
+        "en": "Confirm",
+        "pt-br": "Confirmar"
+    },
+    "BTN_CANCEL": {
+        "en": "Cancel",
+        "pt-br": "Cancelar"
+    },
+    "BTN_SAVE": {
+        "en": "Save",
+        "pt-br": "Salvar"
+    },
+    "HEADER_RAISE_AMOUNT": {
+        "en": "Raise Amount",
+        "pt-br": "Valor do Aumento"
+    },
+    "MODAL_NEW_GAME_TITLE": {
+        "en": "New Game",
+        "pt-br": "Novo Jogo"
+    },
+    "MODAL_NEW_GAME_MSG": {
+        "en": "Are you sure you want to start a new game? Current progress will be lost.",
+        "pt-br": "Tem certeza que deseja iniciar um novo jogo? O progresso atual será perdido."
+    },
+    "MODAL_QUIT_TITLE": {
+        "en": "Quit Game",
+        "pt-br": "Sair do Jogo"
+    },
+    "MODAL_QUIT_MSG": {
+        "en": "Are you sure you want to quit? Your history will be saved.",
+        "pt-br": "Tem certeza que deseja sair? Seu histórico será salvo."
+    },
+    "MSG_NO_SESSION": {
+        "en": "No session ID found. Redirecting to home.",
+        "pt-br": "Nenhum ID de sessão encontrado. Redirecionando para o início."
+    },
+    "MSG_NO_CONFIG": {
+        "en": "No configuration found. Please start from the home page.",
+        "pt-br": "Nenhuma configuração encontrada. Por favor, inicie da página inicial."
+    },
+    "MSG_CONN_LOST": {
+        "en": "Connection lost.",
+        "pt-br": "Conexão perdida."
+    },
+    "MSG_CONN_ERROR": {
+        "en": "Connection error.",
+        "pt-br": "Erro de conexão."
+    },
+    "MSG_CONNECTED": {
+        "en": "Connected to game server.",
+        "pt-br": "Conectado ao servidor do jogo."
+    },
+    "LABEL_STACK": {
+        "en": "Stack:",
+        "pt-br": "Fichas:"
+    },
+    "LABEL_BET": {
+        "en": "Bet:",
+        "pt-br": "Aposta:"
+    },
+    "LABEL_POT": {
+        "en": "Pot:",
+        "pt-br": "Pote:"
+    },
+    "LABEL_WIN_PROB": {
+        "en": "Win:",
+        "pt-br": "Vitória:"
+    },
+    "SYSTEM_INIT": {
+        "en": "Initializing Poker System...",
+        "pt-br": "Inicializando Sistema de Poker..."
+    },
+    "SYSTEM_WAITING": {
+        "en": "Waiting for game start...",
+        "pt-br": "Aguardando início do jogo..."
+    },
+    "MODAL_ELIMINATED_TITLE": {
+        "en": "Eliminated",
+        "pt-br": "Eliminado"
+    },
+    "MODAL_ELIMINATED_MSG": {
+        "en": "You have lost all your chips.",
+        "pt-br": "Você perdeu todas as suas fichas."
+    },
+    "BTN_SIMULATE": {
+        "en": "Simulate Rest",
+        "pt-br": "Simular Restante"
+    },
+    "LABEL_WINNER": {
+        "en": "Winner:",
+        "pt-br": "Vencedor:"
+    },
+    "LABEL_HAND": {
+        "en": "Hand:",
+        "pt-br": "Mão:"
+    },
+    "LABEL_WIN_AMOUNT": {
+        "en": "Pot:",
+        "pt-br": "Pote:"
+    }
+}

@@ -59,6 +59,8 @@ class WebPlayer(ConsolePlayer):
         Define UUID fixo baseado no nome do jogador.
         Sobrescreve o método do ConsolePlayer para usar o nome dinâmico.
         """
+        self.pypoker_uuid = uuid
+        
         from utils.uuid_utils import get_player_uuid
         # Usa o nome definido ou "You" como fallback
         name_to_use = self._player_name or "You"
@@ -118,6 +120,7 @@ class WebPlayer(ConsolePlayer):
         
         text = sep.join(map(str, args)) + end
         self.output_buffer.write(text)
+
         
         # Store in history log (keep last 100 lines)
         if text.strip():
@@ -128,6 +131,8 @@ class WebPlayer(ConsolePlayer):
         # Only send if newline is present or flush is requested
         if '\n' in text or flush:
             self._capture_and_send_output()
+
+
 
     def _ConsolePlayer__receive_action_from_console(self, valid_actions, round_state=None, cached_player_stack=None) -> Tuple[str, int]:
         """
@@ -198,16 +203,113 @@ class WebPlayer(ConsolePlayer):
     # Sobrescrevemos receive_round_result_message APENAS para garantir que o super seja chamado
     # A lógica de display é mantida pelo ConsolePlayer (que usa self.printer)
     def receive_round_result_message(self, winners, hand_info, round_state):
+        # Calcula o pote total (main + side)
+        total_pot = 0
+        if round_state and 'pot' in round_state:
+            pot_data = round_state['pot']
+            if 'main' in pot_data:
+                total_pot += pot_data['main'].get('amount', 0)
+            if 'side' in pot_data:
+                for side_pot in pot_data['side']:
+                    total_pot += side_pot.get('amount', 0)
+
+        # Armazena resultado para enviar em caso de eliminação
+        # IMPORTANTE: Deve ser feito ANTES de chamar super(), pois super() chama wait_for_continue()
+        # que usa self.last_round_result se o jogador for eliminado.
+        
+        # Enriquece hand_info com força da mão e garante consistência
+        enriched_hand_info = []
+        community_cards = self._get_community_cards_from_state(round_state)
+        
+        # Usa lógica do ConsolePlayer para processar hand_info e garantir UUIDs fixos e cartas
+        seats = round_state.get('seats', [])
+        hand_info_dict = self._process_hand_info(hand_info, seats)
+        
+        # Garante que todos os vencedores tenham hand_info
+        winner_uuids, _ = self._process_winners(winners, seats)
+        
+        # Se winners for lista de dicts, extrai UUIDs originais para mapeamento
+        original_winner_uuids = []
+        if winners:
+            for w in winners:
+                if isinstance(w, dict):
+                    original_winner_uuids.append(w.get('uuid'))
+                else:
+                    original_winner_uuids.append(w)
+
+        # Reconstrói lista de hand_info enriquecida
+        # Se hand_info original estava vazio (ex: fold geral), tenta reconstruir com dados do registry
+        if not hand_info_dict and winner_uuids:
+             from utils.cards_registry import get_all_cards
+             all_cards = get_all_cards()
+             for uuid in winner_uuids:
+                 if uuid in all_cards:
+                     hand_info_dict[uuid] = {
+                         'uuid': uuid,
+                         'hole_card': all_cards[uuid]
+                     }
+
+        for uuid, info in hand_info_dict.items():
+            # Calcula força da mão se não existir
+            hole_cards = info.get('hole_card') or info.get('hole_cards') or info.get('hand', {}).get('hole_card')
+            if hole_cards:
+                # Normaliza cartas
+                from utils.hand_utils import normalize_hole_cards
+                normalized_cards = normalize_hole_cards(hole_cards)
+                
+                # Calcula força
+                strength = self.formatter.get_hand_strength_heuristic(normalized_cards, community_cards, round_state.get('street', 'river'))
+                
+                # Atualiza info
+                if 'hand' not in info:
+                    info['hand'] = {}
+                info['hand']['strength'] = strength
+                info['hand']['hole_card'] = normalized_cards
+                
+                # Adiciona ao resultado
+                enriched_hand_info.append(info)
+        
+        # Se enriched_hand_info ainda estiver vazio, tenta usar o original
+        if not enriched_hand_info:
+            enriched_hand_info = hand_info
+
+        self.last_round_result = {
+            "winners": winners,
+            "hand_info": enriched_hand_info,
+            "pot_amount": total_pot,
+            "round_state": self._sanitize_round_state(round_state)
+        }
+
+        # Update last_round_state BEFORE calling super, as super might call wait_for_continue
+        self.last_round_state = round_state
+
         super().receive_round_result_message(winners, hand_info, round_state)
+        
         # Envia update final para garantir que o UI mostre tudo
         sanitized_round_state = self._sanitize_round_state(round_state)
         self._send_update("round_result_data", {"winners": winners, "round_state": sanitized_round_state})
 
     def receive_round_start_message(self, round_count, hole_card, seats):
+        # Check if I am eliminated (stack is 0)
+        is_eliminated = False
+        if seats and hasattr(self, 'uuid') and self.uuid:
+            for seat in seats:
+                if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                    if seat.get('stack', 0) == 0:
+                        is_eliminated = True
+                    break
+        
+        # If eliminated, suppress hole cards
+        if is_eliminated:
+            hole_card = [] 
+
         super().receive_round_start_message(round_count, hole_card, seats)
+        
         # Envia dados do início do round
+        cards_to_send = self.my_hole_cards if self.my_hole_cards else []
+        
         self._send_update("round_start_data", {
-            "hole_cards": self.my_hole_cards,
+            "hole_cards": cards_to_send,
             "round_count": round_count
         })
         self.last_round_count = round_count
@@ -239,21 +341,89 @@ class WebPlayer(ConsolePlayer):
         Aguarda sinal do frontend para continuar para o próximo round.
         Substitui o input() bloqueante do ConsolePlayer.
         """
+        # Verifica se estamos em modo de simulação automática
+        if hasattr(self, 'auto_advance') and self.auto_advance:
+            import time
+            time.sleep(1) # Delay menor para simulação rápida
+            return
+
         # Verifica se o jogador foi eliminado (stack == 0)
         # Se sim, avança automaticamente após breve delay
-        my_stack = 0
-        if self.last_round_state and hasattr(self, 'uuid') and self.uuid:
-            seats = self.last_round_state.get('seats', [])
-            for seat in seats:
-                if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
-                    my_stack = seat.get('stack', 0)
-                    break
+        my_stack = None # Default to None, not 0
+        found_by = None
         
-        if my_stack == 0:
-            self._print_to_buffer("\n[WEB] You are eliminated. Auto-advancing to next round...")
-            import time
-            time.sleep(2) # Pequeno delay para ver o resultado
-            return # Retorna sem esperar input
+        if self.last_round_state:
+            seats = self.last_round_state.get('seats', [])
+            
+            # 1. Try by pypoker_uuid (most reliable)
+            if hasattr(self, 'pypoker_uuid') and self.pypoker_uuid:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == self.pypoker_uuid:
+                        my_stack = seat.get('stack', 0)
+                        found_by = 'pypoker_uuid'
+                        break
+
+            # 2. Try by fixed UUID
+            if my_stack is None and hasattr(self, 'uuid') and self.uuid:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == self.uuid:
+                        my_stack = seat.get('stack', 0)
+                        found_by = 'uuid'
+                        break
+            
+            # 3. Fallback to name
+            player_name = getattr(self, 'name', None) or getattr(self, '_player_name', None)
+            if my_stack is None and player_name:
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('name') == player_name:
+                        my_stack = seat.get('stack', 0)
+                        found_by = 'name'
+                        break
+
+        # Only eliminate if stack is explicitly 0 (found and empty)
+        if my_stack is not None and my_stack == 0:
+            # Check if I am a winner in the last round (if so, I have chips even if stack says 0 currently)
+            am_i_winner = False
+            if hasattr(self, 'last_round_result') and self.last_round_result:
+                winners = self.last_round_result.get('winners', [])
+                for w in winners:
+                    w_uuid = w.get('uuid') if isinstance(w, dict) else w
+                    # Check against both UUID and Name
+                    if (hasattr(self, 'uuid') and w_uuid == self.uuid) or \
+                       (hasattr(self, 'name') and isinstance(w, dict) and w.get('name') == self.name):
+                        am_i_winner = True
+                        break
+            
+            if not am_i_winner:
+                self._print_to_buffer("\n[WEB] You are eliminated.")
+                
+                # Prepara dados do resultado para enviar
+                elimination_data = {}
+                if hasattr(self, 'last_round_result'):
+                    elimination_data = self.last_round_result
+
+                # Envia evento de eliminação para o frontend mostrar UI apropriada
+                self._send_update("player_eliminated", elimination_data)
+                
+                # Aguarda ação do usuário (Quit, New Game, Simulate)
+                try:
+                    while True:
+                        action, _ = self.input_queue.get()
+                        
+                        if action == 'quit':
+                            from players.console_player import QuitGameException
+                            raise QuitGameException()
+                        
+                        elif action == 'simulate':
+                            self._print_to_buffer("[WEB] Simulating remaining game...")
+                            self.auto_advance = True
+                            return # Retorna para deixar o jogo continuar
+                            
+                except Exception as e:
+                    if type(e).__name__ == 'QuitGameException':
+                        raise e
+                    print(f"[WEB PLAYER ERROR] Error waiting after elimination: {e}")
+                return
             
         # 1. Envia sinal de fim de round e solicita confirmação
         self._send_update("round_result_data", {})
@@ -329,4 +499,10 @@ class WebPlayer(ConsolePlayer):
             self._send_update("terminal_output", full_history)
             
         self._send_update("terminal_output", "\n[SYSTEM] Reconnected to game session.\n")
+
+    def _get_community_cards_from_state(self, round_state):
+        """Helper to extract community cards safely."""
+        if not round_state:
+            return []
+        return round_state.get('community_card', [])
 

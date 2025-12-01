@@ -16,38 +16,68 @@
     <div class="container">
         <!-- Login / Config Screen -->
         <div id="login-screen" class="screen active">
-            <h1>Console Poker</h1>
+            <h1 data-i18n="GAME_TITLE">Console Poker</h1>
 
             <div class="card">
                 <div class="form-group">
-                    <label for="nickname">Nickname</label>
-                    <input type="text" id="nickname" placeholder="Enter your nickname" maxlength="12">
+                    <label for="nickname" data-i18n="LABEL_NICKNAME">Nickname</label>
+                    <input type="text" id="nickname" data-i18n="PLACEHOLDER_NICKNAME" placeholder="Enter your nickname"
+                        maxlength="12">
                 </div>
 
                 <div class="config-section">
 
                     <div class="form-group">
-                        <label for="initial-stack">Initial Stack</label>
+                        <label for="initial-stack" data-i18n="LABEL_INITIAL_STACK">Initial Stack</label>
                         <input type="number" id="initial-stack" value="1000" min="100" max="10000">
                     </div>
 
                     <div class="form-group">
-                        <label for="num-bots">Opponents (Bots)</label>
+                        <label for="num-bots" data-i18n="LABEL_OPPONENTS">Opponents (Bots)</label>
                         <input type="number" id="num-bots" value="5" min="2" max="9">
                     </div>
 
                     <div class="form-group checkbox-group">
                         <input type="checkbox" id="show-prob">
-                        <label for="show-prob">Show Win Probability</label>
+                        <label for="show-prob" data-i18n="LABEL_SHOW_PROB">Show Win Probability</label>
                     </div>
                 </div>
 
-                <button id="start-btn" class="primary-btn">Start Game</button>
+                <button id="start-btn" class="primary-btn" data-i18n="BTN_START_GAME">Start Game</button>
             </div>
         </div>
 
+        <div class="lang-selector">
+            <button class="lang-btn active" data-lang="pt-br">PT-BR</button>
+            <button class="lang-btn" data-lang="en">ENG</button>
+        </div>
     </div>
 
+    <script type="module">
+        import { i18n } from '/static/localization.js';
+
+        // Initialize with default language
+        const savedLang = localStorage.getItem('game_lang') || 'pt-br';
+        i18n.init(savedLang);
+
+        // Update active button state
+        updateActiveLangButton(savedLang);
+
+        // Language Selector Logic
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const lang = btn.dataset.lang;
+                i18n.init(lang);
+                updateActiveLangButton(lang);
+            });
+        });
+
+        function updateActiveLangButton(lang) {
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.lang === lang);
+            });
+        }
+    </script>
     <script src="/static/config.js"></script>
 </body>
 
