@@ -429,7 +429,7 @@ function handleActionRequired(data) {
         updatePotDisplay(currentRoundState.pot);
     }
 
-    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    scrollToBottom();
 }
 
 function sendAction(action, amount) {
@@ -485,7 +485,18 @@ function logToTerminal(text, type = 'action') {
         div.textContent = text;
     }
     terminalOutput.appendChild(div);
-    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    scrollToBottom();
+}
+
+function scrollToBottom() {
+    if (window.innerWidth <= 768) {
+        setTimeout(() => {
+            const y = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight, document.documentElement.offsetHeight, document.body.scrollTop + document.documentElement.scrollTop);
+            window.scrollTo(0, y + 100); // Add extra buffer
+        }, 100);
+    } else {
+        terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    }
 }
 
 function renderCards(cards) {
@@ -689,3 +700,37 @@ function parseCommunityCardsFromLog(text) {
         }
     }
 }
+
+// Mobile Header Scroll Logic
+let lastScrollTop = 0;
+const headerBar = document.querySelector('.header-bar');
+const handInfo = document.querySelector('.hand-info');
+const delta = 5;
+const headerHeight = 54; // Approx header height
+
+window.addEventListener('scroll', () => {
+    const scrollTop = Math.max(0, window.scrollY || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop);
+
+    // Debug log
+    // console.log('Scroll:', scrollTop, 'Last:', lastScrollTop, 'Delta:', Math.abs(lastScrollTop - scrollTop));
+
+    // Make sure they scroll more than delta
+    if (Math.abs(lastScrollTop - scrollTop) <= delta) return;
+
+    // If they scrolled down and are past the navbar, add class .header-hidden.
+    if (scrollTop > lastScrollTop && scrollTop > headerHeight) {
+        // Scroll Down
+        // console.log('Hiding header');
+        if (headerBar) headerBar.classList.add('header-hidden');
+        if (handInfo) handInfo.classList.add('moved-up');
+    } else {
+        // Scroll Up
+        // Simplified check: just show it if we are scrolling up.
+        // The previous check (scrollTop + window.innerHeight < document.body.scrollHeight)
+        // can fail on Safari due to dynamic address bar resizing.
+        if (headerBar) headerBar.classList.remove('header-hidden');
+        if (handInfo) handInfo.classList.remove('moved-up');
+    }
+
+    lastScrollTop = scrollTop;
+}, { passive: true });
