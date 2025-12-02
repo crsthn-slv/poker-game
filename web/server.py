@@ -115,6 +115,14 @@ app.add_middleware(
 # Serve arquivos estáticos (frontend)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
+@app.get("/")
+async def read_root():
+    return FileResponse("web/static/index.html")
+
+@app.get("/game")
+async def read_game():
+    return FileResponse("web/static/game.html")
+
 @app.get("/translations.json")
 async def get_translations():
     if os.path.exists("translations.json"):
