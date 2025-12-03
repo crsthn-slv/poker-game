@@ -1,6 +1,8 @@
 /**
- * Game Logic for Terminal Poker Web
+ * Game Logic for Terminal Poker Web (Mobile Refactor)
  */
+
+import { i18n } from '/static/localization.js';
 
 // State
 let socket = null;
@@ -8,45 +10,52 @@ let sessionId = null;
 let currentRoundState = null;
 let myHoleCards = [];
 let myNickname = 'Unknown';
+let myStack = 0;
 
-import { i18n } from '/static/localization.js';
-
-// DOM Elements
-const terminalOutput = document.getElementById('terminal-output');
-const controlsArea = document.getElementById('controls-area');
-const actionButtons = document.querySelectorAll('.action-btn');
-const raiseControls = document.getElementById('raise-controls');
-const raiseAmountInput = document.getElementById('raise-amount');
+// DOM Elements - Header
 const myCardsDisplay = document.getElementById('my-cards');
 const myStackDisplay = document.getElementById('my-stack');
-const myBetDisplay = document.getElementById('my-bet');
 const potDisplay = document.getElementById('pot-display');
-const communityCardsDisplay = document.getElementById('community-cards');
-const winProbDisplay = document.getElementById('win-prob');
-const probDisplayContainer = document.getElementById('prob-display');
-const handStrengthDisplay = document.getElementById('hand-strength-display');
-const handStrengthContainer = document.getElementById('hand-strength-container');
+const btnMenuToggle = document.getElementById('btn-menu-toggle');
 
+// DOM Elements - Chat
+const chatContainer = document.getElementById('chat-container');
+const chatContent = document.getElementById('chat-content');
 
-const btnNextRound = document.getElementById('btn-next-round');
-const btnQuitGame = document.getElementById('btn-quit-game');
-const btnHeaderQuit = document.getElementById('btn-header-quit');
-const btnHeaderNewGame = document.getElementById('btn-header-new-game');
+// DOM Elements - Footer
+const actionBar = document.getElementById('action-bar');
+const btnFold = document.getElementById('btn-fold');
+const btnCall = document.getElementById('btn-call');
+const btnRaise = document.getElementById('btn-raise');
+
+const raiseControls = document.getElementById('raise-controls');
+const raiseAmountInput = document.getElementById('raise-amount');
+const btnCancelRaise = document.getElementById('btn-cancel-raise');
+const btnConfirmRaise = document.getElementById('btn-confirm-raise');
+const btnRaiseMinus = document.getElementById('btn-raise-minus'); // If I added these in HTML? No, I didn't add +/- buttons in HTML step 25. Wait.
+// I checked step 25 HTML. I did NOT add +/- buttons. I added `raise-input-wrapper`.
+// I will stick to the HTML I wrote.
+
+const btnAllIn = document.getElementById('btn-allin');
+
 const endRoundControls = document.getElementById('end-round-controls');
+const btnNextRound = document.getElementById('btn-next-round');
+const eliminationControls = document.getElementById('elimination-controls');
+const btnSimulate = document.getElementById('btn-simulate');
+const btnElimNewGame = document.getElementById('btn-elim-new-game');
+const btnQuitGame = document.getElementById('btn-quit-game');
 
-const actionButtonsContainer = document.querySelector('.action-buttons');
+// Modals
+const menuModal = document.getElementById('menu-modal');
+const btnMenuClose = document.getElementById('btn-menu-close');
+const btnHeaderNewGame = document.getElementById('btn-header-new-game');
+const btnHeaderQuit = document.getElementById('btn-header-quit');
 
-// Modal Elements
 const customModal = document.getElementById('custom-modal');
 const modalTitle = document.getElementById('modal-title');
 const modalMessage = document.getElementById('modal-message');
 const btnModalCancel = document.getElementById('btn-modal-cancel');
 const btnModalConfirm = document.getElementById('btn-modal-confirm');
-
-// Elimination Modal Elements
-const btnElimNewGame = document.getElementById('btn-elim-new-game');
-const btnElimSimulate = document.getElementById('btn-simulate');
-const btnElimQuit = document.getElementById('btn-quit-game'); // Reusing the main quit button
 
 let onModalConfirm = null;
 
@@ -54,80 +63,102 @@ let onModalConfirm = null;
 init();
 
 function init() {
-    // Get session_id from URL
     const urlParams = new URLSearchParams(window.location.search);
     sessionId = urlParams.get('session_id');
 
     if (!sessionId) {
-        alert(i18n.get('MSG_NO_SESSION'));
+        alert(i18n.get('MSG_NO_SESSION') || 'No Session ID');
         window.location.href = '/static/index.html';
         return;
     }
 
-    // Get nickname from local storage
     const storedNick = localStorage.getItem('poker_nickname');
-    if (storedNick) {
-        myNickname = storedNick;
-    }
+    if (storedNick) myNickname = storedNick;
 
-    // Clear i18n cache to ensure new keys are loaded
+    // Clear old i18n cache
     Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('i18n_')) {
-            localStorage.removeItem(key);
-        }
+        if (key.startsWith('i18n_')) localStorage.removeItem(key);
     });
 
-    // Initialize i18n
     i18n.init('pt-br').then(() => {
         connectWebSocket(sessionId);
+        updateUIText();
     });
 }
 
-// Event Listeners
-document.getElementById('btn-fold').addEventListener('click', () => sendAction('fold', 0));
-document.getElementById('btn-call').addEventListener('click', () => sendAction('call', currentRoundState?.amount_to_call || 0));
-document.getElementById('btn-allin').addEventListener('click', () => sendAction('raise', -1));
+function updateUIText() {
+    // Update static text if needed, mostly handled by data-i18n in HTML
+    // But dynamic buttons might need updates
+}
+
+// --- Event Listeners ---
+
+// Menu
+btnMenuToggle.addEventListener('click', () => menuModal.classList.remove('hidden'));
+btnMenuClose.addEventListener('click', () => menuModal.classList.add('hidden'));
 
 btnHeaderQuit.addEventListener('click', () => {
-    btnQuitGame.click(); // Reuse the same logic
+    menuModal.classList.add('hidden');
+    showModal(i18n.get('MODAL_QUIT_TITLE'), i18n.get('MODAL_QUIT_MSG'), () => {
+        sendAction('quit', 0);
+        setTimeout(() => window.location.href = '/static/index.html', 500);
+    });
 });
 
 btnHeaderNewGame.addEventListener('click', () => {
+    menuModal.classList.add('hidden');
     showModal(i18n.get('MODAL_NEW_GAME_TITLE'), i18n.get('MODAL_NEW_GAME_MSG'), () => {
         startNewGame();
     });
 });
 
+// Actions
+btnFold.addEventListener('click', () => {
+    addChatMessage('user', 'Fold', myNickname); // Immediate feedback
+    sendAction('fold', 0);
+});
+
+btnCall.addEventListener('click', () => {
+    const amount = currentRoundState?.amount_to_call || 0;
+    const text = amount > 0 ? `Call ${amount}` : 'Check';
+    addChatMessage('user', text, myNickname); // Immediate feedback
+    sendAction('call', amount);
+});
+
+btnRaise.addEventListener('click', showRaiseControls);
+
+// Raise Controls
+btnCancelRaise.addEventListener('click', hideRaiseControls);
+
+btnConfirmRaise.addEventListener('click', () => {
+    const amount = parseInt(raiseAmountInput.value);
+    addChatMessage('user', `Raise ${amount}`, myNickname); // Immediate feedback
+    sendAction('raise', amount);
+    hideRaiseControls();
+});
+
+btnAllIn.addEventListener('click', () => {
+    // All in logic might need max stack calculation
+    // For now, sending -1 usually means All-In in many backends, or we set max.
+    // The previous code used -1.
+    addChatMessage('user', 'ALL IN!', myNickname);
+    sendAction('raise', -1);
+    hideRaiseControls();
+});
+
+// End Round
 btnNextRound.addEventListener('click', () => {
     sendAction('next_round', 0);
     endRoundControls.classList.add('hidden');
-    controlsArea.classList.add('disabled');
+    actionBar.classList.add('disabled');
 });
 
-btnQuitGame.addEventListener('click', () => {
-    showModal(i18n.get('MODAL_QUIT_TITLE'), i18n.get('MODAL_QUIT_MSG'), () => {
-        sendAction('quit', 0);
-        // Give a small delay for server to process and save, then redirect
-        setTimeout(() => {
-            window.location.href = '/static/index.html';
-        }, 500);
-    });
-});
-
-// Modal Event Listeners
-btnModalCancel.addEventListener('click', hideModal);
-btnModalConfirm.addEventListener('click', () => {
-    if (onModalConfirm) onModalConfirm();
-    hideModal();
-});
-
-// Elimination Modal Listeners
-if (btnElimSimulate) {
-    btnElimSimulate.addEventListener('click', () => {
+// Elimination
+if (btnSimulate) {
+    btnSimulate.addEventListener('click', () => {
         sendAction('simulate', 0);
-        // Hide simulate button after clicking to prevent multiple clicks
-        btnElimSimulate.classList.add('hidden');
-        logToTerminal(i18n.get('BTN_SIMULATE') + '...', 'system');
+        btnSimulate.classList.add('hidden');
+        addSystemMessage(i18n.get('BTN_SIMULATE') + '...');
     });
 }
 
@@ -138,6 +169,20 @@ if (btnElimNewGame) {
         });
     });
 }
+
+btnQuitGame.addEventListener('click', () => {
+    showModal(i18n.get('MODAL_QUIT_TITLE'), i18n.get('MODAL_QUIT_MSG'), () => {
+        sendAction('quit', 0);
+        setTimeout(() => window.location.href = '/static/index.html', 500);
+    });
+});
+
+// Modal
+btnModalCancel.addEventListener('click', hideModal);
+btnModalConfirm.addEventListener('click', () => {
+    if (onModalConfirm) onModalConfirm();
+    hideModal();
+});
 
 function showModal(title, message, onConfirm) {
     modalTitle.textContent = title;
@@ -151,47 +196,32 @@ function hideModal() {
     onModalConfirm = null;
 }
 
-document.getElementById('btn-raise').addEventListener('click', showRaiseControls);
-document.getElementById('btn-cancel-raise').addEventListener('click', hideRaiseControls);
-document.getElementById('btn-confirm-raise').addEventListener('click', () => {
-    const amount = parseInt(raiseAmountInput.value);
-    sendAction('raise', amount);
-    hideRaiseControls();
-});
+function showRaiseControls() {
+    raiseControls.classList.remove('hidden');
+    raiseAmountInput.focus();
+}
 
-raiseAmountInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        document.getElementById('btn-confirm-raise').click();
-    }
-    e.stopPropagation(); // Prevent global shortcuts
-});
+function hideRaiseControls() {
+    raiseControls.classList.add('hidden');
+}
 
-// Keyboard Shortcuts
-document.addEventListener('keydown', (e) => {
-    // Ignore shortcuts if typing in an input
-    if (document.activeElement.tagName === 'INPUT') return;
+// --- WebSocket & Game Logic ---
 
-    // Allow 'n' for next round if visible
-    if (e.key.toLowerCase() === 'n' && !endRoundControls.classList.contains('hidden')) {
-        btnNextRound.click();
-        return;
+function sendAction(action, amount) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+    if (action !== 'next_round') {
+        actionBar.classList.add('disabled');
     }
 
-    // Allow 'q' for quit if visible
-    if (e.key.toLowerCase() === 'q' && !endRoundControls.classList.contains('hidden')) {
-        btnQuitGame.click();
-        return;
-    }
-
-    if (controlsArea.classList.contains('disabled')) return;
-
-    switch (e.key.toLowerCase()) {
-        case 'f': sendAction('fold', 0); break;
-        case 'c': sendAction('call', currentRoundState?.amount_to_call || 0); break;
-        case 'r': showRaiseControls(); break;
-        case 'a': sendAction('raise', -1); break; // All in
-    }
-});
+    socket.send(JSON.stringify({
+        type: 'action',
+        data: {
+            action: action,
+            amount: parseInt(amount)
+        }
+    }));
+}
 
 function connectWebSocket(sid) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -200,7 +230,7 @@ function connectWebSocket(sid) {
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
-        logToTerminal(i18n.get('MSG_CONNECTED'), 'system');
+        addSystemMessage(i18n.get('MSG_CONNECTED') || 'Connected');
     };
 
     socket.onmessage = (event) => {
@@ -209,13 +239,13 @@ function connectWebSocket(sid) {
     };
 
     socket.onclose = () => {
-        logToTerminal(i18n.get('MSG_CONN_LOST'), 'error');
-        controlsArea.classList.add('disabled');
+        addSystemMessage(i18n.get('MSG_CONN_LOST') || 'Connection Lost');
+        actionBar.classList.add('disabled');
     };
 
     socket.onerror = (error) => {
         console.error('WebSocket error:', error);
-        logToTerminal(i18n.get('MSG_CONN_ERROR'), 'error');
+        addSystemMessage(i18n.get('MSG_CONN_ERROR') || 'Connection Error');
     };
 }
 
@@ -224,21 +254,22 @@ function handleGameMessage(type, data) {
 
     switch (type) {
         case 'status':
-            logToTerminal(data, 'system');
+            addSystemMessage(data);
             break;
 
         case 'terminal_output':
-            logToTerminal(data, 'raw');
-            parseCommunityCardsFromLog(data);
+            parseAndLogMessage(data);
             break;
 
         case 'game_start':
+            addSystemMessage('GAME STARTED');
             break;
 
         case 'round_start_data':
             myHoleCards = data.hole_cards;
             renderCards(myHoleCards);
-            renderCommunityCards([]); // Clear community cards for new round
+            // Clear chat or add separator?
+            addSystemMessage('--- NEW ROUND ---');
             break;
 
         case 'street_start':
@@ -254,9 +285,8 @@ function handleGameMessage(type, data) {
             break;
 
         case 'round_result_data':
-            // Only disable controls if we are NOT in the elimination/end-round state
             if (endRoundControls.classList.contains('hidden')) {
-                controlsArea.classList.add('disabled');
+                actionBar.classList.add('disabled');
                 hideRaiseControls();
             }
             break;
@@ -270,233 +300,369 @@ function handleGameMessage(type, data) {
             break;
 
         case 'notification':
-            logToTerminal(data, 'success');
+            addSystemMessage(data);
             break;
 
         case 'error':
-            logToTerminal(data, 'error');
+            addSystemMessage('Error: ' + data);
             break;
 
         case 'player_eliminated':
             handlePlayerEliminated(data);
             break;
+
+        case 'chat_message':
+            if (data.sender && data.content) {
+                if (data.sender === myNickname) return;
+                addChatMessage(data.type || 'opponent', data.content, data.sender);
+            }
+            break;
     }
 }
 
-function handleGameOver(data) {
-    controlsArea.classList.remove('disabled'); // Enable controls so buttons can be clicked
-    actionButtonsContainer.classList.add('hidden'); // Hide fold/call/raise
-    endRoundControls.classList.remove('hidden'); // Show end round controls
+// --- Message Parsing & Rendering ---
 
-    // Hide Next Round and Simulate
-    btnNextRound.classList.add('hidden');
-    if (btnElimSimulate) {
-        btnElimSimulate.classList.add('hidden');
-    }
-
-    // Show New Game and Quit
-    if (btnElimNewGame) {
-        btnElimNewGame.classList.remove('hidden');
-    }
-    btnQuitGame.classList.remove('hidden');
-
-    logToTerminal(i18n.get('MSG_GAME_OVER') || 'Game Over', 'system');
+function stripAnsi(text) {
+    return text.replace(/\x1B\[[0-9;]*[mK]/g, '');
 }
 
-function handlePlayerEliminated(data) {
-    console.log('Player Eliminated Data:', data);
-    controlsArea.classList.remove('disabled'); // Enable controls to allow interaction with buttons
-    hideRaiseControls();
+function parseAndLogMessage(rawText) {
+    if (!rawText) return;
+    const cleanText = stripAnsi(rawText).trim();
+    if (!cleanText) return;
 
-    // Hide Next Round button
-    btnNextRound.classList.add('hidden');
-
-    // Show Simulate and New Game buttons
-    if (btnElimSimulate) {
-        btnElimSimulate.classList.remove('hidden');
-    }
-    if (btnElimNewGame) {
-        btnElimNewGame.classList.remove('hidden');
-    }
-
-    // Ensure controls area is visible
-    actionButtonsContainer.classList.add('hidden');
-    endRoundControls.classList.remove('hidden');
-
-    // Log elimination to terminal
-    logToTerminal(i18n.get('MODAL_ELIMINATED_MSG') || 'You have been eliminated.', 'error');
-
-    // Clear player cards and stack
-    renderCards([]);
-    if (myStackDisplay) myStackDisplay.textContent = '0';
-}
-
-function handleWaitForNextRound() {
-    controlsArea.classList.remove('disabled');
-    actionButtonsContainer.classList.add('hidden');
-    endRoundControls.classList.remove('hidden');
-
-    // Reset buttons to normal state (Next Round visible, others hidden)
-    btnNextRound.classList.remove('hidden');
-
-    if (btnElimSimulate) {
-        btnElimSimulate.classList.add('hidden');
-    }
-    if (btnElimNewGame) {
-        btnElimNewGame.classList.add('hidden');
-    }
-
-    btnNextRound.focus();
-}
-
-function handleActionRequired(data) {
-    currentRoundState = data.round_state;
-
-    controlsArea.classList.remove('disabled');
-    endRoundControls.classList.add('hidden');
-    actionButtonsContainer.classList.remove('hidden');
-
-    if (data.win_probability) {
-        probDisplayContainer.classList.remove('hidden');
-        winProbDisplay.textContent = (data.win_probability * 100).toFixed(1) + '%';
-    } else {
-        if (!data.win_probability) {
-            probDisplayContainer.classList.add('hidden');
+    // 1. Check for Community Cards (Keep as visual aid in chat)
+    if (cleanText.includes('[') && cleanText.includes(']')) {
+        const match = cleanText.match(/\[(.*?)\]/);
+        if (match) {
+            const cardsStr = match[1];
+            const cards = cardsStr.split(/\s+/).filter(c => {
+                return /^[2-9TJQKA][shdcSHDC♥♦♣♠]$/.test(c);
+            });
+            if (cards.length > 0) {
+                addCommunityCardsMessage(cards);
+                return;
+            }
         }
     }
 
-    if (data.hand_strength) {
-        handStrengthContainer.classList.remove('hidden');
-        handStrengthDisplay.textContent = data.hand_strength;
-    } else {
-        handStrengthContainer.classList.add('hidden');
+    // 2. Check for "Wins"
+    if (cleanText.toLowerCase().includes('wins')) {
+        addSystemMessage(cleanText);
+        return;
     }
 
-    actionButtons.forEach(btn => {
-        if (btn === btnNextRound) return;
+    // 3. Filter out noisy terminal output
+    // 3. Filter out noisy terminal output
+    const ignorePatterns = [
+        /^Available actions/i,
+        /^Your cards/i,
+        /^To Call/i,
+        /^\[WEB\]/i,
+        /^\[SYSTEM\]/i,
+        /^─/,
+        /^–/, // En-dash
+        /^—/, // Em-dash
+        /^-/, // Hyphen
+        /^>/, // User input echo
+        /^\[ACTION\]/, // Backend action logs
+        /^.+? (folded|called|raised|checked|all-in|SB|BB)/i // Standard player actions (handled by chat bubbles)
+    ];
 
-        const action = btn.dataset.action;
-        let checkAction = action;
-        if (action === 'allin') checkAction = 'raise';
+    if (ignorePatterns.some(p => p.test(cleanText))) return;
+    if (cleanText.startsWith('|')) return;
 
-        const isValid = data.valid_actions.some(a => a.action === checkAction);
-        btn.disabled = !isValid;
-    });
-
-    updateMyStackDisplay(currentRoundState);
-    updateMyBetDisplay(currentRoundState);
-
-    const raiseAction = data.valid_actions.find(a => a.action === 'raise');
-    if (raiseAction) {
-        const minRaise = raiseAction.amount.min;
-        const maxRaise = raiseAction.amount.max;
-
-        raiseAmountInput.value = minRaise;
-        raiseAmountInput.min = minRaise;
-        raiseAmountInput.max = maxRaise;
+    // 4. Special handling for Pot and Game Events
+    if (cleanText.toLowerCase().startsWith('pot')) {
+        addSystemMessage(cleanText);
+        return;
     }
 
-    const callAction = data.valid_actions.find(a => a.action === 'call');
-    const btnCall = document.getElementById('btn-call');
-    if (callAction) {
-        currentRoundState.amount_to_call = callAction.amount;
-        if (callAction.amount === 0) {
-            btnCall.textContent = i18n.get('BTN_CHECK');
-        } else {
-            btnCall.textContent = `${i18n.get('BTN_CALL').replace('(C)', '')} {${callAction.amount}} (C)`;
+    if (cleanText.toLowerCase().startsWith('round summary')) {
+        addSystemMessage('--- ROUND SUMMARY ---');
+        return;
+    }
+
+    // 5. Parse "Name Action Amount" from terminal output (Robust fallback for bots)
+    // DISABLED: We now rely on explicit 'chat_message' events from web_player.py to avoid duplicates.
+    /*
+    const terminalActionRegex = /^(.+?) (called|raised|folded|checked|all-in|SB|BB)(?:(?:\(| )(\d+)\)?)?$/i;
+    const termMatch = cleanText.match(terminalActionRegex);
+    if (termMatch) {
+        const name = termMatch[1].trim();
+        const action = termMatch[2].toUpperCase();
+        const amount = termMatch[3] || '';
+
+        // Ignore if it's me (my actions are handled by UI buttons usually, or "You" check)
+        // Also ignore "Pot" if it matched (though handled above)
+        if (name !== 'You' && name !== myNickname && name.toLowerCase() !== 'pot') {
+            let displayAction = action;
+            if (action === 'SB') displayAction = 'Small Blind';
+            if (action === 'BB') displayAction = 'Big Blind';
+
+            const text = `${displayAction} ${amount}`.trim();
+            addChatMessage('opponent', text, name);
+            return;
         }
+    }
+    */
+
+    // 6. Fallback: Try to parse "Player declared" if game_update missed it
+    // This is a safety net for reconnected sessions or missed events
+    const actionRegex = /Player ['"](.+?)['"] declared ['"](.+?):(\d+?)['"]/;
+    const match = cleanText.match(actionRegex);
+    if (match) {
+        const name = match[1];
+        const action = match[2].toUpperCase();
+        const amount = match[3];
+        if (name !== myNickname) {
+            addChatMessage('opponent', `${action} ${amount > 0 ? amount : ''}`, name);
+            return;
+        }
+    }
+
+    // 7. Final Fallback
+    addSystemMessage(cleanText);
+}
+
+// Deduplication state
+let lastChatMessage = { content: '', time: 0 };
+
+function addChatMessage(type, content, senderName) {
+    // Simple deduplication: ignore if same content and sender within 500ms
+    const now = Date.now();
+    const uniqueKey = `${type}:${senderName}:${content}`;
+    if (lastChatMessage.content === uniqueKey && (now - lastChatMessage.time) < 1000) {
+        return;
+    }
+    lastChatMessage = { content: uniqueKey, time: now };
+
+    const row = document.createElement('div');
+    row.className = `msg-row ${type}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
+    bubble.textContent = content;
+
+    if (type === 'opponent') {
+        // Avatar
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar-circle';
+        avatar.textContent = getInitials(senderName);
+        avatar.style.backgroundColor = getAvatarColor(senderName);
+
+        // Name label
+        const nameLabel = document.createElement('span');
+        nameLabel.className = 'sender-name';
+        nameLabel.textContent = senderName;
+
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+
+        wrapper.appendChild(nameLabel);
+        wrapper.appendChild(bubble);
+
+        row.appendChild(avatar);
+        row.appendChild(wrapper);
     } else {
-        btnCall.textContent = i18n.get('BTN_CALL');
+        row.appendChild(bubble);
     }
 
-    if (currentRoundState.community_card) {
-        renderCommunityCards(currentRoundState.community_card);
-    }
-
-    if (currentRoundState.pot) {
-        updatePotDisplay(currentRoundState.pot);
-    }
-
+    chatContent.appendChild(row);
     scrollToBottom();
 }
 
-function sendAction(action, amount) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+function addSystemMessage(text) {
+    const row = document.createElement('div');
+    // Check if it's a divider (starts with ---) or explicit centered content
+    const isDivider = text.startsWith('---') || text === 'GAME STARTED' || text === 'GAME OVER';
 
-    if (action !== 'next_round') {
-        controlsArea.classList.add('disabled');
-    }
+    row.className = `msg-row system ${isDivider ? 'centered' : 'left-aligned'}`;
 
-    socket.send(JSON.stringify({
-        type: 'action',
-        data: {
-            action: action,
-            amount: parseInt(amount)
-        }
-    }));
+    const badge = document.createElement('div');
+    badge.className = 'msg-system-badge';
+    badge.textContent = text;
+
+    row.appendChild(badge);
+    chatContent.appendChild(row);
+    scrollToBottom();
 }
 
-function ansiToHtml(text) {
-    if (!text) return '';
+function addCommunityCardsMessage(cards) {
+    const row = document.createElement('div');
+    row.className = 'msg-row system centered'; // Explicitly centered
 
-    const colors = {
-        '30': 'black', '31': '#ff5555', '32': '#50fa7b', '33': '#f1fa8c',
-        '34': '#bd93f9', '35': '#ff79c6', '36': '#8be9fd', '37': '#f8f8f2',
-        '90': '#6272a4'
-    };
+    const container = document.createElement('div');
+    container.className = 'chat-community-cards';
 
-    let html = text.replace(/\x1B\[(\d+)m/g, (match, code) => {
-        if (code === '0') return '</span>';
-        if (code === '1') return '<span style="font-weight:bold">';
-        if (code === '2') return '<span style="opacity:0.6">';
-        if (colors[code]) return `<span style="color:${colors[code]}">`;
-        return '';
+    cards.forEach(card => {
+        const div = document.createElement('div');
+        const isRed = card[0] === 'H' || card[0] === 'D' || card.includes('♥') || card.includes('♦');
+        div.className = `playing-card ${isRed ? 'red' : ''}`;
+        div.textContent = getCardSymbol(card);
+        container.appendChild(div);
     });
 
-    while (html.includes('<span')) {
-        if (!html.includes('</span>')) {
-            html += '</span>';
-        } else {
-            break;
-        }
-    }
-
-    return html;
-}
-
-function logToTerminal(text, type = 'action') {
-    const div = document.createElement('div');
-    div.className = `line ${type}`;
-    if (type === 'raw') {
-        div.innerHTML = ansiToHtml(text);
-    } else {
-        div.textContent = text;
-    }
-    terminalOutput.appendChild(div);
+    row.appendChild(container);
+    chatContent.appendChild(row);
     scrollToBottom();
 }
 
 function scrollToBottom() {
-    const isMobile = window.innerWidth <= 768;
+    // Scroll the container
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
 
-    if (isMobile) {
-        // Increased timeout to ensure keyboard/DOM are ready
-        setTimeout(() => {
-            // On mobile, scroll is on the main window
-            const doc = document.documentElement;
-            const scrollHeight = Math.max(doc.scrollHeight, doc.offsetHeight, document.body.scrollHeight);
+function getInitials(name) {
+    if (!name) return '??';
+    return name.substring(0, 2).toUpperCase();
+}
 
-            // Scroll to absolute bottom
-            window.scrollTo({
-                top: scrollHeight,
-                left: 0,
-                behavior: 'auto' // 'smooth' is buggy on iOS when triggered via script
-            });
-        }, 150);
-    } else {
-        // Desktop: Scroll the specific container
-        if (terminalOutput) {
-            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+function getAvatarColor(name) {
+    // Generate consistent color from name
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    return '#' + '00000'.substring(0, 6 - c.length) + c;
+}
+
+// --- Game State Handling ---
+
+// Assuming there's a WebSocket onmessage handler that dispatches these events
+// This switch statement is added based on the user's instruction and context.
+
+
+
+function handleStreetStart(data) {
+    if (data.street) {
+        addSystemMessage(`--- ${data.street.toUpperCase()} ---`);
+    }
+    if (data.round_state) {
+        currentRoundState = data.round_state;
+        updateStats(currentRoundState);
+    }
+}
+
+function handleGameUpdate(data) {
+    // Update stats
+    if (data.round_state) {
+        currentRoundState = data.round_state;
+        updateStats(currentRoundState);
+    }
+
+    // Note: We used to generate opponent chat messages here, but it was unreliable due to UUID mismatches.
+    // Now we rely on explicit 'chat_message' events sent by the backend or 'terminal_output' parsing.
+    // We only handle "Me" actions here if needed (blinds), but even those are better handled by backend/terminal.
+    if (data.action && data.round_state) {
+        const actionObj = data.action;
+        const seats = data.round_state.seats;
+        const pUuid = actionObj.player_uuid || actionObj.uuid;
+        const player = seats.find(s => s.uuid === pUuid);
+
+        if (player && player.name === myNickname) {
+            const act = actionObj.action;
+            const amt = actionObj.amount || 0;
+            let text = act;
+            if (['CALL', 'RAISE', 'BET', 'SMALLBLIND', 'BIGBLIND'].includes(act) && amt > 0) {
+                text += ` ${amt}`;
+            }
+            // Only show Blinds here. Other actions are optimistic.
+            if (['SMALLBLIND', 'BIGBLIND'].includes(act)) {
+                addChatMessage('user', text, player.name);
+            }
+        }
+    }
+}
+
+function handleActionRequired(data) {
+    currentRoundState = data.round_state;
+    updateStats(currentRoundState);
+
+    actionBar.classList.remove('disabled');
+    endRoundControls.classList.add('hidden');
+
+    // Update buttons based on valid actions
+    const validActions = data.valid_actions || [];
+
+    const canFold = validActions.some(a => a.action === 'fold');
+    const canCall = validActions.some(a => a.action === 'call');
+    const canRaise = validActions.some(a => a.action === 'raise');
+
+    btnFold.disabled = !canFold;
+    btnCall.disabled = !canCall;
+    btnRaise.disabled = !canRaise;
+
+    // Update Call Button Text
+    const callAction = validActions.find(a => a.action === 'call');
+    if (callAction) {
+        currentRoundState.amount_to_call = callAction.amount;
+        const label = btnCall.querySelector('.btn-label');
+        if (callAction.amount === 0) {
+            label.textContent = i18n.get('BTN_CHECK') || 'CHECK';
+        } else {
+            label.textContent = `${i18n.get('BTN_CALL') || 'CALL'} ${callAction.amount}`;
+        }
+    }
+
+    // Update Raise Limits
+    const raiseAction = validActions.find(a => a.action === 'raise');
+    if (raiseAction) {
+        raiseAmountInput.min = raiseAction.amount.min;
+        raiseAmountInput.max = raiseAction.amount.max;
+        raiseAmountInput.value = raiseAction.amount.min;
+    }
+
+    scrollToBottom();
+}
+
+function handleWaitForNextRound() {
+    actionBar.classList.add('disabled');
+    endRoundControls.classList.remove('hidden');
+
+    btnNextRound.classList.remove('hidden');
+    eliminationControls.classList.add('hidden');
+}
+
+function handleGameOver(data) {
+    actionBar.classList.add('disabled');
+    endRoundControls.classList.remove('hidden');
+
+    btnNextRound.classList.add('hidden');
+    eliminationControls.classList.remove('hidden');
+
+    addSystemMessage(i18n.get('MSG_GAME_OVER') || 'GAME OVER');
+}
+
+function handlePlayerEliminated(data) {
+    actionBar.classList.add('disabled');
+    endRoundControls.classList.remove('hidden');
+
+    btnNextRound.classList.add('hidden');
+    eliminationControls.classList.remove('hidden');
+
+    addSystemMessage(i18n.get('MODAL_ELIMINATED_MSG') || 'YOU HAVE BEEN ELIMINATED');
+    renderCards([]); // Clear cards
+}
+
+function updateStats(roundState) {
+    if (!roundState) return;
+
+    // Pot
+    if (roundState.pot) {
+        let totalPot = 0;
+        if (roundState.pot.main) totalPot += roundState.pot.main.amount;
+        if (roundState.pot.side) roundState.pot.side.forEach(s => totalPot += s.amount);
+        potDisplay.textContent = totalPot;
+    }
+
+    // My Stack
+    if (roundState.seats) {
+        const mySeat = roundState.seats.find(s => s.name === myNickname);
+        if (mySeat) {
+            myStackDisplay.textContent = mySeat.stack;
         }
     }
 }
@@ -522,212 +688,24 @@ function getCardSymbol(cardStr) {
     return `${suit}${rank}`;
 }
 
-function showRaiseControls() {
-    raiseControls.classList.remove('hidden');
-    raiseAmountInput.focus();
-}
-
-function hideRaiseControls() {
-    raiseControls.classList.add('hidden');
-}
-
-function handleStreetStart(data) {
-    if (data.round_state) {
-        currentRoundState = data.round_state;
-        if (currentRoundState.community_card) {
-            renderCommunityCards(currentRoundState.community_card);
-        }
-        if (currentRoundState.pot) {
-            updatePotDisplay(currentRoundState.pot);
-        }
-        updateMyBetDisplay(currentRoundState);
-        updateMyStackDisplay(currentRoundState);
-    }
-}
-
-function handleGameUpdate(data) {
-    if (data.round_state) {
-        currentRoundState = data.round_state;
-        if (currentRoundState.community_card) {
-            renderCommunityCards(currentRoundState.community_card);
-        }
-        if (currentRoundState.pot) {
-            updatePotDisplay(currentRoundState.pot);
-        }
-        updateMyBetDisplay(currentRoundState);
-        updateMyStackDisplay(currentRoundState);
-    }
-}
-
-function renderCommunityCards(cards) {
-    communityCardsDisplay.innerHTML = '';
-    cards.forEach(card => {
-        const div = document.createElement('div');
-        const isRed = card[0] === 'H' || card[0] === 'D' || card.includes('♥') || card.includes('♦');
-        div.className = `playing-card ${isRed ? 'red' : ''}`;
-        div.textContent = getCardSymbol(card);
-        communityCardsDisplay.appendChild(div);
-    });
-}
-
-function updatePotDisplay(potData) {
-    let totalPot = 0;
-    if (potData.main) {
-        totalPot += potData.main.amount;
-    }
-    if (potData.side && Array.isArray(potData.side)) {
-        potData.side.forEach(sidePot => {
-            totalPot += sidePot.amount;
-        });
-    }
-    potDisplay.textContent = totalPot;
-}
-
-function updateMyBetDisplay(roundState) {
-    if (!roundState || !roundState.action_histories) {
-        myBetDisplay.textContent = '0';
-        return;
-    }
-
-    let totalBet = 0;
-
-    // Simplified logic: sum all my contributions in the round
-    // This is an approximation as PyPokerEngine history is complex
-    ['preflop', 'flop', 'turn', 'river'].forEach(streetName => {
-        const actions = roundState.action_histories[streetName];
-        if (actions) {
-            let myStreetBet = 0;
-            let myUuid = null;
-            if (roundState.seats) {
-                const mySeat = roundState.seats.find(s => s.name === myNickname);
-                if (mySeat) myUuid = mySeat.uuid;
-            }
-
-            actions.forEach(action => {
-                if (action.uuid === myUuid) {
-                    if (['SMALLBLIND', 'BIGBLIND'].includes(action.action)) {
-                        myStreetBet += action.amount;
-                    } else if (action.action === 'CALL') {
-                        if (action.amount > myStreetBet) {
-                            myStreetBet = action.amount;
-                        }
-                    } else if (action.action === 'RAISE') {
-                        if (action.amount > myStreetBet) {
-                            myStreetBet = action.amount;
-                        }
-                    }
-                }
-            });
-            totalBet += myStreetBet;
-        }
-    });
-
-    myBetDisplay.textContent = totalBet;
-}
-
-function updateMyStackDisplay(roundState) {
-    if (roundState && roundState.seats) {
-        const mySeat = roundState.seats.find(seat => seat.name === myNickname);
-        if (mySeat) {
-            myStackDisplay.textContent = mySeat.stack;
-        }
-    }
-}
-
 async function startNewGame() {
     const storedConfig = localStorage.getItem('poker_config');
-    if (!storedConfig) {
-        alert(i18n.get('MSG_NO_CONFIG'));
-        window.location.href = '/static/index.html';
-        return;
-    }
+    if (!storedConfig) return;
 
     try {
         const config = JSON.parse(storedConfig);
-
-        btnHeaderNewGame.disabled = true;
-        btnHeaderNewGame.textContent = '...';
-
         const response = await fetch('/api/game/new', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
 
-        if (!response.ok) throw new Error('Failed to create game');
+        if (!response.ok) throw new Error('Failed');
 
         const data = await response.json();
-        const newSessionId = data.session_id;
-
-        window.location.href = `/static/game.html?session_id=${newSessionId}`;
+        window.location.href = `/static/game.html?session_id=${data.session_id}`;
 
     } catch (error) {
-        console.error(error);
-        alert('Error starting new game: ' + error.message);
-        btnHeaderNewGame.disabled = false;
-        btnHeaderNewGame.textContent = 'New Game';
+        alert('Error starting new game');
     }
 }
-
-function parseCommunityCardsFromLog(text) {
-    if (!text) return;
-
-    const cleanText = text.replace(/\x1B\[[0-9;]*[mK]/g, '');
-    const lines = cleanText.split('\n');
-
-    let lastCardLine = null;
-    for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].includes('Community cards:')) {
-            lastCardLine = lines[i];
-            break;
-        }
-    }
-
-    if (lastCardLine) {
-        const parts = lastCardLine.split('Community cards:');
-        if (parts.length > 1) {
-            const cardsPart = parts[1].trim();
-            const potentialCards = cardsPart.split(/\s+/);
-
-            const cards = potentialCards.filter(c => {
-                if (c.length < 2 || c.length > 3) return false;
-                if (['Pot', '->'].includes(c)) return false;
-                if (!isNaN(c)) return false;
-                return true;
-            });
-
-            if (cards.length > 0) {
-                renderCommunityCards(cards);
-            }
-        }
-    }
-}
-
-// Mobile Header Scroll Logic
-let lastScrollTop = 0;
-const headerBar = document.querySelector('.header-bar');
-const handInfo = document.querySelector('.hand-info');
-const delta = 5;
-const headerHeight = 54;
-
-window.addEventListener('scroll', () => {
-    // 1. Get current position. pageYOffset is the safest cross-browser/legacy alias
-    // Math.max(0, ...) prevents negative values on iOS (rubber banding at top)
-    const scrollTop = Math.max(0, window.pageYOffset || document.documentElement.scrollTop);
-
-    // 2. Performance: If change is less than delta, ignore
-    if (Math.abs(lastScrollTop - scrollTop) <= delta) return;
-
-    // 3. Direction Logic
-    if (scrollTop > lastScrollTop && scrollTop > headerHeight) {
-        // SCROLL DOWN (Hide)
-        if (headerBar) headerBar.classList.add('header-hidden');
-        if (handInfo) handInfo.classList.add('moved-up');
-    } else {
-        // SCROLL UP (Show)
-        if (headerBar) headerBar.classList.remove('header-hidden');
-        if (handInfo) handInfo.classList.remove('moved-up');
-    }
-
-    lastScrollTop = scrollTop;
-}, { passive: true }); // passive: true is CRUCIAL for performance on iOS

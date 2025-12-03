@@ -758,22 +758,23 @@ class ConsolePlayer(BasePokerPlayer):
             self.printer(" | ".join(action_parts))
         
         # Atualiza pot na mesma linha (sempre que mudar)
-        pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
-        if pot > 0 and pot != self.last_pot_printed:
-            pot_display = self.formatter.format_pot_with_color(pot)
-            # Adiciona à lista de atualizações
-            self.pot_updates.append(pot_display)
-            self.last_pot_printed = pot
+        # DISABLED per user request: Only show pot updates at start of street
+        # pot = round_state.get('pot', {}).get('main', {}).get('amount', 0) if isinstance(round_state.get('pot'), dict) else 0
+        # if pot > 0 and pot != self.last_pot_printed:
+        #     pot_display = self.formatter.format_pot_with_color(pot)
+        #     # Adiciona à lista de atualizações
+        #     self.pot_updates.append(pot_display)
+        #     self.last_pot_printed = pot
             
-            # Exibe atualização na mesma linha
-            if self.pot_line_printed:
-                # Continua na mesma linha, adicionando mais atualizações
-                self.printer(f" -> Pot {pot_display}", end='', flush=True)
-            else:
-                # Primeira vez, imprime todas as atualizações acumuladas (sem quebrar linha)
-                pot_line = " -> ".join([f"Pot {p}" for p in self.pot_updates])
-                self.printer(f"{pot_line}", end='', flush=True)
-                self.pot_line_printed = True
+        #     # Exibe atualização na mesma linha
+        #     if self.pot_line_printed:
+        #         # Continua na mesma linha, adicionando mais atualizações
+        #         self.printer(f" -> Pot {pot_display}", end='', flush=True)
+        #     else:
+        #         # Primeira vez, imprime todas as atualizações acumuladas (sem quebrar linha)
+        #         pot_line = " -> ".join([f"Pot {p}" for p in self.pot_updates])
+        #         self.printer(f"{pot_line}", end='', flush=True)
+        #         self.pot_line_printed = True
         
         # Registra ação no histórico (de outros jogadores)
         if self.game_history:

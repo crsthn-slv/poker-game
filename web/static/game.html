@@ -3,9 +3,9 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Poker Game - Play</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/game_styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto+Mono:wght@400;700&display=swap"
@@ -13,98 +13,118 @@
 </head>
 
 <body>
-    <div class="container">
-        <!-- Game Screen -->
-        <div id="game-screen" class="screen active">
-            <div class="header-bar">
-                <div class="header-left">
-                    <button id="btn-header-quit" class="btn-header" data-i18n="BTN_QUIT">Quit</button>
+    <div class="app-container">
+        <!-- Fixed Header (HUD) -->
+        <header class="hud-header">
+            <div class="hud-row-top">
+                <div class="hud-cards-wrapper">
+                    <div class="cards-display" id="my-cards">
+                        <!-- Cards injected here -->
+                    </div>
                 </div>
-                <div class="header-center-wrapper">
-                    <h2 class="header-title" data-i18n="GAME_TITLE">Console Poker</h2>
-                    <div class="version-text" data-i18n="GAME_VERSION">Alpha Fechada v0.1</div>
+                <div class="hud-stats-wrapper">
+                    <div class="hud-stat">
+                        <span class="hud-label" data-i18n="LABEL_STACK">STACK</span>
+                        <span id="my-stack" class="hud-value">0</span>
+                    </div>
+                    <div class="hud-stat">
+                        <span class="hud-label" data-i18n="LABEL_POT">POT</span>
+                        <span id="pot-display" class="hud-value">0</span>
+                    </div>
                 </div>
-                <div class="header-right">
-                    <button id="btn-header-new-game" class="btn-header" data-i18n="BTN_NEW_GAME">New Game</button>
+                <div class="hud-menu-wrapper">
+                    <button id="btn-menu-toggle" class="btn-icon">☰</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Scrollable Chat Area -->
+        <main id="chat-container" class="chat-container">
+            <div class="chat-content" id="chat-content">
+                <div class="msg-system-badge">
+                    <span data-i18n="SYSTEM_INIT">Initializing System...</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Fixed Footer (Controls) -->
+        <footer class="controls-footer">
+
+            <!-- Standard Actions -->
+            <div id="action-bar" class="action-bar disabled">
+                <button class="btn-action btn-fold" id="btn-fold" data-action="fold">
+                    <span class="btn-label" data-i18n="BTN_FOLD">FOLD</span>
+                </button>
+
+                <button class="btn-action btn-check" id="btn-call" data-action="call">
+                    <span class="btn-label" data-i18n="BTN_CHECK">CHECK</span>
+                </button>
+
+                <button class="btn-action btn-raise" id="btn-raise" data-action="raise">
+                    <span class="btn-label" data-i18n="BTN_RAISE">RAISE</span>
+                </button>
+            </div>
+
+            <!-- Raise Controls (Overlay) -->
+            <div id="raise-controls" class="raise-controls hidden">
+                <div class="raise-header">
+                    <span data-i18n="HEADER_RAISE_AMOUNT">RAISE AMOUNT</span>
+                    <button id="btn-cancel-raise" class="btn-close">✕</button>
+                </div>
+                <div class="raise-body">
+                    <div class="raise-input-wrapper">
+                        <input type="number" id="raise-amount" value="0">
+                    </div>
+                    <div class="raise-presets">
+                        <button class="btn-preset" id="btn-allin" data-i18n="BTN_ALLIN">ALL IN</button>
+                    </div>
+                    <button id="btn-confirm-raise" class="btn-confirm-raise" data-i18n="BTN_CONFIRM">CONFIRM</button>
                 </div>
             </div>
 
-            <div class="game-log" id="terminal-output">
-                <div class="line system" data-i18n="SYSTEM_INIT">Initializing Poker System...</div>
-                <div class="line system" data-i18n="SYSTEM_WAITING">Waiting for game start...</div>
+            <!-- End Round / Game Over Controls -->
+            <div id="end-round-controls" class="end-round-controls hidden">
+                <button id="btn-next-round" class="btn-large-action" data-i18n="BTN_NEXT_ROUND">NEXT ROUND</button>
+
+                <div id="elimination-controls" class="elimination-controls hidden">
+                    <button id="btn-simulate" class="btn-secondary-action" data-i18n="BTN_SIMULATE">SIMULATE</button>
+                    <button id="btn-elim-new-game" class="btn-secondary-action" data-i18n="BTN_NEW_GAME">NEW
+                        GAME</button>
+                    <button id="btn-quit-game" class="btn-danger-action" data-i18n="BTN_QUIT">QUIT</button>
+                </div>
             </div>
+        </footer>
 
-            <div id="controls-area" class="controls-area disabled">
-                <div class="hand-info">
-                    <div class="cards-section">
-                        <div class="cards-display" id="my-cards">
-                            <!-- Cards will be injected here -->
-                            <div class="card-placeholder">?</div>
-                            <div class="card-placeholder">?</div>
-                        </div>
-                        <div class="cards-divider"></div>
-                        <div class="cards-display" id="community-cards">
-                            <!-- Community cards will be injected here -->
-                        </div>
-                    </div>
-                    <div class="stats-display">
-                        <div><span data-i18n="LABEL_STACK">Stack:</span> <span id="my-stack">0</span></div>
-                        <div><span data-i18n="LABEL_BET">Bet:</span> <span id="my-bet">0</span></div>
-                        <div><span data-i18n="LABEL_POT">Pot:</span> <span id="pot-display">0</span></div>
-                        <div id="prob-display" class="hidden"><span data-i18n="LABEL_WIN_PROB">Win:</span> <span
-                                id="win-prob">0%</span></div>
-                        <div id="hand-strength-container" class="hidden"><span data-i18n="LABEL_HAND">Hand:</span> <span
-                                id="hand-strength-display"></span></div>
-                    </div>
-                </div>
-
-                <div class="action-buttons">
-                    <button class="action-btn" data-action="fold" id="btn-fold" data-i18n="BTN_FOLD">Fold (F)</button>
-                    <button class="action-btn" data-action="call" id="btn-call" data-i18n="BTN_CALL">Call (C)</button>
-
-                    <div class="raise-wrapper">
-                        <button class="action-btn" data-action="raise" id="btn-raise" data-i18n="BTN_RAISE">Raise
-                            (R)</button>
-                        <div id="raise-controls" class="raise-popup hidden">
-                            <div class="raise-popup-header" data-i18n="HEADER_RAISE_AMOUNT">Raise Amount</div>
-                            <input type="number" id="raise-amount" value="0">
-                            <div class="raise-popup-actions">
-                                <button id="btn-cancel-raise" class="popup-btn cancel"
-                                    data-i18n="BTN_CANCEL">Cancel</button>
-                                <button id="btn-confirm-raise" class="popup-btn confirm"
-                                    data-i18n="BTN_SAVE">Save</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <button class="action-btn danger" data-action="allin" id="btn-allin" data-i18n="BTN_ALLIN">All In
-                        (A)</button>
-                </div>
-
-                <div id="end-round-controls" class="end-round-controls hidden">
-                    <button id="btn-next-round" class="btn-next-round" data-i18n="BTN_NEXT_ROUND">Next Round</button>
-                    <button id="btn-simulate" class="btn-next-round hidden" data-i18n="BTN_SIMULATE">Simulate</button>
-                    <button id="btn-elim-new-game" class="btn-next-round hidden" data-i18n="BTN_NEW_GAME">New
-                        Game</button>
-                    <button id="btn-quit-game" class="btn-quit-game" data-i18n="BTN_QUIT">Quit</button>
+        <!-- Menu Modal -->
+        <div id="menu-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3 data-i18n="MENU_TITLE">MENU</h3>
+                <div class="menu-buttons">
+                    <button id="btn-header-new-game" class="modal-btn" data-i18n="BTN_NEW_GAME">New Game</button>
+                    <button id="btn-header-quit" class="modal-btn danger" data-i18n="BTN_QUIT">Quit Game</button>
+                    <button id="btn-menu-close" class="modal-btn cancel" data-i18n="BTN_CLOSE">Close</button>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Custom Modal -->
-    <div id="custom-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3 id="modal-title">Confirm Action</h3>
-            <p id="modal-message">Are you sure?</p>
-            <div class="modal-actions">
-                <button id="btn-modal-cancel" class="modal-btn cancel" data-i18n="BTN_CANCEL">Cancel</button>
-                <button id="btn-modal-confirm" class="modal-btn confirm" data-i18n="BTN_CONFIRM">Confirm</button>
+        <!-- Confirmation Modal -->
+        <div id="custom-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3 id="modal-title">Confirm</h3>
+                <p id="modal-message">Are you sure?</p>
+                <div class="modal-actions">
+                    <button id="btn-modal-cancel" class="modal-btn cancel" data-i18n="BTN_CANCEL">Cancel</button>
+                    <button id="btn-modal-confirm" class="modal-btn confirm" data-i18n="BTN_CONFIRM">Confirm</button>
+                </div>
             </div>
         </div>
+
+        <!-- Hidden elements for JS compatibility if needed, or we refactor JS to not need them -->
+        <div id="community-cards" class="hidden"></div>
+        <div id="my-bet" class="hidden"></div>
+        <div id="win-prob" class="hidden"></div>
+        <div id="hand-strength-display" class="hidden"></div>
     </div>
-
-
 
     <script type="module" src="/static/game.js"></script>
 </body>

@@ -358,11 +358,118 @@ class WebPlayer(ConsolePlayer):
         self.last_round_state = round_state
 
     def receive_game_update_message(self, new_action, round_state):
-        super().receive_game_update_message(new_action, round_state)
+        # 1. Direct Print for Frontend Parser (Robustness)
+        # We construct "Name Action Amount" string and print it so the frontend regex catches it.
+        try:
+            if isinstance(new_action, dict):
+                # Get Action
+                action = new_action.get('action', '').upper()
+                
+                # Get Amount
+                amount = new_action.get('amount', 0)
+                if action == 'CALL':
+                    amount = new_action.get('paid', 0)
+                
+                # Get Player Name
+                player_name = new_action.get('player', '')
+                if not player_name:
+                    action_uuid = new_action.get('player_uuid') or new_action.get('uuid')
+                    if action_uuid and round_state:
+                        seats = round_state.get('seats', [])
+                        for seat in seats:
+                            if isinstance(seat, dict) and seat.get('uuid') == action_uuid:
+                                player_name = seat.get('name', 'Unknown')
+                                break
+                
+                if not player_name:
+                    player_name = "Unknown"
+
+                # Print if it's a valid action
+                if action and player_name:
+                    # Format: "Name Action Amount"
+                    # This matches the frontend regex: /^(.+?) (called|raised|folded|checked|all-in|SB|BB)(?:(?:\(| )(\d+)\)?)?$/i
+                    
+                    # Map action to readable string if needed, or keep uppercase
+                    # Frontend regex handles: called|raised|folded|checked|all-in|SB|BB
+                    action_map = {
+                        'SMALLBLIND': 'SB',
+                        'BIGBLIND': 'BB',
+                        'FOLD': 'folded',
+                        'CALL': 'called',
+                        'RAISE': 'raised',
+                        'CHECK': 'checked'
+                    }
+                    
+                    display_action = action_map.get(action, action)
+                    
+                    # Fix: Call with amount 0 is a Check
+                    if action == 'CALL' and amount == 0:
+                        display_action = 'checked'
+                    
+                    # Handle All-in detection (simple heuristic)
+                    if amount > 0 and round_state:
+                         seats = round_state.get('seats', [])
+                         action_uuid = new_action.get('player_uuid') or new_action.get('uuid')
+                         for seat in seats:
+                             if isinstance(seat, dict) and seat.get('uuid') == action_uuid:
+                                 if seat.get('stack', 0) == 0:
+                                     display_action = 'all-in'
+                                 break
+
+                    # Construct message content
+                    msg = f"{display_action}"
+                    if amount > 0 and display_action not in ['folded', 'checked']:
+                        msg += f" {amount}"
+                    
+                    # Send explicit chat message event to frontend
+                    # This bypasses terminal parsing and ensures the bubble appears
+                    # Only send if it's NOT me (frontend handles my actions optimistically)
+                    if player_name != self._player_name:
+                        self._send_update("chat_message", {
+                            "type": "opponent",
+                            "sender": player_name,
+                            "content": msg
+                        })
+                    
+                    # Also print to buffer for history/logs
+                    self._print_to_buffer(f"[ACTION] {player_name} {msg}")
+
+        except Exception as e:
+            print(f"[WEB PLAYER] Error sending action: {e}")
+
+        # 2. Call super to handle Pot updates and internal state
+        # Prepare enriched action for ConsolePlayer just in case
+        enriched_action = new_action.copy() if isinstance(new_action, dict) else new_action
+        if isinstance(enriched_action, dict):
+            if 'action' in enriched_action:
+                enriched_action['action'] = enriched_action['action'].upper()
+            if 'player' not in enriched_action:
+                enriched_action['player'] = player_name if 'player_name' in locals() else 'Unknown'
+
+        super().receive_game_update_message(enriched_action, round_state)
+        
+        # Sanitize new_action to use fixed UUIDs if possible for Frontend
+        sanitized_action = new_action.copy() if isinstance(new_action, dict) else new_action
+        if isinstance(sanitized_action, dict) and round_state:
+            action_uuid = sanitized_action.get('player_uuid') or sanitized_action.get('uuid')
+            if action_uuid:
+                seats = round_state.get('seats', [])
+                for seat in seats:
+                    if isinstance(seat, dict) and seat.get('uuid') == action_uuid:
+                        # Found the seat, get fixed UUID
+                        fixed_uuid = self._get_fixed_uuid_from_seat(seat, False)
+                        if fixed_uuid:
+                            if 'player_uuid' in sanitized_action:
+                                sanitized_action['player_uuid'] = fixed_uuid
+                            if 'uuid' in sanitized_action:
+                                sanitized_action['uuid'] = fixed_uuid
+                        break
+
+
         # Envia atualização do jogo (pot, ações)
         sanitized_round_state = self._sanitize_round_state(round_state)
         self._send_update("game_update", {
-            "action": new_action, 
+            "action": sanitized_action, 
             "round_state": sanitized_round_state
         })
         self.last_round_state = round_state
