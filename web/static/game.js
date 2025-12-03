@@ -287,23 +287,18 @@ function handleGameOver(data) {
     controlsArea.classList.remove('disabled'); // Enable controls so buttons can be clicked
     actionButtonsContainer.classList.add('hidden'); // Hide fold/call/raise
     endRoundControls.classList.remove('hidden'); // Show end round controls
-    endRoundControls.style.display = 'flex';
 
     // Hide Next Round and Simulate
     btnNextRound.classList.add('hidden');
-    btnNextRound.style.display = 'none';
     if (btnElimSimulate) {
         btnElimSimulate.classList.add('hidden');
-        btnElimSimulate.style.display = 'none';
     }
 
     // Show New Game and Quit
     if (btnElimNewGame) {
         btnElimNewGame.classList.remove('hidden');
-        btnElimNewGame.style.display = 'inline-block';
     }
     btnQuitGame.classList.remove('hidden');
-    btnQuitGame.style.display = 'inline-block';
 
     logToTerminal(i18n.get('MSG_GAME_OVER') || 'Game Over', 'system');
 }
@@ -315,22 +310,18 @@ function handlePlayerEliminated(data) {
 
     // Hide Next Round button
     btnNextRound.classList.add('hidden');
-    btnNextRound.style.display = 'none'; // Force hide
 
     // Show Simulate and New Game buttons
     if (btnElimSimulate) {
         btnElimSimulate.classList.remove('hidden');
-        btnElimSimulate.style.display = 'inline-block'; // Force show
     }
     if (btnElimNewGame) {
         btnElimNewGame.classList.remove('hidden');
-        btnElimNewGame.style.display = 'inline-block'; // Force show
     }
 
     // Ensure controls area is visible
     actionButtonsContainer.classList.add('hidden');
     endRoundControls.classList.remove('hidden');
-    endRoundControls.style.display = 'flex'; // Ensure container is flex
 
     // Log elimination to terminal
     logToTerminal(i18n.get('MODAL_ELIMINATED_MSG') || 'You have been eliminated.', 'error');
@@ -347,15 +338,12 @@ function handleWaitForNextRound() {
 
     // Reset buttons to normal state (Next Round visible, others hidden)
     btnNextRound.classList.remove('hidden');
-    btnNextRound.style.display = ''; // Reset inline style
 
     if (btnElimSimulate) {
         btnElimSimulate.classList.add('hidden');
-        btnElimSimulate.style.display = ''; // Reset inline style
     }
     if (btnElimNewGame) {
         btnElimNewGame.classList.add('hidden');
-        btnElimNewGame.style.display = ''; // Reset inline style
     }
 
     btnNextRound.focus();
@@ -489,13 +477,27 @@ function logToTerminal(text, type = 'action') {
 }
 
 function scrollToBottom() {
-    if (window.innerWidth <= 768) {
+    const isMobile = window.innerWidth <= 768;
+
+    if (isMobile) {
+        // Increased timeout to ensure keyboard/DOM are ready
         setTimeout(() => {
-            const y = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight, document.documentElement.offsetHeight, document.body.scrollTop + document.documentElement.scrollTop);
-            window.scrollTo(0, y + 100); // Add extra buffer
-        }, 100);
+            // On mobile, scroll is on the main window
+            const doc = document.documentElement;
+            const scrollHeight = Math.max(doc.scrollHeight, doc.offsetHeight, document.body.scrollHeight);
+
+            // Scroll to absolute bottom
+            window.scrollTo({
+                top: scrollHeight,
+                left: 0,
+                behavior: 'auto' // 'smooth' is buggy on iOS when triggered via script
+            });
+        }, 150);
     } else {
-        terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        // Desktop: Scroll the specific container
+        if (terminalOutput) {
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
     }
 }
 
@@ -706,31 +708,26 @@ let lastScrollTop = 0;
 const headerBar = document.querySelector('.header-bar');
 const handInfo = document.querySelector('.hand-info');
 const delta = 5;
-const headerHeight = 54; // Approx header height
+const headerHeight = 54;
 
 window.addEventListener('scroll', () => {
-    const scrollTop = Math.max(0, window.scrollY || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop);
+    // 1. Get current position. pageYOffset is the safest cross-browser/legacy alias
+    // Math.max(0, ...) prevents negative values on iOS (rubber banding at top)
+    const scrollTop = Math.max(0, window.pageYOffset || document.documentElement.scrollTop);
 
-    // Debug log
-    // console.log('Scroll:', scrollTop, 'Last:', lastScrollTop, 'Delta:', Math.abs(lastScrollTop - scrollTop));
-
-    // Make sure they scroll more than delta
+    // 2. Performance: If change is less than delta, ignore
     if (Math.abs(lastScrollTop - scrollTop) <= delta) return;
 
-    // If they scrolled down and are past the navbar, add class .header-hidden.
+    // 3. Direction Logic
     if (scrollTop > lastScrollTop && scrollTop > headerHeight) {
-        // Scroll Down
-        // console.log('Hiding header');
+        // SCROLL DOWN (Hide)
         if (headerBar) headerBar.classList.add('header-hidden');
         if (handInfo) handInfo.classList.add('moved-up');
     } else {
-        // Scroll Up
-        // Simplified check: just show it if we are scrolling up.
-        // The previous check (scrollTop + window.innerHeight < document.body.scrollHeight)
-        // can fail on Safari due to dynamic address bar resizing.
+        // SCROLL UP (Show)
         if (headerBar) headerBar.classList.remove('header-hidden');
         if (handInfo) handInfo.classList.remove('moved-up');
     }
 
     lastScrollTop = scrollTop;
-}, { passive: true });
+}, { passive: true }); // passive: true is CRUCIAL for performance on iOS
