@@ -1,7 +1,11 @@
 {
     "GAME_TITLE": {
-        "en": "Poker Game",
-        "pt-br": "Poker Game"
+        "en": "Console Poker",
+        "pt-br": "Console Poker"
+    },
+    "GAME_VERSION": {
+        "en": "Closed Alpha v0.1",
+        "pt-br": "Alpha Fechada v0.1"
     },
     "LABEL_NICKNAME": {
         "en": "Nickname",

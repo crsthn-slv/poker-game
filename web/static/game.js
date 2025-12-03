@@ -287,23 +287,18 @@ function handleGameOver(data) {
     controlsArea.classList.remove('disabled'); // Enable controls so buttons can be clicked
     actionButtonsContainer.classList.add('hidden'); // Hide fold/call/raise
     endRoundControls.classList.remove('hidden'); // Show end round controls
-    endRoundControls.style.display = 'flex';
 
     // Hide Next Round and Simulate
     btnNextRound.classList.add('hidden');
-    btnNextRound.style.display = 'none';
     if (btnElimSimulate) {
         btnElimSimulate.classList.add('hidden');
-        btnElimSimulate.style.display = 'none';
     }
 
     // Show New Game and Quit
     if (btnElimNewGame) {
         btnElimNewGame.classList.remove('hidden');
-        btnElimNewGame.style.display = 'inline-block';
     }
     btnQuitGame.classList.remove('hidden');
-    btnQuitGame.style.display = 'inline-block';
 
     logToTerminal(i18n.get('MSG_GAME_OVER') || 'Game Over', 'system');
 }
@@ -315,22 +310,18 @@ function handlePlayerEliminated(data) {
 
     // Hide Next Round button
     btnNextRound.classList.add('hidden');
-    btnNextRound.style.display = 'none'; // Force hide
 
     // Show Simulate and New Game buttons
     if (btnElimSimulate) {
         btnElimSimulate.classList.remove('hidden');
-        btnElimSimulate.style.display = 'inline-block'; // Force show
     }
     if (btnElimNewGame) {
         btnElimNewGame.classList.remove('hidden');
-        btnElimNewGame.style.display = 'inline-block'; // Force show
     }
 
     // Ensure controls area is visible
     actionButtonsContainer.classList.add('hidden');
     endRoundControls.classList.remove('hidden');
-    endRoundControls.style.display = 'flex'; // Ensure container is flex
 
     // Log elimination to terminal
     logToTerminal(i18n.get('MODAL_ELIMINATED_MSG') || 'You have been eliminated.', 'error');
@@ -347,15 +338,12 @@ function handleWaitForNextRound() {
 
     // Reset buttons to normal state (Next Round visible, others hidden)
     btnNextRound.classList.remove('hidden');
-    btnNextRound.style.display = ''; // Reset inline style
 
     if (btnElimSimulate) {
         btnElimSimulate.classList.add('hidden');
-        btnElimSimulate.style.display = ''; // Reset inline style
     }
     if (btnElimNewGame) {
         btnElimNewGame.classList.add('hidden');
-        btnElimNewGame.style.display = ''; // Reset inline style
     }
 
     btnNextRound.focus();
@@ -429,7 +417,7 @@ function handleActionRequired(data) {
         updatePotDisplay(currentRoundState.pot);
     }
 
-    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    scrollToBottom();
 }
 
 function sendAction(action, amount) {
@@ -485,7 +473,32 @@ function logToTerminal(text, type = 'action') {
         div.textContent = text;
     }
     terminalOutput.appendChild(div);
-    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    scrollToBottom();
+}
+
+function scrollToBottom() {
+    const isMobile = window.innerWidth <= 768;
+
+    if (isMobile) {
+        // Increased timeout to ensure keyboard/DOM are ready
+        setTimeout(() => {
+            // On mobile, scroll is on the main window
+            const doc = document.documentElement;
+            const scrollHeight = Math.max(doc.scrollHeight, doc.offsetHeight, document.body.scrollHeight);
+
+            // Scroll to absolute bottom
+            window.scrollTo({
+                top: scrollHeight,
+                left: 0,
+                behavior: 'auto' // 'smooth' is buggy on iOS when triggered via script
+            });
+        }, 150);
+    } else {
+        // Desktop: Scroll the specific container
+        if (terminalOutput) {
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
+    }
 }
 
 function renderCards(cards) {
@@ -689,3 +702,32 @@ function parseCommunityCardsFromLog(text) {
         }
     }
 }
+
+// Mobile Header Scroll Logic
+let lastScrollTop = 0;
+const headerBar = document.querySelector('.header-bar');
+const handInfo = document.querySelector('.hand-info');
+const delta = 5;
+const headerHeight = 54;
+
+window.addEventListener('scroll', () => {
+    // 1. Get current position. pageYOffset is the safest cross-browser/legacy alias
+    // Math.max(0, ...) prevents negative values on iOS (rubber banding at top)
+    const scrollTop = Math.max(0, window.pageYOffset || document.documentElement.scrollTop);
+
+    // 2. Performance: If change is less than delta, ignore
+    if (Math.abs(lastScrollTop - scrollTop) <= delta) return;
+
+    // 3. Direction Logic
+    if (scrollTop > lastScrollTop && scrollTop > headerHeight) {
+        // SCROLL DOWN (Hide)
+        if (headerBar) headerBar.classList.add('header-hidden');
+        if (handInfo) handInfo.classList.add('moved-up');
+    } else {
+        // SCROLL UP (Show)
+        if (headerBar) headerBar.classList.remove('header-hidden');
+        if (handInfo) handInfo.classList.remove('moved-up');
+    }
+
+    lastScrollTop = scrollTop;
+}, { passive: true }); // passive: true is CRUCIAL for performance on iOS

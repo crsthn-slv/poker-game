@@ -194,16 +194,35 @@ button {
     margin: 0;
     font-family: var(--font-pixel);
     font-size: 1.5rem;
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
     white-space: nowrap;
+    text-align: center;
+}
+
+.header-center-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.version-text {
+    font-family: var(--font-main);
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.7;
 }
 
 .header-left,
 .header-right {
-    z-index: 1;
-    /* Ensure buttons are clickable above title if overlap */
+    display: flex;
+    align-items: center;
+}
+
+.header-right {
+    justify-content: flex-end;
 }
 
 .btn-header {
@@ -488,7 +507,6 @@ button {
     display: flex;
     gap: 1rem;
     width: 100%;
-    margin-top: 1rem;
 }
 
 .btn-next-round {
@@ -791,4 +809,249 @@ button {
 .hand-strength {
     font-weight: bold;
     color: var(--primary-color);
+}
+
+/* Mobile Layout */
+@media (max-width: 768px) {
+
+    /* Title adjustments */
+    h1 {
+        font-size: 1.5rem;
+        white-space: nowrap;
+        margin-bottom: 2rem;
+    }
+
+    /* Language Selector adjustments */
+    .lang-selector {
+        position: static;
+        width: 100%;
+        max-width: 600px;
+        margin: 1.5rem auto 0;
+        display: flex;
+        gap: 1rem;
+        padding: 1rem;
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-md);
+        border-radius: var(--radius-md);
+    }
+
+    .lang-btn {
+        flex: 1;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        font-size: 0.8rem;
+    }
+
+    .lang-btn.active {
+        border-color: var(--accent-color);
+        background-color: var(--accent-color);
+        color: white;
+    }
+
+    /* Game Screen Header Mobile */
+    html,
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+        /* Ensure viewport handles scroll, not body */
+    }
+
+    .container,
+    .screen {
+        height: auto;
+        min-height: 100vh;
+        display: block;
+        overflow: visible;
+        /* Do not trap scroll */
+    }
+
+    /* Remove container padding on mobile to maximize width */
+    .container {
+        padding: 0;
+    }
+
+    #game-screen {
+        padding-top: 130px;
+        /* Header (55) + Cards (75) approx */
+        padding-bottom: 120px;
+        display: block;
+        /* Allow flow */
+        width: 100%;
+        max-width: 100%;
+        min-height: 120vh;
+        /* Force scrollability */
+    }
+
+    .game-log {
+        height: auto;
+        min-height: 200px;
+        overflow: visible;
+        /* Let window scroll handle it */
+        margin-bottom: 0;
+        background-color: transparent;
+        /* Seamless background */
+        border: none;
+        box-shadow: none;
+        border-radius: 0;
+        padding: 0.5rem 1rem;
+        /* Minimal horizontal padding */
+        width: 100%;
+    }
+
+    .header-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        border-radius: 0;
+        margin-bottom: 0;
+        padding: 0.5rem 1rem;
+        transition: transform 0.3s ease-in-out;
+        will-change: transform;
+        background-color: #1e1e1e;
+        /* Solid opaque color */
+        border-bottom: 1px solid var(--border-color);
+        height: 54px;
+        /* Fixed height for calculation */
+        display: flex;
+        align-items: center;
+    }
+
+    .header-bar.header-hidden {
+        transform: translateY(-100%) !important;
+    }
+
+    .header-title {
+        font-size: 14px;
+    }
+
+    /* Fixed Cards & Stats Bar */
+    .hand-info {
+        position: fixed;
+        top: 54px;
+        /* Below header */
+        left: 0;
+        right: 0;
+        z-index: 90;
+        background-color: #1e1e1e;
+        /* Solid opaque color */
+        border-bottom: 1px solid var(--border-color);
+        padding: 0.5rem;
+        margin: 0;
+        transition: top 0.3s ease-in-out;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        height: 70px;
+    }
+
+    .hand-info.moved-up {
+        top: 0;
+    }
+
+    /* Resize Cards for Mobile */
+    .playing-card,
+    .card-placeholder {
+        width: 32px;
+        height: 44px;
+        font-size: 0.8rem;
+        border-radius: 4px;
+    }
+
+    .cards-section {
+        gap: 0.5rem;
+    }
+
+    .cards-divider {
+        height: 30px;
+    }
+
+    .stats-display {
+        font-size: 0.75rem;
+        line-height: 1.2;
+    }
+
+    /* Remove controls-area padding on mobile */
+    .controls-area {
+        padding: 0;
+        background-color: transparent;
+        border: none;
+        box-shadow: none;
+    }
+
+    /* Fixed Bottom Actions Mobile */
+    .action-buttons {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background-color: #1e1e1e;
+        /* Solid opaque color */
+        padding: 0.5rem;
+        z-index: 100;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    /* 2x2 Grid Layout & Ordering */
+    .action-btn,
+    .raise-wrapper {
+        width: calc(50% - 0.25rem);
+        flex: none;
+        margin: 0;
+    }
+
+    .action-btn {
+        height: 48px;
+        /* Accessible touch target size */
+        min-height: 48px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Top Row */
+    .raise-wrapper {
+        order: 1;
+    }
+
+    #btn-allin {
+        order: 2;
+    }
+
+    /* Bottom Row */
+    #btn-fold {
+        order: 3;
+    }
+
+    #btn-call {
+        order: 4;
+    }
+
+    /* Ensure Raise Popup opens up correctly */
+    .raise-popup {
+        bottom: 100%;
+        margin-bottom: 10px;
+        left: 0;
+        transform: none;
+        width: 200%;
+        /* Span full width of screen roughly */
+        max-width: 300px;
+    }
+
+    .raise-popup::after {
+        left: 20%;
+        /* Adjust arrow position */
+    }
 }
