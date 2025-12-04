@@ -6,6 +6,8 @@ import queue
 import sys
 import io
 import re
+import time
+import random
 from typing import Dict, Any, Callable, Optional, Tuple
 
 from players.console_player import ConsolePlayer
@@ -425,10 +427,45 @@ class WebPlayer(ConsolePlayer):
                     # This bypasses terminal parsing and ensures the bubble appears
                     # Only send if it's NOT me (frontend handles my actions optimistically)
                     if player_name != self._player_name:
+                        # Add random delay for bot actions to simulate thinking/human-like timing
+                        # Only delay if it's a game action (not automatic like blinds, though blinds are actions too)
+                        # User requested delay for "bot messages", which usually implies their turn.
+                        # Blinds are fast, but a small delay is fine.
+                        self._send_update("bot_thinking", {"player": player_name})
+                        delay = random.uniform(1.0, 3.0)
+                        time.sleep(delay)
+
+                        # Get stack from round_state
+                        current_stack = 0
+                        if round_state:
+                             seats = round_state.get('seats', [])
+                             for seat in seats:
+                                 if isinstance(seat, dict) and seat.get('uuid') == action_uuid:
+                                     current_stack = seat.get('stack', 0)
+                                     break
+
+                        # Calculate total bet for this street
+                        total_bet = 0
+                        if round_state:
+                            street = round_state.get('street')
+                            histories = round_state.get('action_histories', {}).get(street, [])
+                            # Ensure histories is a list (sometimes it might be dict if not initialized?)
+                            if isinstance(histories, list):
+                                for a in histories:
+                                    if isinstance(a, dict) and a.get('uuid') == action_uuid:
+                                        total_bet += a.get('amount', 0)
+                                        # For CALL, amount is usually paid amount.
+                                        # For RAISE, amount is usually added amount.
+                                        # If 'paid' exists, prioritize it?
+                                        # In history, 'amount' is usually the cost.
+                                        # Let's stick to 'amount'.
+
                         self._send_update("chat_message", {
                             "type": "opponent",
                             "sender": player_name,
-                            "content": msg
+                            "content": msg,
+                            "bet": total_bet,
+                            "stack": current_stack
                         })
                     
                     # Also print to buffer for history/logs

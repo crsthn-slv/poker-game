@@ -57,6 +57,9 @@ const modalMessage = document.getElementById('modal-message');
 const btnModalCancel = document.getElementById('btn-modal-cancel');
 const btnModalConfirm = document.getElementById('btn-modal-confirm');
 
+const thinkingIndicator = document.getElementById('thinking-indicator');
+const thinkingText = document.getElementById('thinking-text');
+
 let onModalConfirm = null;
 
 // Initialize
@@ -312,10 +315,15 @@ function handleGameMessage(type, data) {
             break;
 
         case 'chat_message':
+            hideThinking();
             if (data.sender && data.content) {
                 if (data.sender === myNickname) return;
-                addChatMessage(data.type || 'opponent', data.content, data.sender);
+                addChatMessage(data.type || 'opponent', data.content, data.sender, data);
             }
+            break;
+
+        case 'bot_thinking':
+            handleBotThinking(data);
             break;
     }
 }
@@ -326,10 +334,109 @@ function stripAnsi(text) {
     return text.replace(/\x1B\[[0-9;]*[mK]/g, '');
 }
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatCardsInText(text) {
+    // First escape HTML to prevent XSS
+    let safeText = escapeHtml(text);
+
+    // Convert newlines to <br> for Dealer messages
+    safeText = safeText.replace(/\n/g, '<br>');
+
+    // Regex for cards with Red suits (Hearts ♥, Diamonds ♦)
+    // Matches RankSuit (e.g. 10♥, K♦) or SuitRank (e.g. ♥10, ♦K)
+    // Ranks: 2-9, T, J, Q, K, A, 10
+    const redCardRegex = /((?:10|[2-9TJQKA])[♦♥]|[♦♥](?:10|[2-9TJQKA]))/g;
+
+    return safeText.replace(redCardRegex, '<span style="color: #ff5252;">$1</span>');
+}
+
+// Deduplication state
+let lastChatMessage = { content: '', time: 0 };
+let pendingFinalStacks = null;
+let isShowingCards = false;
+
 function parseAndLogMessage(rawText) {
     if (!rawText) return;
     const cleanText = stripAnsi(rawText).trim();
     if (!cleanText) return;
+
+    // Define ignore patterns early
+    const ignorePatterns = [
+        /^Available actions/i,
+        /^Your cards/i,
+        /^To Call/i,
+        /^\[WEB\]/i,
+        /^\[SYSTEM\]/i,
+        /^─/,
+        /^–/, // En-dash
+        /^—/, // Em-dash
+        /^-/, // Hyphen
+        /^>/, // User input echo
+        /^\[ACTION\]/, // Backend action logs
+        /^.+? (folded|called|raised|checked|all-in|SB|BB)/i, // Standard player actions (handled by chat bubbles)
+        /^Pot .* \| Your chips/i, // Hide repeated pot/stack info during player turn
+        /^Community cards/i // Hide backend community cards msg (handled by Dealer msg)
+    ];
+
+    // Handle "Final stacks" buffering - Check FIRST to avoid filtering
+    if (cleanText.toLowerCase().startsWith('final stacks:')) {
+        pendingFinalStacks = cleanText;
+        return;
+    }
+
+    if (pendingFinalStacks) {
+        if (ignorePatterns.some(p => p.test(cleanText))) return; // Ignore noise
+        const combined = pendingFinalStacks + '\n' + cleanText;
+        addChatMessage('opponent', combined, 'Dealer');
+        pendingFinalStacks = null;
+        return;
+    }
+
+    // Handle "Participant cards" - Individual messages
+    if (cleanText.toLowerCase().startsWith('participant cards:')) {
+        isShowingCards = true;
+        addChatMessage('opponent', 'Show your cards', 'Dealer');
+        return;
+    }
+
+    if (isShowingCards) {
+        // Check for end of section
+        const lower = cleanText.toLowerCase();
+        if (lower.startsWith('winner') || lower.startsWith('final stacks') || lower.startsWith('---')) {
+            isShowingCards = false;
+            // Fall through to handle this line (e.g. Winner line)
+        } else {
+            // Parse card line: "Name (Pos): Cards | Hand"
+            // Regex: Name (Group 1), Optional Pos (Group 2), Content (Group 3)
+            const cardRegex = /^(.+?)(?:\s*\((.+?)\))?:\s*(.+)$/;
+            const match = cleanText.match(cardRegex);
+            if (match) {
+                const name = match[1].trim();
+                // Collapse multiple spaces and remove newlines
+                const content = match[3].trim().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+
+                // Determine type (user or opponent)
+                const type = (name === myNickname) ? 'user' : 'opponent';
+
+                // Find stack
+                let stack = null;
+                if (currentRoundState && currentRoundState.seats) {
+                    const seat = currentRoundState.seats.find(s => s.name === name);
+                    if (seat) stack = seat.stack;
+                }
+
+                addChatMessage(type, `I have ${content}`, name, { stack: stack });
+                return;
+            }
+            // Ignore other lines in this block (noise)
+            return;
+        }
+    }
 
     // 1. Check for Community Cards (Keep as visual aid in chat)
     if (cleanText.includes('[') && cleanText.includes(']')) {
@@ -346,40 +453,26 @@ function parseAndLogMessage(rawText) {
         }
     }
 
-    // 2. Check for "Wins"
-    if (cleanText.toLowerCase().includes('wins')) {
-        addSystemMessage(cleanText);
+    // 2. Check for "Wins" / "Winner" / "Won"
+    const lower = cleanText.toLowerCase();
+    if (lower.includes('wins') || lower.includes('winner') || lower.includes('won')) {
+        addChatMessage('opponent', cleanText, 'Dealer');
         return;
     }
 
     // 3. Filter out noisy terminal output
-    // 3. Filter out noisy terminal output
-    const ignorePatterns = [
-        /^Available actions/i,
-        /^Your cards/i,
-        /^To Call/i,
-        /^\[WEB\]/i,
-        /^\[SYSTEM\]/i,
-        /^─/,
-        /^–/, // En-dash
-        /^—/, // Em-dash
-        /^-/, // Hyphen
-        /^>/, // User input echo
-        /^\[ACTION\]/, // Backend action logs
-        /^.+? (folded|called|raised|checked|all-in|SB|BB)/i // Standard player actions (handled by chat bubbles)
-    ];
-
     if (ignorePatterns.some(p => p.test(cleanText))) return;
     if (cleanText.startsWith('|')) return;
 
     // 4. Special handling for Pot and Game Events
     if (cleanText.toLowerCase().startsWith('pot')) {
-        addSystemMessage(cleanText);
+        // Ignore "Pot" messages that start with Pot (likely backend updates)
+        // Unless it's a "Pot won" message which usually contains "wins" handled above
         return;
     }
 
     if (cleanText.toLowerCase().startsWith('round summary')) {
-        addSystemMessage('--- ROUND SUMMARY ---');
+        // Ignore Round Summary
         return;
     }
 
@@ -425,10 +518,7 @@ function parseAndLogMessage(rawText) {
     addSystemMessage(cleanText);
 }
 
-// Deduplication state
-let lastChatMessage = { content: '', time: 0 };
-
-function addChatMessage(type, content, senderName) {
+function addChatMessage(type, content, senderName, options = {}) {
     // Simple deduplication: ignore if same content and sender within 500ms
     const now = Date.now();
     const uniqueKey = `${type}:${senderName}:${content}`;
@@ -442,19 +532,42 @@ function addChatMessage(type, content, senderName) {
 
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
-    bubble.textContent = content;
+    // Format cards in text to be red if Hearts/Diamonds
+    bubble.innerHTML = formatCardsInText(content);
 
     if (type === 'opponent') {
         // Avatar
         const avatar = document.createElement('div');
-        avatar.className = 'avatar-circle';
-        avatar.textContent = getInitials(senderName);
-        avatar.style.backgroundColor = getAvatarColor(senderName);
+        avatar.style.position = 'relative'; // For badge positioning
+
+        // Check if it's the Dealer/System bot
+        if (senderName === 'Dealer' || senderName === 'System') {
+            avatar.className = 'avatar-circle robot';
+            avatar.textContent = '🤖';
+            avatar.style.backgroundColor = '#7c4dff'; // Purple for bot
+            avatar.style.border = '1px solid #b388ff';
+        } else {
+            avatar.className = 'avatar-circle';
+            avatar.textContent = getInitials(senderName);
+            avatar.style.backgroundColor = getAvatarColor(senderName);
+
+            // Bet Badge
+            if (options.bet !== undefined && options.bet !== null) {
+                const badge = document.createElement('div');
+                badge.className = 'avatar-bet-badge';
+                badge.textContent = options.bet;
+                avatar.appendChild(badge);
+            }
+        }
 
         // Name label
         const nameLabel = document.createElement('span');
         nameLabel.className = 'sender-name';
-        nameLabel.textContent = senderName;
+        let displayName = senderName;
+        if (options.stack !== undefined && options.stack !== null) {
+            displayName += ` (${options.stack})`;
+        }
+        nameLabel.textContent = displayName;
 
         const wrapper = document.createElement('div');
         wrapper.style.display = 'flex';
@@ -474,15 +587,32 @@ function addChatMessage(type, content, senderName) {
 }
 
 function addSystemMessage(text) {
-    const row = document.createElement('div');
-    // Check if it's a divider (starts with ---) or explicit centered content
-    const isDivider = text.startsWith('---') || text === 'GAME STARTED' || text === 'GAME OVER';
+    // Remove dashes from text (e.g. "--- FLOP ---" -> "FLOP")
+    const cleanText = text.replace(/^-+\s*|\s*-+$/g, '');
 
-    row.className = `msg-row system ${isDivider ? 'centered' : 'left-aligned'}`;
+    // Check if it's a divider (starts with --- in original text) or explicit centered content
+    // Note: We check original 'text' for dashes to identify dividers coming from backend
+    // Also explicitly check for Street names to ensure they are centered
+    const upper = cleanText.toUpperCase();
+    const isDivider = text.startsWith('---') ||
+        text === 'GAME STARTED' ||
+        text === 'GAME OVER' ||
+        ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].includes(upper) ||
+        upper.includes('WINNER') ||
+        upper.includes('WON');
+
+    if (!isDivider) {
+        // Render as "Dealer" bot message
+        addChatMessage('opponent', cleanText, 'Dealer');
+        return;
+    }
+
+    const row = document.createElement('div');
+    row.className = `msg-row system centered`;
 
     const badge = document.createElement('div');
     badge.className = 'msg-system-badge';
-    badge.textContent = text;
+    badge.textContent = cleanText; // Use clean text (no dashes)
 
     row.appendChild(badge);
     chatContent.appendChild(row);
@@ -538,7 +668,8 @@ function getAvatarColor(name) {
 
 function handleStreetStart(data) {
     if (data.street) {
-        addSystemMessage(`--- ${data.street.toUpperCase()} ---`);
+        // Send just the street name, addSystemMessage will handle centering and no dashes
+        addSystemMessage(data.street.toUpperCase());
     }
     if (data.round_state) {
         currentRoundState = data.round_state;
@@ -578,6 +709,7 @@ function handleGameUpdate(data) {
 }
 
 function handleActionRequired(data) {
+    hideThinking();
     currentRoundState = data.round_state;
     updateStats(currentRoundState);
 
@@ -596,9 +728,11 @@ function handleActionRequired(data) {
     btnRaise.disabled = !canRaise;
 
     // Update Call Button Text
+    let callAmount = 0;
     const callAction = validActions.find(a => a.action === 'call');
     if (callAction) {
-        currentRoundState.amount_to_call = callAction.amount;
+        callAmount = callAction.amount;
+        currentRoundState.amount_to_call = callAmount;
         const label = btnCall.querySelector('.btn-label');
         if (callAction.amount === 0) {
             label.textContent = i18n.get('BTN_CHECK') || 'CHECK';
@@ -614,6 +748,38 @@ function handleActionRequired(data) {
         raiseAmountInput.max = raiseAction.amount.max;
         raiseAmountInput.value = raiseAction.amount.min;
     }
+
+    // --- Dealer Message ---
+    // Calculate Pot
+    let totalPot = 0;
+    if (currentRoundState.pot) {
+        if (currentRoundState.pot.main) totalPot += currentRoundState.pot.main.amount;
+        if (currentRoundState.pot.side) currentRoundState.pot.side.forEach(s => totalPot += s.amount);
+    }
+
+    // Get My Stack
+    let myStack = 0;
+    if (currentRoundState.seats) {
+        const mySeat = currentRoundState.seats.find(s => s.name === myNickname);
+        if (mySeat) myStack = mySeat.stack;
+    }
+
+    // Community Cards
+    const cards = currentRoundState.community_card || [];
+    const cardsStr = cards.map(c => getCardSymbol(c)).join(' ');
+
+    let msg = `The pot is ${totalPot}, you have ${myStack} chips.`;
+    if (callAmount > 0) {
+        msg += ` To continue playing you need to call ${callAmount}.`;
+    } else {
+        msg += ` You can check.`;
+    }
+
+    if (cards.length > 0) {
+        msg += `\nCommunity cards are: ${cardsStr}`;
+    }
+
+    addChatMessage('opponent', msg, 'Dealer');
 
     scrollToBottom();
 }
@@ -645,6 +811,17 @@ function handlePlayerEliminated(data) {
 
     addSystemMessage(i18n.get('MODAL_ELIMINATED_MSG') || 'YOU HAVE BEEN ELIMINATED');
     renderCards([]); // Clear cards
+}
+
+function handleBotThinking(data) {
+    if (data.player) {
+        thinkingText.textContent = `${data.player} is thinking`;
+        thinkingIndicator.classList.remove('hidden');
+    }
+}
+
+function hideThinking() {
+    thinkingIndicator.classList.add('hidden');
 }
 
 function updateStats(roundState) {
