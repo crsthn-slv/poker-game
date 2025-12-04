@@ -406,6 +406,284 @@ class SupabaseClient:
             print(f"[SUPABASE] Error fetching bot messages: {e}")
             return {}
 
+    def create_match_session(self, player_id: str, config: Dict[str, Any]) -> Optional[str]:
+        """
+        Cria uma nova sessão de partida.
+        
+        Args:
+            player_id: UUID do jogador
+            config: Configuração da partida (initial_stack, num_opponents, total_rounds)
+            
+        Returns:
+            match_session_id ou None se falhar
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    match_session_id = str(uuid.uuid4())
+                    
+                    # Get next match number for this player
+                    cursor.execute("""
+                        SELECT COALESCE(MAX(match_number), 0) + 1
+                        FROM match_sessions
+                        WHERE player_id = %s
+                    """, (player_id,))
+                    
+                    match_number = cursor.fetchone()[0]
+                    
+                    # Insert new match session
+                    cursor.execute("""
+                        INSERT INTO match_sessions (
+                            id, player_id, match_number, status,
+                            total_rounds, initial_stack, num_opponents
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        match_session_id,
+                        player_id,
+                        match_number,
+                        'active',
+                        config.get('total_rounds', 20),
+                        config.get('initial_stack', 1000),
+                        config.get('num_opponents', 5)
+                    ))
+                    
+                    conn.commit()
+                    return match_session_id
+                    
+        except Exception as e:
+            print(f"[SUPABASE] Error creating match session: {e}")
+            return None
+
+    def get_match_history(self, player_id: str, limit: int = 256) -> List[Dict[str, Any]]:
+        """
+        Obtém histórico de partidas de um jogador.
+        
+        Args:
+            player_id: UUID do jogador
+            limit: Número máximo de partidas (padrão 256)
+            
+        Returns:
+            Lista de dicts com informações das partidas
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT 
+                            id, match_number, status, created_at, completed_at,
+                            current_round, total_rounds, initial_stack, num_opponents,
+                            last_updated
+                        FROM match_sessions
+                        WHERE player_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (player_id, limit))
+                    
+                    rows = cursor.fetchall()
+                    matches = []
+                    
+                    for row in rows:
+                        matches.append({
+                            'id': row[0],
+                            'match_number': row[1],
+                            'status': row[2],
+                            'created_at': row[3].isoformat() if row[3] else None,
+                            'completed_at': row[4].isoformat() if row[4] else None,
+                            'current_round': row[5],
+                            'total_rounds': row[6],
+                            'initial_stack': row[7],
+                            'num_opponents': row[8],
+                            'last_updated': row[9].isoformat() if row[9] else None
+                        })
+                    
+                    return matches
+                    
+        except Exception as e:
+            print(f"[SUPABASE] Error getting match history: {e}")
+            return []
+
+    def get_active_match(self, player_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Obtém a partida ativa de um jogador, se houver.
+        
+        Args:
+            player_id: UUID do jogador
+            
+        Returns:
+            Dict com informações da partida ou None
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT 
+                            id, match_number, status, created_at, current_round,
+                            total_rounds, initial_stack, num_opponents, session_data
+                        FROM match_sessions
+                        WHERE player_id = %s AND status = 'active'
+                        ORDER BY last_updated DESC
+                        LIMIT 1
+                    """, (player_id,))
+                    
+                    row = cursor.fetchone()
+                    if not row:
+                        return None
+                    
+                    return {
+                        'id': row[0],
+                        'match_number': row[1],
+                        'status': row[2],
+                        'created_at': row[3].isoformat() if row[3] else None,
+                        'current_round': row[4],
+                        'total_rounds': row[5],
+                        'initial_stack': row[6],
+                        'num_opponents': row[7],
+                        'session_data': row[8]
+                    }
+                    
+        except Exception as e:
+            print(f"[SUPABASE] Error getting active match: {e}")
+            return None
+
+    def update_match_status(
+        self, 
+        match_session_id: str, 
+        status: str, 
+        session_data: Optional[Dict] = None,
+        current_round: Optional[int] = None
+    ) -> bool:
+        """
+        Atualiza status e dados de uma partida.
+        
+        Args:
+            match_session_id: ID da partida
+            status: Novo status ('active', 'completed', 'abandoned')
+            session_data: Dados da sessão (opcional)
+            current_round: Round atual (opcional)
+            
+        Returns:
+            True se atualizado com sucesso
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Build dynamic update query
+                    updates = ["status = %s"]
+                    params = [status]
+                    
+                    if session_data is not None:
+                        updates.append("session_data = %s")
+                        params.append(Json(session_data))
+                    
+                    if current_round is not None:
+                        updates.append("current_round = %s")
+                        params.append(current_round)
+                    
+                    if status == 'completed':
+                        updates.append("completed_at = NOW()")
+                    
+                    params.append(match_session_id)
+                    
+                    query = f"""
+                        UPDATE match_sessions
+                        SET {', '.join(updates)}
+                        WHERE id = %s
+                    """
+                    
+                    cursor.execute(query, params)
+                    conn.commit()
+                    return cursor.rowcount > 0
+                    
+        except Exception as e:
+            print(f"[SUPABASE] Error updating match status: {e}")
+            return False
+
+    def get_match_details(self, match_session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Obtém detalhes completos de uma partida para visualização.
+        Inclui todos os rounds e ações.
+        
+        Args:
+            match_session_id: ID da partida
+            
+        Returns:
+            Dict com detalhes completos ou None
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Get match session info
+                    cursor.execute("""
+                        SELECT 
+                            ms.id, ms.match_number, ms.status, ms.created_at, ms.completed_at,
+                            ms.current_round, ms.total_rounds, ms.initial_stack, ms.num_opponents,
+                            ms.player_id
+                        FROM match_sessions ms
+                        WHERE ms.id = %s
+                    """, (match_session_id,))
+                    
+                    match_row = cursor.fetchone()
+                    if not match_row:
+                        return None
+                    
+                    match_data = {
+                        'id': match_row[0],
+                        'match_number': match_row[1],
+                        'status': match_row[2],
+                        'created_at': match_row[3].isoformat() if match_row[3] else None,
+                        'completed_at': match_row[4].isoformat() if match_row[4] else None,
+                        'current_round': match_row[5],
+                        'total_rounds': match_row[6],
+                        'initial_stack': match_row[7],
+                        'num_opponents': match_row[8],
+                        'player_id': str(match_row[9])
+                    }
+                    
+                    # Get associated games
+                    cursor.execute("""
+                        SELECT id, timestamp, small_blind, big_blind
+                        FROM games
+                        WHERE match_session_id = %s
+                        ORDER BY timestamp
+                    """, (match_session_id,))
+                    
+                    games = []
+                    for game_row in cursor.fetchall():
+                        game_id = game_row[0]
+                        
+                        # Get rounds for this game
+                        cursor.execute("""
+                            SELECT id, round_number, button_position, result
+                            FROM rounds
+                            WHERE game_id = %s
+                            ORDER BY round_number
+                        """, (game_id,))
+                        
+                        rounds = []
+                        for round_row in cursor.fetchall():
+                            rounds.append({
+                                'id': str(round_row[0]),
+                                'round_number': round_row[1],
+                                'button_position': round_row[2],
+                                'result': round_row[3]
+                            })
+                        
+                        games.append({
+                            'id': game_id,
+                            'timestamp': game_row[1].isoformat() if game_row[1] else None,
+                            'small_blind': game_row[2],
+                            'big_blind': game_row[3],
+                            'rounds': rounds
+                        })
+                    
+                    match_data['games'] = games
+                    return match_data
+                    
+        except Exception as e:
+            print(f"[SUPABASE] Error getting match details: {e}")
+            return None
+
 
 # Instância global (singleton pattern)
 _supabase_client = None

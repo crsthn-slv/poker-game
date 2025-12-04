@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Console Poker - Matches</title>
+    <link rel="stylesheet" href="/static/home.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1 data-i18n="GAME_TITLE">Console Poker</h1>
+            <div class="player-info">
+                <span id="player-nickname" class="player-nickname"></span>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Conversations View (Match History) -->
+            <div id="conversations-view" class="view-container active">
+                <div class="section-header">
+                    <h2 data-i18n="CONVERSATIONS_TITLE">Conversations</h2>
+                </div>
+
+                <div class="match-list" id="match-list">
+                    <!-- Loading state -->
+                    <div class="loading-state" id="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p data-i18n="LOADING">Loading matches...</p>
+                    </div>
+
+                    <!-- Empty state -->
+                    <div class="empty-state hidden" id="empty-state">
+                        <div class="empty-icon">🎮</div>
+                        <h3 data-i18n="NO_MATCHES_TITLE">No matches yet</h3>
+                        <p data-i18n="NO_MATCHES_DESC">Start your first match by clicking the + button below</p>
+                    </div>
+
+                    <!-- Match items will be injected here -->
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div id="settings-view" class="view-container">
+                <div class="section-header">
+                    <h2 data-i18n="SETTINGS_TITLE">Settings</h2>
+                </div>
+
+                <div class="settings-content">
+                    <!-- Profile Section -->
+                    <div class="settings-section">
+                        <h3 class="settings-section-title" data-i18n="PROFILE_SECTION">Profile</h3>
+
+                        <div class="settings-item">
+                            <label for="settings-nickname" data-i18n="LABEL_NICKNAME">Nickname</label>
+                            <input type="text" id="settings-nickname" maxlength="12" placeholder="Your nickname">
+                            <button id="btn-save-nickname" class="btn-small" data-i18n="BTN_SAVE">Save</button>
+                        </div>
+
+                        <div class="settings-item">
+                            <label data-i18n="PLAYER_ID_LABEL">Player ID</label>
+                            <div class="player-id-display" id="player-id-display">-</div>
+                        </div>
+                    </div>
+
+                    <!-- Language Section -->
+                    <div class="settings-section">
+                        <h3 class="settings-section-title" data-i18n="LANGUAGE_SECTION">Language</h3>
+
+                        <div class="settings-item">
+                            <div class="lang-buttons">
+                                <button class="lang-btn" data-lang="pt-br">PT-BR</button>
+                                <button class="lang-btn active" data-lang="en">ENG</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- About Section -->
+                    <div class="settings-section">
+                        <h3 class="settings-section-title" data-i18n="ABOUT_SECTION">About</h3>
+
+                        <div class="settings-item">
+                            <div class="about-info">
+                                <p class="version-info">Console Poker</p>
+                                <p class="version-number">closed alpha v.0.0.1</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Floating Action Button -->
+        <button class="fab" id="fab-new-match" aria-label="New Match">
+            <span class="fab-icon">+</span>
+        </button>
+
+        <!-- Bottom Navigation -->
+        <nav class="bottom-nav">
+            <button class="nav-item active" data-view="conversations">
+                <span class="nav-icon">💬</span>
+                <span class="nav-label" data-i18n="NAV_CONVERSATIONS">Conversas</span>
+            </button>
+            <button class="nav-item" data-view="settings">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-label" data-i18n="NAV_SETTINGS">Config</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Bottom Sheet - New Match -->
+    <div class="bottom-sheet-overlay" id="new-match-overlay"></div>
+    <div class="bottom-sheet" id="new-match-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-header">
+            <h3 data-i18n="NEW_MATCH_TITLE">New Match</h3>
+        </div>
+
+        <div class="sheet-content">
+            <div class="form-group">
+                <label for="match-stack" data-i18n="LABEL_INITIAL_STACK">Initial Stack</label>
+                <div class="range-input-container">
+                    <input type="range" id="match-stack" min="100" max="10000" step="100" value="1000">
+                    <span class="range-value" id="match-stack-value">1000</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="match-opponents" data-i18n="LABEL_OPPONENTS">Opponents</label>
+                <div class="range-input-container">
+                    <input type="range" id="match-opponents" min="1" max="9" step="1" value="5">
+                    <span class="range-value" id="match-opponents-value">5</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="match-rounds" data-i18n="LABEL_ROUNDS">Rounds</label>
+                <div class="range-input-container">
+                    <input type="range" id="match-rounds" min="5" max="100" step="5" value="20">
+                    <span class="range-value" id="match-rounds-value">20</span>
+                </div>
+            </div>
+
+            <div class="sheet-actions">
+                <button class="btn-secondary" id="btn-cancel-match" data-i18n="BTN_CANCEL">Cancel</button>
+                <button class="btn-primary" id="btn-start-match" data-i18n="BTN_START_MATCH">Start Match</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/static/home.js"></script>
+</body>
+
+</html>

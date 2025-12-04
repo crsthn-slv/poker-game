@@ -120,6 +120,10 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 async def read_root():
     return FileResponse("web/static/index.html")
 
+@app.get("/home")
+async def read_home():
+    return FileResponse("web/static/home.html")
+
 @app.get("/game")
 async def read_game():
     return FileResponse("web/static/game.html")
@@ -168,6 +172,110 @@ async def get_translations_api(lang_code: str):
         print(f"[SERVER] Error fetching translations from DB: {e}")
                 
     return final_translations
+
+# ============================================================================
+# Match Management Endpoints
+# ============================================================================
+
+class MatchConfig(BaseModel):
+    """Configuração de nova partida."""
+    nickname: str
+    initial_stack: int = 1000
+    num_opponents: int = 5
+    total_rounds: int = 20
+
+@app.post("/api/match/create")
+async def create_match(config: MatchConfig):
+    """Cria uma nova sessão de partida."""
+    try:
+        client = get_supabase_client()
+        player_id = client.ensure_player(config.nickname)
+        
+        match_session_id = client.create_match_session(player_id, {
+            'initial_stack': config.initial_stack,
+            'num_opponents': config.num_opponents,
+            'total_rounds': config.total_rounds
+        })
+        
+        if not match_session_id:
+            raise HTTPException(status_code=500, detail="Failed to create match session")
+        
+        match_history = client.get_match_history(player_id, limit=1)
+        match_number = match_history[0]['match_number'] if match_history else 1
+        
+        return {
+            "match_session_id": match_session_id,
+            "match_number": match_number,
+            "player_id": player_id
+        }
+    except Exception as e:
+        print(f"[SERVER] Error creating match: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/match/history/{nickname}")
+async def get_match_history_endpoint(nickname: str, limit: int = 256):
+    """Obtém histórico de partidas de um jogador."""
+    try:
+        client = get_supabase_client()
+        player_stats = client.get_player_stats(nickname)
+        
+        if not player_stats:
+            return {"matches": [], "player_id": None}
+        
+        matches = client.get_match_history(player_stats['player_id'], limit)
+        return {"matches": matches, "player_id": player_stats['player_id']}
+    except Exception as e:
+        print(f"[SERVER] Error getting match history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/match/{match_id}")
+async def get_match_endpoint(match_id: str):
+    """Obtém detalhes de uma partida específica."""
+    try:
+        client = get_supabase_client()
+        match_details = client.get_match_details(match_id)
+        
+        if not match_details:
+            raise HTTPException(status_code=404, detail="Match not found")
+        
+        return match_details
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SERVER] Error getting match: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class MatchStatusUpdate(BaseModel):
+    """Atualização de status de partida."""
+    status: str
+    current_round: Optional[int] = None
+    session_data: Optional[Dict[str, Any]] = None
+
+@app.post("/api/match/{match_id}/status")
+async def update_match_status_endpoint(match_id: str, update: MatchStatusUpdate):
+    """Atualiza o status de uma partida."""
+    try:
+        client = get_supabase_client()
+        success = client.update_match_status(
+            match_id, 
+            update.status, 
+            session_data=update.session_data,
+            current_round=update.current_round
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update match status")
+        
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SERVER] Error updating match status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# Game Session Endpoints
+# ============================================================================
 
 @app.post("/api/game/new")
 async def create_game(config: GameConfig):

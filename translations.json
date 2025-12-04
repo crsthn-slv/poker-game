@@ -210,5 +210,65 @@
     "MSG_COMMUNITY_CARDS": {
         "en": "Community Cards: {cards}",
         "pt-br": "Cartas da Mesa: {cards}"
+    },
+    "CONVERSATIONS_TITLE": {
+        "en": "Conversations",
+        "pt-br": "Conversas"
+    },
+    "SETTINGS_TITLE": {
+        "en": "Settings",
+        "pt-br": "Configurações"
+    },
+    "NAV_CONVERSATIONS": {
+        "en": "Conversas",
+        "pt-br": "Conversas"
+    },
+    "NAV_SETTINGS": {
+        "en": "Config",
+        "pt-br": "Config"
+    },
+    "NO_MATCHES_TITLE": {
+        "en": "No matches yet",
+        "pt-br": "Nenhuma partida ainda"
+    },
+    "NO_MATCHES_DESC": {
+        "en": "Start your first match by clicking the + button below",
+        "pt-br": "Comece sua primeira partida clicando no botão + abaixo"
+    },
+    "LOADING": {
+        "en": "Loading matches...",
+        "pt-br": "Carregando partidas..."
+    },
+    "ERROR_LOADING_MATCHES": {
+        "en": "Error loading matches",
+        "pt-br": "Erro ao carregar partidas"
+    },
+    "PROFILE_SECTION": {
+        "en": "Profile",
+        "pt-br": "Perfil"
+    },
+    "LANGUAGE_SECTION": {
+        "en": "Language",
+        "pt-br": "Idioma"
+    },
+    "ABOUT_SECTION": {
+        "en": "About",
+        "pt-br": "Sobre"
+    },
+    "PLAYER_ID_LABEL": {
+        "en": "Player ID",
+        "pt-br": "ID do Jogador"
+    },
+    "NEW_MATCH_TITLE": {
+        "en": "New Match",
+        "pt-br": "Nova Partida"
+    },
+    "LABEL_ROUNDS": {
+        "en": "Rounds",
+        "pt-br": "Rodadas"
+    },
+    "BTN_START_MATCH": {
+        "en": "Start Match",
+        "pt-br": "Iniciar Partida"
     }
 }
