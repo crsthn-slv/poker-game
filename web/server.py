@@ -57,7 +57,7 @@ class GameConfig(BaseModel):
     initial_stack: int = 1000
     num_bots: int = 5
     show_probability: bool = False
-    lang: str = 'pt-br'
+    lang: str = 'en'
 
 class GameSession:
     """Gerencia uma sessão de jogo ativa."""
@@ -143,26 +143,31 @@ async def get_config():
 
 @app.get("/api/translations/{lang_code}")
 async def get_translations_api(lang_code: str):
-    """Retorna traduções do Supabase via backend."""
-    client = get_supabase_client()
-    translations = client.get_translations(lang_code)
+    """Retorna traduções do Supabase via backend, mesclando com arquivo local."""
     
-    if not translations:
-        # Fallback to local file if DB fails or empty
-        if os.path.exists("translations.json"):
-            try:
-                with open("translations.json", "r") as f:
-                    data = json.load(f)
-                    # Convert {KEY: {lang: val}} to {KEY: val}
-                    local_trans = {}
-                    for key, langs in data.items():
-                        if lang_code in langs:
-                            local_trans[key] = langs[lang_code]
-                    return local_trans
-            except:
-                pass
+    # 1. Carrega do arquivo local como base (garante que chaves novas existam)
+    final_translations = {}
+    if os.path.exists("translations.json"):
+        try:
+            with open("translations.json", "r") as f:
+                data = json.load(f)
+                # Convert {KEY: {lang: val}} to {KEY: val}
+                for key, langs in data.items():
+                    if lang_code in langs:
+                        final_translations[key] = langs[lang_code]
+        except Exception as e:
+            print(f"[SERVER] Error loading local translations: {e}")
+
+    # 2. Busca do Supabase e sobrescreve/adiciona
+    try:
+        client = get_supabase_client()
+        db_translations = client.get_translations(lang_code)
+        if db_translations:
+            final_translations.update(db_translations)
+    except Exception as e:
+        print(f"[SERVER] Error fetching translations from DB: {e}")
                 
-    return translations
+    return final_translations
 
 @app.post("/api/game/new")
 async def create_game(config: GameConfig):

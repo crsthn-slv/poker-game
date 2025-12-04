@@ -350,11 +350,32 @@ function formatCardsInText(text) {
     // Convert newlines to <br> for Dealer messages
     safeText = safeText.replace(/\n/g, '<br>');
 
-    // Regex for cards with Red suits (Hearts ♥, Diamonds ♦)
-    // Matches RankSuit (e.g. 10♥, K♦) or SuitRank (e.g. ♥10, ♦K)
-    // Ranks: 2-9, T, J, Q, K, A, 10
-    const redCardRegex = /((?:10|[2-9TJQKA])[♦♥]|[♦♥](?:10|[2-9TJQKA]))/g;
+    // 1. Convert Letter Suits to Symbols (Case insensitive)
+    // Handle RankSuit (e.g. Ah, 10s)
+    safeText = safeText.replace(/([2-9TJQKA]|10)([shdcSHDC])/g, (match, rank, suit) => {
+        const s = suit.toLowerCase();
+        let symbol = '';
+        if (s === 's') symbol = '♠';
+        if (s === 'h') symbol = '♥';
+        if (s === 'd') symbol = '♦';
+        if (s === 'c') symbol = '♣';
+        return `${rank}${symbol}`;
+    });
 
+    // Handle SuitRank (e.g. hA, s10)
+    safeText = safeText.replace(/([shdcSHDC])([2-9TJQKA]|10)/g, (match, suit, rank) => {
+        const s = suit.toLowerCase();
+        let symbol = '';
+        if (s === 's') symbol = '♠';
+        if (s === 'h') symbol = '♥';
+        if (s === 'd') symbol = '♦';
+        if (s === 'c') symbol = '♣';
+        return `${symbol}${rank}`;
+    });
+
+    // 2. Colorize Red Suits (Hearts ♥, Diamonds ♦)
+    // Matches RankSuit (e.g. 10♥, K♦) or SuitRank (e.g. ♥10, ♦K)
+    const redCardRegex = /((?:10|[2-9TJQKA])[♦♥]|[♦♥](?:10|[2-9TJQKA]))/g;
     return safeText.replace(redCardRegex, '<span style="color: #ff5252;">$1</span>');
 }
 
@@ -618,7 +639,8 @@ function addSystemMessage(text, isSystem = false) {
 
     const badge = document.createElement('div');
     badge.className = 'msg-system-badge';
-    badge.textContent = cleanText; // Use clean text (no dashes)
+    // Use innerHTML to allow colored cards
+    badge.innerHTML = formatCardsInText(cleanText);
 
     row.appendChild(badge);
     chatContent.appendChild(row);
@@ -634,7 +656,7 @@ function addCommunityCardsMessage(cards) {
 
     cards.forEach(card => {
         const div = document.createElement('div');
-        const isRed = card[0] === 'H' || card[0] === 'D' || card.includes('♥') || card.includes('♦');
+        const isRed = /[hdHD♥♦]/.test(card);
         div.className = `playing-card ${isRed ? 'red' : ''}`;
         div.textContent = getCardSymbol(card);
         container.appendChild(div);
@@ -681,7 +703,7 @@ function handleStreetStart(data) {
         // Append community cards if available in round_state
         if (data.round_state && data.round_state.community_card && data.round_state.community_card.length > 0) {
             const cards = data.round_state.community_card.map(c => getCardSymbol(c)).join(' ');
-            msg += `: [${cards}]`;
+            msg += `: ${cards}`;
         }
 
         addSystemMessage(msg, true);
@@ -863,7 +885,7 @@ function renderCards(cards) {
     myCardsDisplay.innerHTML = '';
     cards.forEach(card => {
         const div = document.createElement('div');
-        const isRed = card[0] === 'H' || card[0] === 'D' || card.includes('♥') || card.includes('♦');
+        const isRed = /[hdHD♥♦]/.test(card);
         div.className = `playing-card ${isRed ? 'red' : ''}`;
         div.textContent = getCardSymbol(card);
         myCardsDisplay.appendChild(div);
@@ -871,13 +893,30 @@ function renderCards(cards) {
 }
 
 function getCardSymbol(cardStr) {
-    const suitMap = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣' };
+    const suitMap = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣', 's': '♠', 'h': '♥', 'd': '♦', 'c': '♣' };
     const rankMap = { 'T': '10' };
 
-    const suit = suitMap[cardStr[0]] || cardStr[0];
-    const rank = rankMap[cardStr[1]] || cardStr[1];
+    // Clean card string
+    cardStr = cardStr.trim();
 
-    return `${suit}${rank}`;
+    // Check if Suit is first (SuitRank e.g. H10)
+    if (suitMap[cardStr[0]]) {
+        const suit = suitMap[cardStr[0]];
+        const rankChar = cardStr.substring(1);
+        const rank = rankMap[rankChar] || rankChar;
+        return `${rank}${suit}`; // Return RankSuit (e.g. 10♥) for consistency
+    }
+
+    // Check if Suit is last (RankSuit e.g. 10h)
+    const lastChar = cardStr[cardStr.length - 1];
+    if (suitMap[lastChar]) {
+        const suit = suitMap[lastChar];
+        const rankChar = cardStr.substring(0, cardStr.length - 1);
+        const rank = rankMap[rankChar] || rankChar;
+        return `${rank}${suit}`;
+    }
+
+    return cardStr;
 }
 
 async function startNewGame() {

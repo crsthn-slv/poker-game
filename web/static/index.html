@@ -50,8 +50,8 @@
         </div>
 
         <div class="lang-selector">
-            <button class="lang-btn active" data-lang="pt-br">PT-BR</button>
-            <button class="lang-btn" data-lang="en">ENG</button>
+            <button class="lang-btn" data-lang="pt-br">PT-BR</button>
+            <button class="lang-btn active" data-lang="en">ENG</button>
         </div>
     </div>
 
@@ -59,7 +59,7 @@
         import { i18n } from '/static/localization.js';
 
         // Initialize with default language
-        const savedLang = localStorage.getItem('game_lang') || 'pt-br';
+        const savedLang = localStorage.getItem('game_lang') || 'en';
         i18n.init(savedLang);
 
         // Update active button state

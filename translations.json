@@ -162,5 +162,53 @@
     "LABEL_WIN_AMOUNT": {
         "en": "Pot:",
         "pt-br": "Pote:"
+    },
+    "MSG_GAME_STARTED": {
+        "en": "Game Started! Good luck!",
+        "pt-br": "Jogo Iniciado! Boa sorte!"
+    },
+    "MSG_ROUND": {
+        "en": "Round",
+        "pt-br": "Rodada"
+    },
+    "MSG_NEW_ROUND": {
+        "en": "New Round",
+        "pt-br": "Nova Rodada"
+    },
+    "MSG_STREET_PREFLOP": {
+        "en": "PREFLOP",
+        "pt-br": "PRÉ-FLOP"
+    },
+    "MSG_STREET_FLOP": {
+        "en": "FLOP",
+        "pt-br": "FLOP"
+    },
+    "MSG_STREET_TURN": {
+        "en": "TURN",
+        "pt-br": "TURN"
+    },
+    "MSG_STREET_RIVER": {
+        "en": "RIVER",
+        "pt-br": "RIVER"
+    },
+    "MSG_STREET_SHOWDOWN": {
+        "en": "SHOWDOWN",
+        "pt-br": "SHOWDOWN"
+    },
+    "MSG_POT_STATUS": {
+        "en": "Pot: {pot} | Your chips: {stack}",
+        "pt-br": "Pote: {pot} | Suas fichas: {stack}"
+    },
+    "MSG_CALL_REQUIRED": {
+        "en": "To Call: {amount}",
+        "pt-br": "Para Pagar: {amount}"
+    },
+    "MSG_CHECK_ALLOWED": {
+        "en": "Check Allowed",
+        "pt-br": "Mesa Permitida"
+    },
+    "MSG_COMMUNITY_CARDS": {
+        "en": "Community Cards: {cards}",
+        "pt-br": "Cartas da Mesa: {cards}"
     }
 }

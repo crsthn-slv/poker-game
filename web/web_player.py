@@ -152,13 +152,92 @@ class WebPlayer(ConsolePlayer):
             self._capture_and_send_output()
 
     def _load_bot_messages(self):
-        """Carrega mensagens de bot do banco de dados."""
+        """Carrega mensagens de bot do banco de dados ou usa defaults."""
         try:
             client = get_supabase_client()
             self.bot_messages = client.get_bot_messages(self.lang)
             print(f"[WEB PLAYER] Loaded {sum(len(v) for v in self.bot_messages.values())} bot messages for lang={self.lang}")
         except Exception as e:
             print(f"[WEB PLAYER] Error loading bot messages: {e}")
+            self.bot_messages = {}
+
+        # Fallback se não houver mensagens (DB vazio ou erro)
+        if not self.bot_messages:
+            print("[WEB PLAYER] Using default bot messages fallback.")
+            self.bot_messages = self._get_default_bot_messages()
+
+    def _get_default_bot_messages(self):
+        """Retorna mensagens padrão caso o banco esteja vazio."""
+        if self.lang == 'pt-br':
+            return {
+                'FOLD': [
+                    "Estou fora.", "Passo.", "Sem chance.", "Desisto dessa.", "Fica pra próxima.",
+                    "Muito caro pra mim.", "Não vou pagar pra ver.", "Fold.", "Larguei."
+                ],
+                'CALL': [
+                    "Pago.", "Vamos ver.", "Call.", "Estou dentro.", "Acompanho.",
+                    "Pago pra ver.", "Não vou deixar barato.", "Seguindo."
+                ],
+                'CHECK': [
+                    "Mesa.", "Check.", "Passo a vez.", "Nada por enquanto.", "Sigo.",
+                    "Vamos ver o que vem.", "Sem apostas."
+                ],
+                'RAISE': [
+                    "Aumento.", "Vou subir.", "Raise.", "Vamos esquentar isso.", "Quero ver quem paga.",
+                    "Aumento a aposta.", "Botando pressão."
+                ],
+                'ALL-IN': [
+                    "ALL IN!", "Todas as minhas fichas.", "É tudo ou nada!", "Vou com tudo.",
+                    "Empurrando tudo pro centro.", "Momento da verdade: All-in!"
+                ],
+                'WIN': [
+                    "Isso!", "Sabia!", "Pote é meu.", "Obrigado pelas fichas.", "Bela mão.",
+                    "Tive sorte.", "Jogaram bem.", "Mais uma pra conta."
+                ],
+                'SHOW_CARDS': [
+                    "Eu tinha {cards} - {hand_name}", "Olha o que eu tinha: {cards}",
+                    "Minha mão: {cards}", "Segura essa: {cards}"
+                ],
+                'MUCK': [
+                    "Melhor não mostrar.", "Esconde essa.", "Não vale a pena mostrar.",
+                    "Segredo.", "Muck."
+                ]
+            }
+        else:
+            return {
+                'FOLD': [
+                    "I'm out.", "Fold.", "No way.", "Too rich for me.", "Next hand.",
+                    "Folding this one.", "Can't call that."
+                ],
+                'CALL': [
+                    "I call.", "Calling.", "I'm in.", "Let's see it.", "Matching the bet.",
+                    "I'll stay.", "Call."
+                ],
+                'CHECK': [
+                    "Check.", "Checking.", "Pass.", "No bets.", "Checking to you.",
+                    "Let's see the next card."
+                ],
+                'RAISE': [
+                    "Raise.", "Raising.", "I'll bump it up.", "Let's make it interesting.",
+                    "Raising the stakes.", "Price just went up."
+                ],
+                'ALL-IN': [
+                    "ALL IN!", "All my chips.", "Pushing it all.", "All in.",
+                    "Risking it all!", "Time to gamble: All-in!"
+                ],
+                'WIN': [
+                    "Yes!", "I take the pot.", "Nice hand.", "Thanks for the chips.",
+                    "Good game.", "Lucky river.", "Adding to my stack."
+                ],
+                'SHOW_CARDS': [
+                    "I had {cards} - {hand_name}", "Check this out: {cards}",
+                    "My hand: {cards}", "Holding: {cards}"
+                ],
+                'MUCK': [
+                    "Mucking.", "Better not show.", "Keeping it secret.",
+                    "Not showing.", "Muck."
+                ]
+            }
 
     def _get_bot_message(self, action_type: str) -> Optional[str]:
         """Retorna uma mensagem aleatória para o tipo de ação."""
