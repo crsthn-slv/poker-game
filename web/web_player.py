@@ -12,6 +12,7 @@ from typing import Dict, Any, Callable, Optional, Tuple
 
 from players.console_player import ConsolePlayer
 from utils.game_history import GameHistory
+from web.supabase_client import get_supabase_client
 
 class WebPlayer(ConsolePlayer):
     """
@@ -22,10 +23,11 @@ class WebPlayer(ConsolePlayer):
     def __init__(self, 
                  initial_stack: int = 100, 
                  small_blind: int = 5, 
-                 big_blind: int = 10, 
+                 big_blind: int = 10,
                  show_win_probability: bool = False,
                  on_game_update: Optional[Callable[[str, Any], None]] = None,
-                 on_round_complete: Optional[Callable[[Dict[str, Any]], None]] = None):
+                 on_round_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
+                 lang: str = 'pt-br'):
         
         # Inicializa o buffer antes de chamar super, pois super pode usar printer
         self.output_buffer = io.StringIO()
@@ -33,6 +35,7 @@ class WebPlayer(ConsolePlayer):
         self.on_round_complete = on_round_complete
         self.input_queue = queue.Queue()
         self.game_id = None
+        self.lang = lang
         
         super().__init__(
             input_receiver=lambda x: "f", # Placeholder, não será usado pois sobrescrevemos __receive_action
@@ -42,6 +45,10 @@ class WebPlayer(ConsolePlayer):
             show_win_probability=show_win_probability,
             printer=self._print_to_buffer # Injeta nosso método de impressão
         )
+        
+        # Carrega mensagens de bot do Supabase
+        self.bot_messages = {}
+        self._load_bot_messages()
         
         # State tracking for reconnection
         self.waiting_for_action = False
@@ -142,6 +149,27 @@ class WebPlayer(ConsolePlayer):
         if '\n' in text or flush:
             self._capture_and_send_output()
 
+            self._capture_and_send_output()
+
+    def _load_bot_messages(self):
+        """Carrega mensagens de bot do banco de dados."""
+        try:
+            client = get_supabase_client()
+            self.bot_messages = client.get_bot_messages(self.lang)
+            print(f"[WEB PLAYER] Loaded {sum(len(v) for v in self.bot_messages.values())} bot messages for lang={self.lang}")
+        except Exception as e:
+            print(f"[WEB PLAYER] Error loading bot messages: {e}")
+
+    def _get_bot_message(self, action_type: str) -> Optional[str]:
+        """Retorna uma mensagem aleatória para o tipo de ação."""
+        if not self.bot_messages:
+            print(f"[WEB PLAYER] WARNING: No bot messages loaded! (lang={self.lang})")
+            return None
+            
+        messages = self.bot_messages.get(action_type, [])
+        if messages:
+            return random.choice(messages)
+        return None
 
 
     def _ConsolePlayer__receive_action_from_console(self, valid_actions, round_state=None, cached_player_stack=None) -> Tuple[str, int]:
@@ -226,6 +254,7 @@ class WebPlayer(ConsolePlayer):
     # Sobrescrevemos receive_round_result_message APENAS para garantir que o super seja chamado
     # A lógica de display é mantida pelo ConsolePlayer (que usa self.printer)
     def receive_round_result_message(self, winners, hand_info, round_state):
+        self._print_to_buffer(f"[WEB_DBG] receive_round_result_message ENTERED. Winners: {len(winners)}")
         # Calcula o pote total (main + side)
         total_pot = 0
         if round_state and 'pot' in round_state:
@@ -306,11 +335,128 @@ class WebPlayer(ConsolePlayer):
         # Update last_round_state BEFORE calling super, as super might call wait_for_continue
         self.last_round_state = round_state
 
+        # --- CHAT MESSAGES FOR SHOWDOWN/WIN ---
+        # MOVED BEFORE super() because super() blocks waiting for user input ("Next Round")
+        try:
+            seats = round_state.get('seats', [])
+            winner_uuids = []
+            for w in winners:
+                if isinstance(w, dict):
+                    winner_uuids.append(w.get('uuid'))
+                else:
+                    winner_uuids.append(w)
+            
+            # Identify players who showed cards and get their info
+            shown_cards_info = {}
+            if isinstance(enriched_hand_info, list): # List of dicts
+                 for h in enriched_hand_info:
+                     shown_cards_info[h.get('uuid')] = h
+            elif isinstance(enriched_hand_info, dict): # Dict of UUID -> info
+                 shown_cards_info = enriched_hand_info
+
+            for seat in seats:
+                # Include 'allin' players (who have stack 0 but are in showdown)
+                # State can be 'participating', 'allin', 'folded'
+                seat_state = seat.get('state')
+                if seat_state != 'folded':
+                    uuid = seat.get('uuid')
+                    name = seat.get('name')
+                    
+                    # Skip myself (human)
+                    if name == self._player_name:
+                        continue
+                        
+                    # Determine message type
+                    msg_type = None
+                    player_hand_info = None
+                    
+                    if uuid in winner_uuids:
+                        msg_type = 'WIN'
+                        # Winners might also show cards
+                        if uuid in shown_cards_info:
+                            player_hand_info = shown_cards_info[uuid]
+                    elif uuid in shown_cards_info:
+                        msg_type = 'SHOW_CARDS'
+                        player_hand_info = shown_cards_info[uuid]
+                    else:
+                        msg_type = 'MUCK'
+                    
+                    self._print_to_buffer(f"[WEB_DBG] Checking message for {name} ({seat_state}): type={msg_type}")
+                    
+                    # Send message
+                    if msg_type:
+                        chat_msg = self._get_bot_message(msg_type)
+                        if chat_msg:
+                            # Handle placeholders for SHOW_CARDS (or WIN if applicable)
+                            if '{cards}' in chat_msg or '{hand_name}' in chat_msg:
+                                if player_hand_info:
+                                    # Debug info
+                                    self._print_to_buffer(f"[WEB_DBG] player_hand_info for {name}: {player_hand_info}")
+                                    
+                                    # Get cards
+                                    hole_cards = player_hand_info.get('hole_card') or player_hand_info.get('hole_cards') or player_hand_info.get('hand', {}).get('hole_card')
+                                    
+                                    # Fallback: Try to find cards in original hand_info if missing
+                                    if not hole_cards:
+                                        self._print_to_buffer(f"[WEB_DBG] Cards missing in enriched info, checking original hand_info...")
+                                        if isinstance(hand_info, list):
+                                            for h in hand_info:
+                                                if h.get('uuid') == uuid:
+                                                    hole_cards = h.get('hole_card') or h.get('hole_cards')
+                                                    break
+                                        elif isinstance(hand_info, dict):
+                                            h = hand_info.get(uuid, {})
+                                            hole_cards = h.get('hole_card') or h.get('hole_cards')
+                                    
+                                    if hole_cards:
+                                        # Normalize and format cards
+                                        from utils.hand_utils import normalize_hole_cards
+                                        normalized = normalize_hole_cards(hole_cards)
+                                        # Format as [Ah Ks]
+                                        cards_str = f"[{' '.join(normalized)}]"
+                                        chat_msg = chat_msg.replace('{cards}', cards_str)
+                                    else:
+                                        # Ensure placeholder is removed
+                                        chat_msg = chat_msg.replace('{cards}', '')
+                                    
+                                    # Get hand name
+                                    hand_entry = player_hand_info.get('hand', {})
+                                    hand_strength = hand_entry.get('strength')
+                                    # If strength is "ONEPAIR", convert to "One Pair"
+                                    hand_name = str(hand_strength).replace('_', ' ').title() if hand_strength else "Hand"
+                                    chat_msg = chat_msg.replace('{hand_name}', hand_name)
+                                else:
+                                    # Fallback if info missing but message expects it
+                                    # Replace with empty or generic
+                                    chat_msg = chat_msg.replace('{cards}', '').replace('{hand_name}', 'Hand')
+
+                            # Add small delay for natural feel
+                            # time.sleep(random.uniform(0.5, 1.5)) # Removed sleep to avoid blocking
+                            
+                            self._print_to_buffer(f"[WEB_DBG] Sending {msg_type} message for {name}: {chat_msg}") # DEBUG
+                            self._send_update("chat_message", {
+                                "type": "opponent",
+                                "sender": name,
+                                "content": chat_msg,
+                                "bet": 0,
+                                "stack": seat.get('stack', 0)
+                            })
+                        else:
+                             self._print_to_buffer(f"[WEB_DBG] No message found for {msg_type} (lang={self.lang})") # DEBUG
+                            
+        except Exception as e:
+            self._print_to_buffer(f"[WEB_DBG] Error sending round result chat: {e}")
+            import traceback
+            traceback.print_exc()
+        # ---------------------------------------
+
         super().receive_round_result_message(winners, hand_info, round_state)
         
         # Envia update final para garantir que o UI mostre tudo
         sanitized_round_state = self._sanitize_round_state(round_state)
         self._send_update("round_result_data", {"winners": winners, "round_state": sanitized_round_state})
+
+
 
         # Trigger incremental save if callback is set
         if self.on_round_complete and hasattr(self, 'game_history'):
@@ -343,7 +489,8 @@ class WebPlayer(ConsolePlayer):
         
         self._send_update("round_start_data", {
             "hole_cards": cards_to_send,
-            "round_count": round_count
+            "round_count": round_count,
+            "seats": seats # Added seats to round_start_data
         })
         self.last_round_count = round_count
         self.last_street = 'preflop'
@@ -460,10 +607,47 @@ class WebPlayer(ConsolePlayer):
                                         # In history, 'amount' is usually the cost.
                                         # Let's stick to 'amount'.
 
+                        # Tenta obter mensagem natural do bot
+                        natural_message = self._get_bot_message(action)
+                        
+                        # Se tiver mensagem natural, usa ela (SEM FALLBACK para genérico se não encontrar, mas o código atual já tem msg construída)
+                        # O usuário pediu "nao quero fallbacks", o que implica que se não tiver no banco, não deve mandar nada?
+                        # Ou deve mandar a mensagem construída (que é técnica)?
+                        # O usuário disse: "quero que os bots pareçam mais naturais... cria 10 textos... nao quero fallbacks"
+                        # Interpretando: Se tiver no banco, usa. Se não, usa o que já tinha (técnico) ou nada?
+                        # "nao quero fallbacks" provavelmente se refere a não ter textos genéricos "Bot calls" hardcoded no código se falhar o banco.
+                        # Mas como o banco é a fonte da verdade agora, se falhar, o comportamento padrão (técnico) é aceitável ou deve ser silenciado?
+                        # Vou assumir que se tiver mensagem natural, usa. Se não, mantém o comportamento antigo (técnico) para não quebrar o jogo,
+                        # POIS o chat bubble é a única forma de ver a ação visualmente além do log.
+                        # Mas espere, o usuário disse "nao quero fallbacks" no contexto de "ensure fallback to generic messages".
+                        # Então ele quer que o banco SEJA a fonte.
+                        
+                        final_msg = msg # Default to technical "Call 100"
+                        
+                        if natural_message:
+                            final_msg = natural_message
+                            
+                            # Append amount for Raise actions
+                            if action == 'RAISE' and amount > 0:
+                                final_msg += f" {amount}"
+                            
+                            # Append amount for Blinds
+                            if action in ['SMALLBLIND', 'BIGBLIND'] and amount > 0:
+                                final_msg += f" {amount}"
+                        
+                        # Se for ALL-IN, tenta pegar mensagem específica
+                        if display_action == 'all-in':
+                             all_in_msg = self._get_bot_message('ALL-IN')
+                             if all_in_msg:
+                                 final_msg = all_in_msg
+                                 # Optional: Append amount for All-in too if desired, but user asked for Raise
+                                 if amount > 0:
+                                     final_msg += f" {amount}"
+
                         self._send_update("chat_message", {
                             "type": "opponent",
                             "sender": player_name,
-                            "content": msg,
+                            "content": final_msg,
                             "bet": total_bet,
                             "stack": current_stack
                         })

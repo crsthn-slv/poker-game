@@ -57,24 +57,8 @@ class LocalizationManager {
             console.warn('Backend API failed, trying local translations.json...', e);
         }
 
-        // Fallback para translations.json direto (caso API falhe totalmente)
-        try {
-            const response = await fetch('/translations.json');
-            const jsonData = await response.json();
-
-            // Convert JSON structure { KEY: { lang: val } } to { KEY: val }
-            this.translations = {};
-            for (const [key, langs] of Object.entries(jsonData)) {
-                if (langs[langCode]) {
-                    this.translations[key] = langs[langCode];
-                }
-            }
-            this.isLoaded = true;
-            console.log('Traduções carregadas de translations.json (Fallback).');
-            this.updatePage();
-        } catch (e) {
-            console.error('Failed to load translations.json', e);
-        }
+        // NO FALLBACKS as per user request.
+        console.error('Failed to load translations from API and cache.');
     }
 
     /**

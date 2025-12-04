@@ -83,7 +83,7 @@ function init() {
         if (key.startsWith('i18n_')) localStorage.removeItem(key);
     });
 
-    i18n.init('pt-br').then(() => {
+    i18n.init(i18n.currentLang).then(() => {
         connectWebSocket(sessionId);
         updateUIText();
     });
@@ -228,7 +228,7 @@ function sendAction(action, amount) {
 
 function connectWebSocket(sid) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/${sid}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/${sid}?lang=${i18n.currentLang}`;
 
     socket = new WebSocket(wsUrl);
 
@@ -265,14 +265,17 @@ function handleGameMessage(type, data) {
             break;
 
         case 'game_start':
-            addSystemMessage('GAME STARTED');
+            addSystemMessage(i18n.get('MSG_GAME_STARTED'), true);
             break;
 
         case 'round_start_data':
             myHoleCards = data.hole_cards;
             renderCards(myHoleCards);
-            // Clear chat or add separator?
-            addSystemMessage('--- NEW ROUND ---');
+            // Display "Round X" if available, otherwise fallback
+            const roundMsg = data.round_count
+                ? `${i18n.get('MSG_ROUND') || 'Round'} ${data.round_count}`
+                : i18n.get('MSG_NEW_ROUND');
+            addSystemMessage(`--- ${roundMsg} ---`, true);
             break;
 
         case 'street_start':
@@ -398,9 +401,11 @@ function parseAndLogMessage(rawText) {
     }
 
     // Handle "Participant cards" - Individual messages
+    // DISABLED: We now rely on backend 'chat_message' events for natural language
+    /*
     if (cleanText.toLowerCase().startsWith('participant cards:')) {
         isShowingCards = true;
-        addChatMessage('opponent', 'Show your cards', 'Dealer');
+        // addChatMessage('opponent', 'Show your cards', 'Dealer');
         return;
     }
 
@@ -437,6 +442,7 @@ function parseAndLogMessage(rawText) {
             return;
         }
     }
+    */
 
     // 1. Check for Community Cards (Keep as visual aid in chat)
     if (cleanText.includes('[') && cleanText.includes(']')) {
@@ -586,7 +592,7 @@ function addChatMessage(type, content, senderName, options = {}) {
     scrollToBottom();
 }
 
-function addSystemMessage(text) {
+function addSystemMessage(text, isSystem = false) {
     // Remove dashes from text (e.g. "--- FLOP ---" -> "FLOP")
     const cleanText = text.replace(/^-+\s*|\s*-+$/g, '');
 
@@ -594,7 +600,7 @@ function addSystemMessage(text) {
     // Note: We check original 'text' for dashes to identify dividers coming from backend
     // Also explicitly check for Street names to ensure they are centered
     const upper = cleanText.toUpperCase();
-    const isDivider = text.startsWith('---') ||
+    const isDivider = isSystem || text.startsWith('---') ||
         text === 'GAME STARTED' ||
         text === 'GAME OVER' ||
         ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].includes(upper) ||
@@ -669,7 +675,16 @@ function getAvatarColor(name) {
 function handleStreetStart(data) {
     if (data.street) {
         // Send just the street name, addSystemMessage will handle centering and no dashes
-        addSystemMessage(data.street.toUpperCase());
+        const streetKey = `MSG_STREET_${data.street.toUpperCase()}`;
+        let msg = i18n.get(streetKey) || data.street.toUpperCase();
+
+        // Append community cards if available in round_state
+        if (data.round_state && data.round_state.community_card && data.round_state.community_card.length > 0) {
+            const cards = data.round_state.community_card.map(c => getCardSymbol(c)).join(' ');
+            msg += `: [${cards}]`;
+        }
+
+        addSystemMessage(msg, true);
     }
     if (data.round_state) {
         currentRoundState = data.round_state;
@@ -768,15 +783,15 @@ function handleActionRequired(data) {
     const cards = currentRoundState.community_card || [];
     const cardsStr = cards.map(c => getCardSymbol(c)).join(' ');
 
-    let msg = `The pot is ${totalPot}, you have ${myStack} chips.`;
+    let msg = i18n.get('MSG_POT_STATUS', { pot: totalPot, stack: myStack });
     if (callAmount > 0) {
-        msg += ` To continue playing you need to call ${callAmount}.`;
+        msg += ' ' + i18n.get('MSG_CALL_REQUIRED', { amount: callAmount });
     } else {
-        msg += ` You can check.`;
+        msg += ' ' + i18n.get('MSG_CHECK_ALLOWED');
     }
 
     if (cards.length > 0) {
-        msg += `\nCommunity cards are: ${cardsStr}`;
+        msg += '\n' + i18n.get('MSG_COMMUNITY_CARDS', { cards: cardsStr });
     }
 
     addChatMessage('opponent', msg, 'Dealer');

@@ -374,6 +374,38 @@ class SupabaseClient:
             print(f"[SUPABASE] Error upserting translations: {e}")
             return False
 
+    def get_bot_messages(self, lang_code: str = 'en-us') -> Dict[str, List[str]]:
+        """
+        Obtém mensagens de bot do banco de dados.
+        
+        Args:
+            lang_code: Código do idioma
+            
+        Returns:
+            Dict {action_type: [messages]}
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT action_type, message_text 
+                        FROM bot_messages 
+                        WHERE lang_code = %s
+                    """, (lang_code,))
+                    
+                    rows = cursor.fetchall()
+                    
+                    messages = {}
+                    for action, text in rows:
+                        if action not in messages:
+                            messages[action] = []
+                        messages[action].append(text)
+                        
+                    return messages
+        except Exception as e:
+            print(f"[SUPABASE] Error fetching bot messages: {e}")
+            return {}
+
 
 # Instância global (singleton pattern)
 _supabase_client = None

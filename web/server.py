@@ -57,6 +57,7 @@ class GameConfig(BaseModel):
     initial_stack: int = 1000
     num_bots: int = 5
     show_probability: bool = False
+    lang: str = 'pt-br'
 
 class GameSession:
     """Gerencia uma sessão de jogo ativa."""
@@ -174,13 +175,17 @@ async def create_game(config: GameConfig):
     return {"session_id": session_id}
 
 @app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
+async def websocket_endpoint(websocket: WebSocket, session_id: str, lang: str = 'pt-br'):
     """Endpoint WebSocket para comunicação em tempo real."""
     if session_id not in sessions:
         await websocket.close(code=4004, reason="Session not found")
         return
 
     session = sessions[session_id]
+    # Update session config with lang if provided
+    if lang:
+        session.config.lang = lang
+        
     await session.connect(websocket)
 
     try:
@@ -248,7 +253,8 @@ def run_poker_game(session: GameSession):
             big_blind=big_blind,
             show_win_probability=session.config.show_probability,
             on_game_update=session.send_update,
-            on_round_complete=handle_round_complete
+            on_round_complete=handle_round_complete,
+            lang=session.config.lang
         )
         web_player.set_game_id(session.session_id)
         web_player.set_player_name(session.config.nickname)
@@ -274,7 +280,7 @@ def run_poker_game(session: GameSession):
             config.register_player(name=bot_name, algorithm=bot_instance)
             
         # 5. Inicia o Jogo (Bloqueante)
-        session.send_update("status", "Starting game...")
+        session.send_update("game_start", {})
         
         # Cria jogo no Supabase antes de começar
         try:
