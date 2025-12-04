@@ -155,7 +155,7 @@ body {
     overflow-y: auto;
     padding-top: calc(var(--header-height) + 30px);
     /* padding-bottom removed, using margin to avoid footer overlap */
-    margin-bottom: calc(var(--footer-height) + 30px);
+    margin-bottom: calc(var(--footer-height) + 80px);
     display: flex;
     flex-direction: column;
     scroll-behavior: smooth;
@@ -595,7 +595,7 @@ body {
 /* Thinking Indicator */
 .thinking-indicator {
     position: absolute;
-    bottom: calc(var(--footer-height) + 16px);
+    bottom: calc(var(--footer-height) + 30px);
     left: 16px;
     background-color: rgba(20, 20, 20, 0.9);
     padding: 8px 16px;

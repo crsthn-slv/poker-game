@@ -197,7 +197,21 @@ button {
 }
 
 .lang-btn.active {
-    background-color: var(--accent-color);
     color: white;
     border-color: var(--accent-color);
+}
+
+.version-text {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.75rem;
+    /* 12px, readable */
+    color: var(--text-secondary);
+    opacity: 0.7;
+    font-family: var(--font-main);
+    pointer-events: none;
+    /* Let clicks pass through if it overlaps something interactive */
+    z-index: 100;
 }
